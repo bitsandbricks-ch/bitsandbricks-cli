@@ -9,10 +9,13 @@ The entry point names a class (or an instance) like `Plugin` below. Every hook i
 optional; override the ones you need. Install a plugin next to bnb:
 
     pipx inject bitsandbricks-cli <plugin package>
+
+BNB_PLUGINS=none (or a comma separated list of names) limits which plugins load.
 """
 
 from __future__ import annotations
 
+import os
 import sys
 from typing import Any, Callable, ClassVar
 
@@ -88,7 +91,11 @@ def load() -> list[Plugin]:
     eps = entry_points()
     found = eps.select(group=GROUP) if hasattr(eps, "select") else eps.get(GROUP, [])  # 3.9 returns a dict
     _plugins = []
+    only = os.environ.get("BNB_PLUGINS")  # unset: all; "none": none; "a,b": only these
+    allowed = None if only is None else {n.strip() for n in only.split(",") if n.strip()}
     for ep in sorted(found, key=lambda e: e.name):
+        if allowed is not None and ep.name not in allowed:
+            continue
         try:
             obj = ep.load()
             plugin = obj() if isinstance(obj, type) else obj

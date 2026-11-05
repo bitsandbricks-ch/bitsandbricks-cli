@@ -7,8 +7,10 @@ of that each repo's own `.github/rulesets/*.json` must match what's live.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
+import time
 
 from bitsandbricks import core, plugins
 from bitsandbricks.config import Config, Group
@@ -420,3 +422,48 @@ def sync(repo: str, ctx: dict) -> None:
                   f"Copies these files from {source}:\n\n{lines}\n\n"
                   "Check the diff for changes this repo made on purpose before merging.\n\nOpened by `bnb sync`.")
     say(f"   PR: {url}")
+
+
+# ── new repos ────────────────────────────────────────────────────────────────
+
+
+def create_repo(cfg: Config, repo: str, group_name: str | None = None, public: bool = False,
+                description: str = "") -> None:
+    """Create a repo the way its group wants it: from the reference repo when that is a GitHub
+    template, the group's files committed, then its settings, security and rulesets applied."""
+    if "/" not in repo:
+        raise RuntimeError(f"Name the owner too: {repo} -> <owner>/{repo}")
+    if core.exists(repo):
+        raise RuntimeError(f"{repo} exists already (bnb doctor --fix {repo} applies the defaults)")
+    if group_name:
+        group = next((g for g in cfg.groups if g.name == group_name), None)
+        if not group:
+            raise RuntimeError(f"No group {group_name!r}. Groups: {', '.join(g.name for g in cfg.groups) or 'none'}")
+    else:
+        group = cfg.group_of(repo)
+    want = baseline(cfg, group) if group else None
+    template = bool(group and group.reference and (api("GET", f"/repos/{group.reference}") or {}).get("is_template"))
+    args = ["repo", "create", repo, "--public" if public else "--private"]
+    args += ["--template", group.reference] if template else ["--add-readme"]
+    if description:
+        args += ["--description", description]
+    say(f"== {repo}" + (f" (group {group.name})" if group else " (no group: a plain repo)"))
+    if core.DRY_RUN:
+        say(f"   [dry-run] gh {' '.join(args)}")
+    else:
+        core.gh(*args)
+        say(f"   created {WEB}/{repo}" + (f" from the template {group.reference}" if template else ""))
+        time.sleep(5 if template else 2)  # GitHub fills a new repo in the background
+    if not want:
+        return
+    texts = file_texts(want)
+    files = {p: t for p, t in texts.items() if p in want["files"]}
+    own = cfg.files_of(group) if template else files  # a template brings the reference's files itself
+    if own:
+        for path, text in own.items():
+            body = {"message": f"chore: add {path} from the defaults",
+                    "content": base64.b64encode(text.encode()).decode()}
+            api("PUT", f"/repos/{repo}/contents/{path}", body)
+        say(f"   committed {len(own)} file(s): {', '.join(own)}")
+    apply(repo, want)
+    say(f"   check it: bnb doctor {repo}")

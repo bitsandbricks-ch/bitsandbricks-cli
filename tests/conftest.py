@@ -20,4 +20,5 @@ def env(tmp_path_factory):
         "XDG_CONFIG_HOME": str(bin_dir / "config"),
         "BNB_DEFAULTS": "acme/defaults",
         "BNB_OPEN": "print",
+        "BNB_PLUGINS": "demo",  # only the tests' own plugin, whatever else is installed
     }

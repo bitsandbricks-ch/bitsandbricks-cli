@@ -22,6 +22,15 @@ from datetime import datetime, timezone
 WEB = "https://github.com"
 WORKERS = 8  # repos handled at the same time
 DRY_RUN = False
+CACHE: str | None = None  # e.g. "90s": GET answers come from gh's own cache for that long (the TUI sets it)
+
+
+class RateLimited(RuntimeError):
+    """GitHub said: rate limit exceeded. `reset` is when it resets (epoch seconds), if known."""
+
+    def __init__(self, message: str, reset: int | None = None):
+        super().__init__(message)
+        self.reset = reset
 
 _out = threading.local()
 
@@ -77,6 +86,10 @@ def capture(fn, *args, **kwargs) -> str:
 def gh(*args: str, stdin: str | None = None, check: bool = True) -> str:
     """Run gh and return its output; raises with gh's message on failure."""
     proc = subprocess.run(["gh", *args], input=stdin, capture_output=True, text=True, check=False)
+    if proc.returncode != 0 and "rate limit" in proc.stderr.lower():
+        reset = (rate_limit().get("core") or {}).get("reset")
+        when = datetime.fromtimestamp(reset).strftime("%H:%M") if reset else "soon"
+        raise RateLimited(f"GitHub rate limit reached, it resets at {when}", reset)
     if check and proc.returncode != 0:
         raise RuntimeError(f"gh {' '.join(args[:4])}: {proc.stderr.strip()[:300]}")
     return proc.stdout
@@ -88,6 +101,8 @@ def api(method: str, path: str, body: dict | None = None):
         say(f"   [dry-run] {method} {path}")
         return {}
     args = ["api", "-X", method, path, "-H", "Accept: application/vnd.github+json"]
+    if method == "GET" and CACHE:
+        args += ["--cache", CACHE]
     if body is not None:
         args += ["--input", "-"]
     out = gh(*args, stdin=json.dumps(body) if body is not None else None)
@@ -118,11 +133,21 @@ def download(path: str) -> bytes:
 
 def graphql(query: str, **variables) -> dict:
     """A read-only GraphQL query (runs in dry runs too)."""
-    out = gh("api", "graphql", "--input", "-", stdin=json.dumps({"query": query, "variables": variables}))
+    cache = ["--cache", CACHE] if CACHE else []
+    out = gh("api", "graphql", *cache, "--input", "-", stdin=json.dumps({"query": query, "variables": variables}))
     data = json.loads(out)
     if data.get("errors"):
         raise RuntimeError("; ".join(e.get("message", "?") for e in data["errors"])[:300])
     return data["data"]
+
+
+def rate_limit() -> dict:
+    """{"core": {"remaining", "limit", "reset"}, "graphql": {...}}; asking costs nothing. {} when unknown."""
+    proc = subprocess.run(["gh", "api", "/rate_limit"], capture_output=True, text=True, check=False)
+    try:
+        return json.loads(proc.stdout).get("resources") or {} if proc.returncode == 0 else {}
+    except ValueError:
+        return {}
 
 
 def exists(repo: str) -> bool:
