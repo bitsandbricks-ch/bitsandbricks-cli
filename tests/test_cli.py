@@ -85,6 +85,18 @@ def test_packages(env):
     assert "api/backend" not in bnb(env, "packages", "web")
 
 
+def test_rerun_and_blocked_approval(env, tmp_path):
+    log = tmp_path / "calls.log"
+    out = bnb({**env, "FAKE_GH_LOG": str(log)}, "rerun", "plugin-b", "--yes")
+    assert "failure  Release · v0.3.0" in out and 'failure    sign  (step "cosign")' in out
+    assert "re-running the failed jobs of Release on v0.3.0" in out
+    assert "POST /repos/acme/plugin-b/actions/runs/7/rerun-failed-jobs" in log.read_text()
+    assert "no failed run" in bnb(env, "rerun", "api", "--yes")
+    assert "[dry-run] re-run" in bnb(env, "rerun", "plugin-b", "--run", "7", "--dry-run")
+    out = bnb(env, "approve", "plugin-a", "--yes")
+    assert 'you can\'t approve it: you started this run' in out and "Prevent self-review" in out
+
+
 def test_doctor(env):
     out = bnb(env, "doctor")
     assert "== acme/plugin-tpl (the reference)\n   ok\n   reference of group plugins" in out

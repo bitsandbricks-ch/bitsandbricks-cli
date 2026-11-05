@@ -58,6 +58,15 @@ def test_tui_flow(env, monkeypatch):
             await pilot.pause(0.3)
             await pilot.press("y")
             await pilot.pause(1)
+            runs.move_cursor(row=runs.get_row_index("acme/plugin-a|12"))
+            await pilot.press("a")
+            await pilot.pause(0.2)
+            runs.move_cursor(row=runs.get_row_index("acme/plugin-b|7"))
+            await until(pilot, lambda: "cosign" in str(app.query_one("#runs-detail").render()))
+            await pilot.press("x")
+            await pilot.pause(0.3)
+            await pilot.press("y")
+            await pilot.pause(1)
             await pilot.press("4")
             releases = app.query_one("#releases-table")
             await until(pilot, lambda: releases.row_count)
@@ -83,6 +92,8 @@ def test_tui_flow(env, monkeypatch):
             log = [str(line.text) for line in app.query_one("#log").lines]
             assert any("demo key on acme/web" in line for line in log), log
             assert any("[dry-run] approve acme/api main" in line for line in log), log
+            assert any("Prevent self-review" in line for line in log), log
+            assert any("[dry-run] re-run the failed jobs of Release on v0.3.0" in line for line in log), log
             assert any("https://example.org/one" in line for line in log), log
 
     asyncio.run(run())

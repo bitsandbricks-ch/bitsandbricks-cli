@@ -6,6 +6,7 @@ repo of your orgs. --org and --group narrow that down.
 
   bnb init your-org/your-defaults   point bnb at a defaults repo (or a local folder)
   bnb status | prs | runs           what's going on
+  bnb rerun name [--run ID]         re-run the failed jobs of a run
   bnb releases [--problems]         latest releases, missing assets, failed release runs
   bnb packages [--problems]         container images: newest tags, release images, image builds
   bnb pr web#12 [--diff]            one PR in detail
@@ -26,7 +27,8 @@ import sys
 
 from bitsandbricks import __version__, config, core, defaults, packages, plugins, repos
 
-ON_REPOS = ("status", "prs", "merge", "runs", "releases", "packages", "approve", "security", "doctor", "sync", "repos")
+ON_REPOS = ("status", "prs", "merge", "runs", "rerun", "releases", "packages", "approve",
+           "security", "doctor", "sync", "repos")
 
 
 def common_parser() -> argparse.ArgumentParser:
@@ -50,6 +52,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict]:
         "prs": "open PRs with checks, reviews, conflicts, auto-merge",
         "merge": "auto-merge (or --now) open PRs",
         "runs": "latest workflow runs",
+        "rerun": "re-run the failed jobs of the newest failed run",
         "releases": "latest release, its assets and release runs",
         "packages": "container images: newest tags, release images, image builds",
         "approve": "approve runs waiting for you",
@@ -67,6 +70,9 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict]:
             sp.add_argument("--method", choices=("squash", "merge", "rebase"), default="squash")
         if cmd == "approve":
             sp.add_argument("--yes", action="store_true", help="approve without asking")
+        if cmd == "rerun":
+            sp.add_argument("--run", type=int, help="this run id instead of the newest failed one")
+            sp.add_argument("--yes", action="store_true", help="re-run without asking")
         if cmd == "runs":
             sp.add_argument("--limit", type=int, default=3)
             sp.add_argument("--failed", action="store_true")
@@ -219,6 +225,10 @@ def run(cfg, args, names: list[str], pick: dict) -> None:
         return repos.prs(cfg, names)
     if args.cmd == "runs":
         return repos.runs(names, args.limit, args.failed)
+    if args.cmd == "rerun":
+        if not args.repos:
+            sys.exit("Name the repo: bnb rerun hubra")
+        return repos.rerun(names, args.run, args.yes)
     if args.cmd == "releases":
         return repos.releases(cfg, names, args.problems)
     if args.cmd == "packages":

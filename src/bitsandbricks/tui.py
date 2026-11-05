@@ -4,7 +4,8 @@ Start it with `bnb tui` (needs Textual: the [tui] extra or `pipx inject bitsandb
 
   Repos          group, latest release, PRs, CI per repo
   Pull requests  every open PR; the right side shows the selected one in depth
-  Runs           runs waiting for your approval, then the newest run per repo
+  Runs           runs waiting for your approval (or for someone else, and why), then the newest
+                 run per repo; the right side lists its jobs and what failed, x re-runs failed jobs
   Releases       latest release per repo, missing assets, failed release runs and why
   Packages       container images: newest tags, whether the release has its image, image builds
   Security       open Dependabot, secret scanning and code scanning alerts
@@ -17,7 +18,7 @@ and r reloads the tab you are on. The header shows the API calls left.
 
 Keys: ← → or 1-9 switch tabs · ↑ ↓ move · Enter or o open · r refresh · m auto-merge
 · M merge now · A auto-merge all ready PRs · v filter PRs · y mark ready · d diff
-· a approve a waiting run · f fix drift and s sync files (Checks tab) · n new repo
+· a approve a waiting run · x re-run failed jobs · f fix drift and s sync files (Checks tab) · n new repo
 · Enter: what you can do with the row · t theme
 · ctrl+p every command · q quit. Every change asks first; --dry-run only shows it.
 """
@@ -67,7 +68,7 @@ BASE_TABS = [("repos", "Repos"), ("prs", "Pull requests"), ("runs", "Runs"), ("r
 # Which tabs each key works on: the footer shows only the keys of the tab you are on.
 TAB_ACTIONS = {
     "merge": {"repos", "prs"}, "merge_all": {"repos", "prs"}, "pr_filter": {"prs"}, "ready": {"prs"},
-    "diff": {"prs"}, "approve": {"runs"}, "fix": {"checks"}, "sync": {"checks"},
+    "diff": {"prs"}, "approve": {"runs"}, "rerun": {"runs"}, "fix": {"checks"}, "sync": {"checks"},
 }
 SETTINGS = [("defaults", "Defaults repo"), ("orgs", "Orgs"), ("groups", "Groups"), ("plugins", "Plugins"),
             ("theme", "Theme"), ("file", "Config file")]
@@ -244,6 +245,7 @@ class BnbTui(App):
         Binding("y", "ready", "Ready"),
         Binding("d", "diff", "Diff"),
         Binding("a", "approve", "Approve"),
+        Binding("x", "rerun", "Re-run failed"),
         Binding("f", "fix", "Fix drift"),
         Binding("s", "sync", "Sync files"),
         Binding("n", "new_repo", "New repo"),
@@ -724,8 +726,11 @@ class BnbTui(App):
             key = f"{repo}|{run['id']}"
             seen.add(run["id"])
             self.runs[key] = (repo, run, envs)
-            table.add_row(self.label(repo), Text("waiting for you", style=f"bold {self.highlight()}"),
+            state = (Text("waiting, not for you", style=WARNING) if R.is_blocked(envs)
+                     else Text("waiting for you", style=f"bold {self.highlight()}"))
+            table.add_row(self.label(repo), state,
                           run.get("name") or "", run.get("head_branch") or "", core.ago(run.get("created_at")), key=key)
+        waiting = [w for w in waiting if not R.is_blocked(w[2])]
         for repo, run in last:
             if not run or run["id"] in seen:
                 continue
@@ -801,14 +806,11 @@ class BnbTui(App):
             else:
                 self.show("releases", R.release_text(info))
         elif tab == "runs":
-            repo, run, envs = self.runs[key]
-            lines = [f"{repo}  {run.get('name')}", run["html_url"], "",
-                     f"event    {run.get('event')}", f"ref      {run.get('head_branch')}",
-                     f"state    {run.get('conclusion') or run.get('status')}",
-                     f"started  {core.ago(run.get('created_at'))}"]
-            if envs:
-                lines += ["", f"Waits for: {', '.join(e['name'] for e in envs)}", "a approves it"]
-            self.show("runs", "\n".join(lines))
+            if f"runs:{key}" in self.detail_cache:
+                self.show("runs", self.detail_cache[f"runs:{key}"])
+            else:
+                self.show("runs", self.run_text(key) + "\n\nLoading its jobs …")
+                self.load_run_jobs(key)
         else:
             cache_key = f"{tab}:{key}"
             if cache_key in self.detail_cache:
@@ -816,6 +818,38 @@ class BnbTui(App):
             else:
                 self.show(tab, "Checking …" if tab == "checks" else "Loading …")
                 self.load_view(tab, key)
+
+    def run_text(self, key: str) -> str:
+        repo, run, envs = self.runs[key]
+        state = run.get("conclusion") or run.get("status")
+        lines = [f"{repo}  {run.get('name')}", run["html_url"], "",
+                 f"event    {run.get('event')}", f"ref      {run.get('head_branch')}",
+                 f"state    {state}", f"started  {core.ago(run.get('created_at'))}"]
+        if run.get("run_attempt", 1) > 1:
+            lines.append(f"attempt  {run['run_attempt']}")
+        if envs and R.is_blocked(envs):
+            lines += ["", f"Waits for: {', '.join(e['name'] for e in envs)}, but you can't approve it:"]
+            lines += [f"  {e['blocked']}" for e in envs]
+        elif envs:
+            lines += ["", f"Waits for: {', '.join(e['name'] for e in envs)}", "a approves it"]
+        if state in R.FAILED:
+            lines += ["", "x re-runs its failed jobs (approvals already given stay)"]
+        return "\n".join(lines)
+
+    @work(thread=True, group="detail")
+    def load_run_jobs(self, key: str) -> None:
+        """The run's jobs under its detail: the steps of a release at a glance, and what failed."""
+        repo, run, _ = self.runs[key]
+        try:
+            jobs = R.run_jobs(repo, run["id"])
+        except core.RateLimited as err:
+            self.call_from_thread(self.rate_limited, err)
+            return
+        except RuntimeError as err:
+            jobs = [f"error: {err}"]
+        text = self.run_text(key) + "\n\nJobs:\n" + "\n".join(f"  {j}" for j in jobs or ["none listed"])
+        self.detail_cache[f"runs:{key}"] = text
+        self.call_from_thread(self.show_if_current, "runs", key, text)
 
     def repo_text(self, repo: str) -> str:
         node = self.info.get(repo) or {}
@@ -1070,6 +1104,10 @@ class BnbTui(App):
         if not envs:
             self.log_line("That run isn't waiting for your approval")
             return
+        if R.is_blocked(envs):
+            for e in envs:
+                self.log_line(f"You can't approve it: {e['blocked']}")
+            return
 
         def approve(repo, run, envs) -> None:
             if core.DRY_RUN:
@@ -1084,6 +1122,21 @@ class BnbTui(App):
             question = f"Approve {', '.join(e['name'] for e in envs)} for {repo} {run.get('head_branch')}?"
         self.confirm_then(question, approve, repo, run, envs)
 
+
+    def action_rerun(self) -> None:
+        key = self.current_key()
+        if self.tab() != "runs" or not key:
+            self.log_line("x re-runs a failed run: Runs tab (3)")
+            return
+        repo, run, _ = self.runs[key]
+        state = run.get("conclusion") or run.get("status")
+        if state not in R.FAILED:
+            self.log_line(f"{run.get('name')} didn't fail ({state}): nothing to re-run")
+            return
+        self.detail_cache.pop(f"runs:{key}", None)
+        self.confirm_then(f"Re-run the failed jobs of {repo} {run.get('name')} on {run.get('head_branch')}?\n"
+                          "Jobs that passed and approvals already given stay as they are.",
+                          R.rerun_failed, repo, run)
 
     # ── settings ──────────────────────────────────────────────────────────
 
@@ -1196,8 +1249,12 @@ class BnbTui(App):
                     items.append(("ready", "Mark ready for review (y)", self.action_ready))
                 items.append(("diff", "Show the diff (d)", self.action_diff))
             items.append(("checks", "Its checks page", lambda: self.action_open_link(f"{p['url']}/checks")))
-        elif tab == "runs" and self.runs[key][2]:
-            items.append(("approve", "Approve (a)", self.action_approve))
+        elif tab == "runs":
+            run, envs = self.runs[key][1], self.runs[key][2]
+            if envs and not R.is_blocked(envs):
+                items.append(("approve", "Approve (a)", self.action_approve))
+            if (run.get("conclusion") or "") in R.FAILED:
+                items.append(("rerun", "Re-run its failed jobs (x)", self.action_rerun))
         elif tab == "releases":
             runs = self.releases[key]["runs"]
             if runs:
