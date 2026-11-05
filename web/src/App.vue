@@ -65,16 +65,16 @@ window.addEventListener('keydown', (e) => {
   <router-view v-else-if="!signedIn || route.meta.public" />
   <div v-else class="screen">
     <header class="top">
-      <span class="prompt accent">{{ state.me.user.name.toLowerCase().replace(/\s+/g, '') }}@mortar</span><span class="dim">:~$</span>
+      <span class="prompt accent">{{ state.me.user.name.toLowerCase().replace(/\s+/g, '') }}@mortar</span><span class="dim hide-xs">:~$</span>
       <span class="dim hide-sm">{{ who }}</span>
       <span class="spacer" />
       <span v-if="state.busy" class="warn">working…</span>
       <span class="dim hide-sm" :title="'API calls left at GitHub'">{{ rate }}</span>
       <label class="check" title="every change only shows what it would do">
-        <input v-model="state.dryRun" type="checkbox"> <span :class="state.dryRun ? 'warn' : 'dim'">dry run</span>
+        <input v-model="state.dryRun" type="checkbox"> <span :class="state.dryRun ? 'warn' : 'dim'">dry<span class="hide-xs"> run</span></span>
       </label>
-      <button title="t switches the theme" @click="theme = themes[(themes.indexOf(theme) + 1) % themes.length]">{{ theme }}</button>
-      <button @click="logout">logout</button>
+      <button title="t switches the theme" aria-label="switch the theme" @click="theme = themes[(themes.indexOf(theme) + 1) % themes.length]"><span class="hide-xs">{{ theme }}</span><span class="show-xs">◐</span></button>
+      <button @click="logout"><span class="hide-xs">logout</span><span class="show-xs">exit</span></button>
     </header>
     <nav class="tabs" aria-label="views">
       <router-link v-for="t in TABS" :key="t.name" :to="t.path" :class="{ active: route.name === t.name }">

@@ -30,11 +30,11 @@ const shown = computed(() => {
 })
 const index = computed(() => shown.value.findIndex((r) => props.rowKey(r) === props.modelValue))
 
-function select(i) {
+function select(i, scroll = true) {
   const r = shown.value[Math.max(0, Math.min(i, shown.value.length - 1))]
   if (!r) return
   emit('update:modelValue', props.rowKey(r))
-  nextTick(() => table.value?.querySelector('tr.sel')?.scrollIntoView({ block: 'nearest' }))
+  if (scroll) nextTick(() => table.value?.querySelector('tr.sel')?.scrollIntoView({ block: 'nearest' }))
 }
 function key(e) {
   if (e.target.tagName === 'INPUT') return
@@ -50,7 +50,7 @@ function sort(c) {
   if (sortKey.value === c.key) sortDir.value = -sortDir.value
   else { sortKey.value = c.key; sortDir.value = 1 }
 }
-watch(() => props.rows, () => { if (index.value < 0 && shown.value.length && props.modelValue == null) select(0) })
+watch(() => props.rows, () => { if (index.value < 0 && shown.value.length && props.modelValue == null) select(0, false) })
 defineExpose({ focus: () => table.value?.focus(), shown })
 </script>
 

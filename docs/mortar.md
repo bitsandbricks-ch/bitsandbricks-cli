@@ -30,6 +30,10 @@ scripts (key)        ─┘      │                  └─> GitLab REST/GraphQ
 ![theme amber](screenshots/13-theme-amber.png)
 ![theme paper](screenshots/14-theme-paper.png)
 
+On a phone (the layout adapts below 700px; it can be added to the home screen):
+
+<img src="screenshots/phone/m01-login.png" alt="login" width="200"> <img src="screenshots/phone/m02-repos.png" alt="repos" width="200"> <img src="screenshots/phone/m03-prs.png" alt="prs" width="200"> <img src="screenshots/phone/m05-approvals.png" alt="approvals" width="200"> <img src="screenshots/phone/m06-stats.png" alt="stats" width="200"> <img src="screenshots/phone/m08-defaults.png" alt="defaults" width="200"> <img src="screenshots/phone/m12-settings.png" alt="settings" width="200"> <img src="screenshots/phone/m14-console-run.png" alt="console run" width="200">
+
 ## Run it
 
 ```sh

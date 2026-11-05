@@ -20,8 +20,10 @@ function remember(l) {
   history.value = [l, ...history.value.filter((x) => x !== l)].slice(0, 100)
   try { localStorage.setItem(HISTORY, JSON.stringify(history.value)) } catch { /* private window */ }
 }
+const QUICK = ['status', 'prs', 'runs', 'approve --dry-run', 'releases --problems', 'security', 'doctor', 'stats']
+function quick(l) { line.value = l; run() }
 onMounted(async () => {
-  input.value?.focus()
+  if (!window.matchMedia('(pointer: coarse)').matches) input.value?.focus() // no keyboard popping up on phones
   try {
     const c = await get('/console/commands')
     writes.value = new Set(c.writes)
@@ -62,12 +64,15 @@ function key(e) {
 
 <template>
   <div class="view" @click.self="input?.focus()">
-    <div ref="screen" class="scroll pad">
+    <div ref="screen" class="scroll pad console-out">
       <div v-for="(o, i) in out" :key="i" style="margin-bottom: 10px">
         <div v-if="o.line"><span class="accent">$ bnb</span> {{ o.line.replace(/^(bnb|bitsandbricks)\s+/, '') }}</div>
         <TextPane :text="o.text" />
       </div>
       <div v-if="running" class="warn cursor">running </div>
+    </div>
+    <div class="toolbar quick" aria-label="quick commands">
+      <button v-for="q in QUICK" :key="q" :disabled="running" @click="quick(q)">{{ q }}</button>
     </div>
     <div class="toolbar" style="border-top: 1px solid var(--line); border-bottom: 0">
       <span class="accent">$ bnb</span>
