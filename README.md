@@ -111,12 +111,22 @@ Install one next to bnb with `pipx inject bitsandbricks-cli <package>`. `BNB_PLU
 
 hubra-cli is one: it adds Hubra plugin releases, signing checks and a Hubra tab.
 
+## Operator (web app)
+
+`bnb-operator` runs bnb as a web app: people sign in with GitHub and GitLab (OAuth, their own tokens), and
+get every command and TUI view in a terminal-style browser UI, plus a defaults editor with templates,
+stats, a console, plugins and a signed plugin marketplace. `bnb login https://your-operator` points the CLI
+and TUI at it with an API key, so a laptop needs neither gh nor a token.
+
+```sh
+docker compose -f deploy/docker-compose.yml up -d   # after filling in deploy/operator.env
+```
+
+Setup, settings and the security model: [docs/operator.md](docs/operator.md).
+
 ## Roadmap
 
-- GitLab backend next to GitHub.
-- Kubernetes (k3s) and Docker views as plugins.
-- A plugin index to find and install plugins.
-- An AI agent that proposes fixes for security alerts and merge conflicts as PRs.
+Ideas and planned features live in [docs/BACKLOG.md](docs/BACKLOG.md).
 
 ## Development
 
@@ -124,6 +134,7 @@ hubra-cli is one: it adds Hubra plugin releases, signing checks and a Hubra tab.
 pip install -e ".[dev]"
 pytest          # runs every command against tests/fake_gh, a stand-in for gh
 ruff check .
+cd web && npm ci && npm run build   # the operator's UI (npm run dev for a live-reloading one)
 ```
 
 ## License

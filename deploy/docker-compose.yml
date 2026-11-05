@@ -1,0 +1,20 @@
+# The operator with Postgres. Put it behind a TLS proxy (Caddy, Traefik, nginx) at BNB_OPERATOR_URL.
+#   cp operator.env.example operator.env   # fill in the OAuth apps and who may sign in
+#   docker compose up -d
+services:
+  operator:
+    build: ..
+    env_file: operator.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://bnb:bnb@db/bnb
+      BNB_OPERATOR_TRUSTED_PROXIES: "1"
+    ports: ["127.0.0.1:8080:8080"]
+    volumes: [data:/data]
+    depends_on: [db]
+    restart: unless-stopped
+  db:
+    image: postgres:17-alpine
+    environment: { POSTGRES_USER: bnb, POSTGRES_PASSWORD: bnb, POSTGRES_DB: bnb }
+    volumes: [db:/var/lib/postgresql/data]
+    restart: unless-stopped
+volumes: { data: {}, db: {} }
