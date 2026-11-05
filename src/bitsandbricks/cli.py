@@ -7,8 +7,11 @@ repo of your orgs. --org and --group narrow that down.
   bnb init your-org/your-defaults   point bnb at a defaults repo (or a local folder)
   bnb status | prs | runs           what's going on
   bnb stats [--days 30]             PRs merged, time to merge, CI success, releases
+  bnb rerun name [--run ID]         re-run the failed jobs of a run
   bnb releases [--problems]         latest releases, missing assets, failed release runs
   bnb packages [--problems]         container images: newest tags, release images, image builds
+  bnb bump name [patch|minor|1.4.0] a PR with the next version and its changelog section
+  bnb release [names] [--yes]       tag v<version> where it is newer than the latest release
   bnb pr web#12 [--diff]            one PR in detail
   bnb merge [names] [--now]         auto-merge open PRs (drafts and conflicts stay)
   bnb approve                       runs waiting for you (environments, outside contributors)
@@ -26,10 +29,10 @@ from __future__ import annotations
 import argparse
 import sys
 
-from bitsandbricks import __version__, config, core, defaults, packages, plugins, repos
+from bitsandbricks import __version__, config, core, defaults, packages, plugins, repos, versions
 
-ON_REPOS = ("status", "prs", "merge", "runs", "releases", "packages", "approve", "security", "doctor", "sync", "repos",
-            "stats")
+ON_REPOS = ("status", "prs", "merge", "runs", "rerun", "releases", "packages", "approve", "security", "doctor", "sync",
+            "repos", "stats")
 
 
 def common_parser() -> argparse.ArgumentParser:
@@ -53,6 +56,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict]:
         "prs": "open PRs with checks, reviews, conflicts, auto-merge",
         "merge": "auto-merge (or --now) open PRs",
         "runs": "latest workflow runs",
+        "rerun": "re-run the failed jobs of the newest failed run",
         "releases": "latest release, its assets and release runs",
         "packages": "container images: newest tags, release images, image builds",
         "approve": "approve runs waiting for you",
@@ -71,6 +75,9 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict]:
             sp.add_argument("--method", choices=("squash", "merge", "rebase"), default="squash")
         if cmd == "approve":
             sp.add_argument("--yes", action="store_true", help="approve without asking")
+        if cmd == "rerun":
+            sp.add_argument("--run", type=int, help="this run id instead of the newest failed one")
+            sp.add_argument("--yes", action="store_true", help="re-run without asking")
         if cmd == "runs":
             sp.add_argument("--limit", type=int, default=3)
             sp.add_argument("--failed", action="store_true")
@@ -82,6 +89,13 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict]:
             sp.add_argument("--days", type=int, default=30)
         if cmd == "sync":
             sp.add_argument("--only", action="append", metavar="PATH", help="only this file (repeatable)")
+    sp = sub.add_parser("bump", parents=[common], help="open a PR with the next version and changelog section")
+    sp.add_argument("repos", nargs="+", metavar="name", help=f"{names}; the last may be the level")
+    sp.add_argument("--auto-merge", action="store_true", help="merge the PR once its checks pass")
+    sp = sub.add_parser("release", parents=[common], help="tag v<version> where it is newer than the latest release")
+    sp.add_argument("repos", nargs="*", help=f"{names}; none: list what each repo would release")
+    sp.add_argument("--yes", action="store_true", help="push the tags without asking")
+    sp.add_argument("--list", action="store_true", help="only list versions against the latest releases")
     sp = sub.add_parser("pr", parents=[common], help="one PR in detail")
     sp.add_argument("target", help="name#12 or a PR URL")
     sp.add_argument("--diff", action="store_true")
@@ -227,6 +241,17 @@ def main(argv: list[str] | None = None) -> None:
             if not number:
                 sys.exit("Name the PR: bnb pr name#12")
             return repos.pr_detail(repo, number, args.diff, args.body)
+        if args.cmd == "bump":
+            level = "patch"
+            if len(args.repos) > 1 and versions.is_level(args.repos[-1]):
+                level = args.repos.pop()
+            names, _ = repos.pick_repos(cfg, args.repos, args.group)
+            return versions.bump_all(cfg, names, level, args.auto_merge)
+        if args.cmd == "release":
+            names, _ = repos.pick_repos(cfg, args.repos, args.group)
+            if args.list or not args.repos:
+                return versions.summary(cfg, names)
+            return versions.release_all(cfg, names, args.yes)
         names, pick = repos.pick_repos(cfg, args.repos, args.group)
         if pick and args.cmd != "merge":
             sys.exit("name#12 works with merge, pr and open")
@@ -247,6 +272,10 @@ def run(cfg, args, names: list[str], pick: dict) -> None:
         return repos.prs(cfg, names)
     if args.cmd == "runs":
         return repos.runs(names, args.limit, args.failed)
+    if args.cmd == "rerun":
+        if not args.repos:
+            sys.exit("Name the repo: bnb rerun hubra")
+        return repos.rerun(names, args.run, args.yes)
     if args.cmd == "releases":
         return repos.releases(cfg, names, args.problems)
     if args.cmd == "packages":

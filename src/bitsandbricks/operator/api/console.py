@@ -19,7 +19,8 @@ from bitsandbricks.operator.context import as_user, user_settings
 bp = Blueprint("console", __name__, url_prefix="/api/v1")
 
 READS = {"status", "prs", "pr", "runs", "releases", "packages", "security", "repos", "plugins", "stats"}
-WRITES = {"merge", "approve", "doctor", "sync", "new"}  # write unless --dry-run (doctor: unless no --fix)
+WRITES = {"merge", "approve", "doctor", "sync", "new", "rerun", "bump", "release"}
+# write unless --dry-run (doctor: unless no --fix; release: unless --list or no names)
 LOCAL = {"init", "tui", "open", "config", "login", "logout", "whoami", "market", "key"}
 
 
@@ -36,6 +37,8 @@ def is_write(argv: list[str]) -> bool:
         return False
     if cmd == "doctor":
         return "--fix" in argv
+    if cmd == "release":
+        return "--list" not in argv and any(not a.startswith("-") for a in argv[1:])
     return cmd in WRITES or cmd in web_commands()
 
 
@@ -70,7 +73,7 @@ def run():
     write = is_write(argv)
     if write and not can_write():
         abort(403, "this API key is read-only: add --dry-run")
-    if cmd == "approve" and "--yes" not in argv and "--dry-run" not in argv:
+    if cmd in ("approve", "rerun", "release") and write and "--yes" not in argv:
         argv.append("--yes")  # nobody can answer y/N here; the console asked before sending
     s = user_settings(__import__("flask").g.user)
     mine = {k: s[k] for k in ("defaults", "ref", "orgs", "repos", "exclude") if s.get(k)}

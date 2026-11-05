@@ -50,11 +50,35 @@ def test_tui_flow(env, monkeypatch):
             await pilot.pause(0.3)
             assert app.tab() == "prs"
             assert app.query_one("#prs-table").row_count == 3
+            prs = app.query_one("#prs-table")
+            prs.move_cursor(row=prs.get_row_index("acme/web#7"))
+            await pilot.pause(0.2)
+            assert "u update branch" in str(app.query_one("#prs-detail").render())
+            await pilot.press("u")
+            await pilot.pause(0.3)
+            await pilot.press("y")
+            await pilot.pause(0.5)
+            await pilot.press("c")
+            await pilot.pause(0.3)
+            await pilot.press(*"thanks", "enter")
+            await pilot.pause(0.5)
             await pilot.press("3")
             runs = app.query_one("#runs-table")
             await until(pilot, lambda: runs.row_count)
             runs.move_cursor(row=runs.get_row_index("acme/api|5"))
             await pilot.press("a")
+            await pilot.pause(0.3)
+            await pilot.press("y")
+            await pilot.pause(1)
+            runs.move_cursor(row=runs.get_row_index("acme/plugin-a|12"))
+            await pilot.press("a")
+            await pilot.pause(0.2)
+            runs.move_cursor(row=runs.get_row_index("acme/plugin-b|7"))
+            await until(pilot, lambda: "cosign" in str(app.query_one("#runs-detail").render()))
+            assert "l failed log" in str(app.query_one("#runs-detail").render())
+            await pilot.press("l")
+            await until(pilot, lambda: "createLogEntryConflict" in str(app.query_one("#runs-detail").render()))
+            await pilot.press("x")
             await pilot.pause(0.3)
             await pilot.press("y")
             await pilot.pause(1)
@@ -65,6 +89,18 @@ def test_tui_flow(env, monkeypatch):
             releases.move_cursor(row=releases.get_row_index("acme/plugin-b"))
             await until(pilot, lambda: "cosign" in str(app.query_one("#releases-detail").render()))
             assert "MISSING *.zip" in str(app.query_one("#releases-detail").render())
+            await until(pilot, lambda: "→ R releases v0.4.0" in str(app.query_one("#releases-detail").render()))
+            assert "b bump version" in str(app.query_one("#releases-detail").render())
+            await pilot.press("R")
+            await until(pilot, lambda: "v0.4.0" in str(app.screen.query_one("Label").render()))
+            await pilot.press("y")
+            await pilot.pause(1)
+            await pilot.press("b")
+            await pilot.pause(0.3)
+            await pilot.press("down", "enter")
+            await pilot.pause(0.3)
+            await pilot.press("y")
+            await pilot.pause(1)
             await pilot.press("5")
             images = app.query_one("#packages-table")
             await until(pilot, lambda: images.row_count)
@@ -83,7 +119,13 @@ def test_tui_flow(env, monkeypatch):
             log = [str(line.text) for line in app.query_one("#log").lines]
             assert any("demo key on acme/web" in line for line in log), log
             assert any("[dry-run] approve acme/api main" in line for line in log), log
+            assert any("Prevent self-review" in line for line in log), log
+            assert any("[dry-run] re-run the failed jobs of Release on v0.3.0" in line for line in log), log
             assert any("https://example.org/one" in line for line in log), log
+            assert any("[dry-run] push tag v0.4.0 on main" in line for line in log), log
+            assert any("[dry-run] update the branch of acme/web#7" in line for line in log), log
+            assert any("[dry-run] comment on acme/web#7: thanks" in line for line in log), log
+            assert any("[dry-run] branch bump/v0.5.0" in line for line in log), log
 
     asyncio.run(run())
 
@@ -104,14 +146,27 @@ def test_tui_menu_footer_settings_new(env, monkeypatch, tmp_path):
             table = app.query_one("#repos-table")
             await until(pilot, lambda: table.row_count)
             assert "runs" not in app.loaded and "security" not in app.loaded  # loaded on demand only
-            assert app.check_action("diff", ()) is False and app.check_action("merge", ()) is True
+            table.move_cursor(row=table.get_row_index("acme/api"))
+            await pilot.pause(0.2)
+            assert app.check_action("diff", ()) is False and app.check_action("merge", ()) is False  # no PRs
             table.move_cursor(row=table.get_row_index("acme/web"))
+            await pilot.pause(0.2)
+            assert app.check_action("merge", ()) is True
             await pilot.press("enter")
             await pilot.pause(0.3)
-            assert isinstance(app.screen, tui.Pick)
+            assert isinstance(app.screen, tui.RowPage)  # Enter opens the row as a page
             labels = [str(o.prompt) for o in app.screen.query_one("OptionList").options]
             assert "Check it against the defaults" in labels and "Open in the browser (o)" in labels
+            await until(pilot, lambda: "Open PRs:" in str(app.screen.query_one("#page-detail").render()))
+            assert "Repos › acme/web" in str(app.screen.query_one("#page-title").render())
+            await pilot.press("m")  # its key runs it from the page
+            await pilot.pause(0.3)
+            await pilot.press("y")
+            await until(pilot, lambda: "auto-merge" in "".join(
+                str(x.text) for x in app.screen.query_one("#page-log").lines))
             await pilot.press("escape")
+            await pilot.pause(0.2)
+            assert not isinstance(app.screen, tui.RowPage)
             await pilot.press("2")
             await pilot.pause(0.2)
             assert app.check_action("diff", ()) is True and app.check_action("approve", ()) is False

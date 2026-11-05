@@ -30,6 +30,8 @@ Two files:
       immutable_releases = true
       rulesets = "rulesets/default"         # folder of ruleset JSON in the defaults repo
       release_assets = ["*.zip"]            # files every release must attach (`bnb releases`)
+      version = "pyproject.toml"            # where the version lives (`bnb bump`, `bnb release`)
+      changelog = ["CHANGELOG.md"]          # changelogs `bnb bump` adds the new section to
       files = "files/default"               # folder copied into each repo, path for path
 
   The first group that matches a repo is its group. Keys bnb doesn't know stay on
@@ -63,7 +65,8 @@ GITLAB: contextvars.ContextVar = contextvars.ContextVar("bnb_gitlab", default=No
 # A user's settings in place of the config file (the operator's web console sets it).
 OVERRIDE: contextvars.ContextVar = contextvars.ContextVar("bnb_config_override", default=None)
 GROUP_KEYS = {"name", "match", "from", "files", "require", "settings", "security", "immutable_releases",
-              "vulnerability_reporting", "rulesets", "release_assets"}
+              "vulnerability_reporting", "rulesets", "release_assets",
+              "version", "changelog"}
 
 
 def config_dir() -> Path:
@@ -169,6 +172,8 @@ class Group:
     vulnerability_reporting: bool | None = None
     rulesets: str | None = None
     release_assets: list[str] = field(default_factory=list)  # globs every release must attach
+    version: str | None = None  # the file that holds the version: plugin.yaml, pyproject.toml, VERSION ...
+    changelog: list[str] = field(default_factory=list)  # changelogs that get a section per version
     extra: dict = field(default_factory=dict)
 
     def matches(self, repo: str, topics: list[str] | None = None) -> bool:
@@ -272,6 +277,8 @@ def make_group(raw: dict, i: int) -> Group:
         vulnerability_reporting=raw.get("vulnerability_reporting"),
         rulesets=raw.get("rulesets"),
         release_assets=_list(raw.get("release_assets")),
+        version=raw.get("version"),
+        changelog=_list(raw.get("changelog")),
         extra={k: v for k, v in raw.items() if k not in GROUP_KEYS},
     )
 

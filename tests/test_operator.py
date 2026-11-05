@@ -95,7 +95,8 @@ def test_lists(op):
     assert "blocked: required checks" in c.get("/api/v1/pr?repo=acme/web&number=7").json["text"]
     assert any(r["repo"] == "acme/web" for r in c.get("/api/v1/runs?repo=web").json["runs"])
     waits = c.get("/api/v1/approvals").json["approvals"]
-    assert {(w["repo"], w["id"]) for w in waits} == {("acme/api", 5), ("acme/web", 6)}
+    assert {(w["repo"], w["id"]) for w in waits} == {("acme/api", 5), ("acme/web", 6), ("acme/plugin-a", 12)}
+    assert next(w for w in waits if w["id"] == 12)["blocked"] and not next(w for w in waits if w["id"] == 5)["blocked"]
     rel = c.get("/api/v1/releases?problems=1").json["releases"]
     assert any("missing *.zip" in " ".join(r["problems"]) for r in rel)
     assert c.get("/api/v1/packages").json["packages"]

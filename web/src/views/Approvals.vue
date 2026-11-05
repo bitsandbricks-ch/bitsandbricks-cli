@@ -17,7 +17,8 @@ const output = ref('')
 const rows = computed(() => (data.value?.approvals || []).map((r) => ({ ...r, key: `${r.repo}|${r.kind}|${r.id}`, when: ago(r.created) })))
 const columns = [
   { key: 'repo', label: 'repo', cls: (r) => (r.provider === 'gitlab' ? 'warn' : '') },
-  { key: 'waits_for', label: 'waits for', cls: () => 'warn' },
+  { key: 'waits_for', label: 'waits for', cls: (r) => (r.blocked ? 'dim' : 'warn') },
+  { key: 'blocked', label: 'you can approve', fmt: (v) => (v ? `no: ${v}` : 'yes'), cls: (r) => (r.blocked ? 'bad' : 'ok') },
   { key: 'name', label: 'run', cls: () => '' },
   { key: 'branch', label: 'branch', cls: () => '' },
   { key: 'when', label: 'since', cls: () => 'dim' },
@@ -25,6 +26,7 @@ const columns = [
 const current = computed(() => rows.value.find((r) => r.key === sel.value))
 async function approve(r = current.value) {
   if (!r) return
+  if (r.blocked) { output.value = `you can't approve it: ${r.blocked}`; return }
   const text = await act(`Approve ${r.waits_for} for ${r.repo} ${r.branch || ''}?`, '/approve', { repo: r.repo, id: r.id, kind: r.kind })
   if (text !== null) { output.value = text; load(true) }
 }

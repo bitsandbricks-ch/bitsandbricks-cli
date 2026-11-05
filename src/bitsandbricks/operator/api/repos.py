@@ -314,7 +314,9 @@ def approvals():
             found = R.all_waiting(gh_r) if gh_r else []
             rows = [{"repo": repo, "provider": "github", "kind": "run", "id": run["id"], "name": run.get("name"),
                      "branch": run.get("head_branch"), "created": run.get("created_at"), "url": run.get("html_url"),
-                     "waits_for": ", ".join(e["name"] for e in envs)} for repo, run, envs in found]
+                     "waits_for": ", ".join(e["name"] for e in envs),
+                     "blocked": "; ".join(e["blocked"] for e in envs if e.get("blocked")) if R.is_blocked(envs) else ""}
+                    for repo, run, envs in found]
             rows += GL.waiting(gl, gl_r) if gl and gl_r else []
         except core.RateLimited as err:
             abort(429, str(err))
@@ -335,6 +337,8 @@ def approve():
             if not match:
                 abort(404, "that run isn't waiting for you (any more)")
             _, run, envs = match[0]
+            if R.is_blocked(envs):
+                abort(403, "you can't approve it: " + "; ".join(e["blocked"] for e in envs))
 
             what = f"{', '.join(e['name'] for e in envs)} for {repo} {run.get('head_branch')}"
 
