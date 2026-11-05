@@ -113,11 +113,12 @@ def github(repos: list[str], days: int = 30) -> list[dict]:
     out = []
     for repo in repos:
         n = info.get(repo) or {}
-        merged = [(when(p["createdAt"]), when(p["mergedAt"])) for p in (n.get("merged") or {}).get("nodes") or []]
-        open_now = [when(p["createdAt"]) for p in (n.get("open") or {}).get("nodes") or []]
-        closed = [when(p["createdAt"]) for p in (n.get("closed") or {}).get("nodes") or []]
+        merged = [(when(p.get("createdAt")), when(p.get("mergedAt")))
+                  for p in (n.get("merged") or {}).get("nodes") or []]
+        open_now = [when(p.get("createdAt")) for p in (n.get("open") or {}).get("nodes") or []]
+        closed = [when(p.get("createdAt")) for p in (n.get("closed") or {}).get("nodes") or []]
         opened = [c for c, _ in merged if c] + open_now + [c for c in closed if c]
-        rels = [(r["tagName"], when(r["createdAt"])) for r in (n.get("releases") or {}).get("nodes") or []]
+        rels = [(r.get("tagName"), when(r.get("createdAt"))) for r in (n.get("releases") or {}).get("nodes") or []]
         out.append(summarize(repo, "github", merged, opened, open_now, all_runs.get(repo, []), rels, since, now))
     return out
 

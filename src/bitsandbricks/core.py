@@ -22,7 +22,7 @@ import os
 import re
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager, redirect_stdout
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from datetime import datetime, timezone
 
 WEB = "https://github.com"
@@ -200,14 +200,15 @@ def capture(fn, *args, **kwargs) -> str:
     ptoken = _printed.set(buf)
     try:
         if _context_stdout_installed():
+            install_context_stdout()  # someone may have swapped sys.stderr since (a test runner)
             fn(*args, **kwargs)
         else:
-            with redirect_stdout(buf):
+            with redirect_stdout(buf), redirect_stderr(buf):
                 fn(*args, **kwargs)
     except RateLimited:
         raise
     except (RuntimeError, SystemExit) as err:
-        if str(err) and str(err) not in ("0", "None"):
+        if str(err) and str(err) != "None" and not str(err).isdigit():
             say(f"error: {err}")
     finally:
         lines = _lines.get() or []
