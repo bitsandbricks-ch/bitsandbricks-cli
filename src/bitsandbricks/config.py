@@ -41,10 +41,12 @@ from __future__ import annotations
 import fnmatch
 import json
 import os
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from bitsandbricks import core
 from bitsandbricks.core import api, file_on
 
 if sys.version_info >= (3, 11):
@@ -53,6 +55,7 @@ else:  # pragma: no cover
     import tomli as tomllib
 
 DEFAULTS_FILE = "bitsandbricks.toml"
+REPO_NAME = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 GROUP_KEYS = {"name", "match", "from", "files", "require", "settings", "security", "immutable_releases",
               "vulnerability_reporting", "rulesets", "release_assets"}
 
@@ -95,10 +98,12 @@ def save_user_config(values: dict) -> Path:
 class Source:
     """Read files from the defaults: a local folder or a GitHub repo at a ref."""
 
-    def __init__(self, where: str, ref: str | None = None):
+    def __init__(self, where: str, ref: str | None = None, allow_local: bool = True):
         self.where = where
         self.ref = ref
-        self.local = Path(os.path.expanduser(where)) if _is_local(where) else None
+        self.local = Path(os.path.expanduser(where)) if allow_local and _is_local(where) else None
+        if not self.local and not REPO_NAME.match(where):
+            raise RuntimeError(f"Not a repo (owner/name) or a folder: {where}")
 
     def __str__(self) -> str:
         if self.local:
@@ -248,26 +253,33 @@ def make_group(raw: dict, i: int) -> Group:
     )
 
 
-_loaded: dict[tuple, Config] = {}
+_loaded = core.Scoped("config")
 
 
-def load(orgs: list[str] | None = None) -> Config:
-    """Your config plus the defaults repo's bitsandbricks.toml. `orgs` (from --org) narrows the orgs."""
-    mine = user_config()
-    where = os.environ.get("BNB_DEFAULTS") or mine.get("defaults")
-    ref = os.environ.get("BNB_DEFAULTS_REF") or mine.get("ref")
-    key = (where, ref, tuple(orgs or ()))
+def load(orgs: list[str] | None = None, mine: dict | None = None, env: bool = True) -> Config:
+    """Your config plus the defaults repo's bitsandbricks.toml. `orgs` (from --org) narrows the orgs.
+    The operator passes each user's settings as `mine` (env=False: no BNB_* variables, no local folders)."""
+    server = mine is not None
+    if mine is None:
+        mine = user_config()
+        if not mine.get("defaults") and not os.environ.get("BNB_DEFAULTS"):
+            mine = {**operator_settings(), **mine}
+    getenv = os.environ.get if env else (lambda _k, _d=None: None)
+    where = getenv("BNB_DEFAULTS") or mine.get("defaults")
+    ref = getenv("BNB_DEFAULTS_REF") or mine.get("ref")
+    key = (where, ref, tuple(orgs or ()), tuple(_list(mine.get("orgs"))), tuple(_list(mine.get("repos"))),
+           tuple(_list(mine.get("exclude"))))
     if key in _loaded:
         return _loaded[key]
     raw: dict = {}
     source = None
     if where:
-        source = Source(where, ref)
+        source = Source(where, ref, allow_local=not server)
         text = source.read(DEFAULTS_FILE)
         if text is None:
             raise RuntimeError(f"No {DEFAULTS_FILE} in {source}. Start one with: bnb init {where}")
         raw = parse_defaults(text, f"{source}/{DEFAULTS_FILE}")
-    env_orgs = [o.strip() for o in (os.environ.get("BNB_ORGS") or "").split(",") if o.strip()]
+    env_orgs = [o.strip() for o in (getenv("BNB_ORGS") or "").split(",") if o.strip()]
     all_orgs = env_orgs or _unique(_list(raw.get("orgs")) + _list(mine.get("orgs")))
     cfg = Config(
         source=source,
@@ -279,6 +291,19 @@ def load(orgs: list[str] | None = None) -> Config:
     )
     _loaded[key] = cfg
     return cfg
+
+
+def operator_settings() -> dict:
+    """With `bnb login <operator>`: the defaults repo and orgs saved on the operator (no local config)."""
+    from bitsandbricks.transport import OperatorTransport, current
+    t = current()
+    if not isinstance(t, OperatorTransport):
+        return {}
+    try:
+        got = t.get_json("/settings") or {}
+    except RuntimeError:
+        return {}
+    return {k: got[k] for k in ("defaults", "ref", "orgs", "repos", "exclude") if got.get(k)}
 
 
 def _unique(items: list[str]) -> list[str]:

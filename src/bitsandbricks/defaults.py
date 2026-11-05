@@ -299,7 +299,7 @@ def reference_check(group: Group, want: dict, fix: bool) -> None:
         if own:
             import_rulesets(ref, own)
             say(f"   rulesets ({', '.join(own)}) imported from .github/rulesets")
-            if not core.DRY_RUN:
+            if not core.dry_run():
                 want["rulesets"] = live_rulesets(ref)
         if group.require:
             api("PATCH", f"/repos/{ref}", group.require)
@@ -411,7 +411,7 @@ def sync(repo: str, ctx: dict) -> None:
     if api("GET", f"/repos/{repo}/pulls?state=open&head={owner}:{branch}"):
         say(f"   PR already open: {WEB}/{repo}/pulls?q=head:{branch}")
         return
-    if core.DRY_RUN:
+    if core.dry_run():
         say(f"   [dry-run] PR on {branch} with {len(changed)} file(s)")
         return
     lines = "\n".join(f"- `{p}`" for p in changed)
@@ -443,15 +443,12 @@ def create_repo(cfg: Config, repo: str, group_name: str | None = None, public: b
         group = cfg.group_of(repo)
     want = baseline(cfg, group) if group else None
     template = bool(group and group.reference and (api("GET", f"/repos/{group.reference}") or {}).get("is_template"))
-    args = ["repo", "create", repo, "--public" if public else "--private"]
-    args += ["--template", group.reference] if template else ["--add-readme"]
-    if description:
-        args += ["--description", description]
     say(f"== {repo}" + (f" (group {group.name})" if group else " (no group: a plain repo)"))
-    if core.DRY_RUN:
-        say(f"   [dry-run] gh {' '.join(args)}")
+    if core.dry_run():
+        how = f"from the template {group.reference}" if template else "with a README"
+        say(f"   [dry-run] create {'public' if public else 'private'} {repo} {how}")
     else:
-        core.gh(*args)
+        core.transport().repo_create(repo, public, group.reference if template else None, description)
         say(f"   created {WEB}/{repo}" + (f" from the template {group.reference}" if template else ""))
         time.sleep(5 if template else 2)  # GitHub fills a new repo in the background
     if not want:

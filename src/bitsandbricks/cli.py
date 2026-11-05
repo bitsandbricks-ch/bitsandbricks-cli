@@ -167,7 +167,7 @@ def main(argv: list[str] | None = None) -> None:
     if extra and args.cmd not in handlers:
         parser.error(f"unrecognized arguments: {' '.join(extra)}")
     args._extra = extra  # plugin commands pass these on (options before their own arguments)
-    core.DRY_RUN = getattr(args, "dry_run", False)
+    core.set_dry_run(getattr(args, "dry_run", False))
     try:
         if args.cmd == "init":
             return init(args)
@@ -191,7 +191,7 @@ def main(argv: list[str] | None = None) -> None:
                 from bitsandbricks import tui
             except ImportError as err:
                 sys.exit(f"The TUI needs Textual: pipx inject bitsandbricks-cli textual. ({err})")
-            return tui.run(cfg, dry_run=core.DRY_RUN, group=args.group)
+            return tui.run(cfg, dry_run=core.dry_run(), group=args.group)
         if args.cmd == "new":
             repo = args.repo if "/" in args.repo or len(cfg.orgs) != 1 else f"{cfg.orgs[0]}/{args.repo}"
             return defaults.create_repo(cfg, repo, args.group, args.public, args.description)

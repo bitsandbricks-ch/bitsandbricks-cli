@@ -28,7 +28,6 @@ import contextlib
 import re
 import time
 import webbrowser
-from concurrent.futures import ThreadPoolExecutor
 from typing import ClassVar
 
 from rich.style import Style
@@ -532,8 +531,7 @@ class BnbTui(App):
     def load_security(self) -> None:
         self.loaded["security"] = time.time()
         try:
-            with ThreadPoolExecutor(core.WORKERS) as pool:
-                found = dict(zip(self.repos, pool.map(R.repo_alerts, self.repos)))
+            found = dict(zip(self.repos, core.pmap(R.repo_alerts, self.repos)))
         except core.RateLimited as err:
             self.call_from_thread(self.rate_limited, err)
             return
@@ -702,8 +700,7 @@ class BnbTui(App):
 
         try:
             waiting = R.all_waiting(self.repos)
-            with ThreadPoolExecutor(core.WORKERS) as pool:
-                last = list(pool.map(latest, self.repos))
+            last = core.pmap(latest, self.repos)
         except core.RateLimited as err:
             self.call_from_thread(self.rate_limited, err)
             return
@@ -1048,10 +1045,10 @@ class BnbTui(App):
             return
 
         def ready(repo: str, number: int) -> None:
-            if core.DRY_RUN:
+            if core.dry_run():
                 core.say(f"[dry-run] mark {repo}#{number} ready for review")
             else:
-                core.gh("pr", "ready", str(number), "--repo", repo)
+                core.transport().pr_ready(repo, int(number))
                 core.say(f"{repo}#{number} is ready for review")
         self.confirm_then(f"Mark {p['repo']}#{p['number']} ready for review?", ready, p["repo"], p["number"])
 
@@ -1072,7 +1069,7 @@ class BnbTui(App):
             return
 
         def approve(repo, run, envs) -> None:
-            if core.DRY_RUN:
+            if core.dry_run():
                 core.say(f"[dry-run] approve {repo} {run.get('head_branch')}")
             else:
                 R.approve_run(repo, run, envs)

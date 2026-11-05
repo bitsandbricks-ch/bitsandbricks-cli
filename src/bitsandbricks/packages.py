@@ -6,7 +6,6 @@ Reading packages needs the `read:packages` scope: `gh auth refresh -s read:packa
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote
 
 from bitsandbricks import core
@@ -68,8 +67,7 @@ def package_infos(cfg: Config, repos: list[str], nodes: dict[str, dict] | None =
     wanted = set(repos)
     owners = sorted({r.split("/")[0] for r in repos})
     try:
-        with ThreadPoolExecutor(core.WORKERS) as pool:
-            found = list(pool.map(owner_packages, owners))
+        found = core.pmap(owner_packages, owners)
     except core.RateLimited:
         raise
     except RuntimeError as err:
@@ -105,9 +103,8 @@ def package_infos(cfg: Config, repos: list[str], nodes: dict[str, dict] | None =
             return repo, []
         return repo, [r for r in found if is_image_run(r)][:5]
 
-    with ThreadPoolExecutor(core.WORKERS) as pool:
-        infos = list(pool.map(load, infos))
-        runs = dict(pool.map(runs_of, linked))
+    infos = core.pmap(load, infos)
+    runs = dict(core.pmap(runs_of, linked))
     for i in infos:
         if i["repo"]:
             i["runs"] = runs.get(i["repo"], [])

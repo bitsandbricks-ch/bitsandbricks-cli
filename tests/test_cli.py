@@ -197,10 +197,10 @@ def test_readme_names_every_command():
 def test_new_repo(env):
     out = bnb(env, "new", "--dry-run", "acme/plugin-c")
     assert "== acme/plugin-c (group plugins)" in out
-    assert "[dry-run] gh repo create acme/plugin-c --private --template acme/plugin-tpl" in out
+    assert "[dry-run] create private acme/plugin-c from the template acme/plugin-tpl" in out
     assert "[dry-run] PATCH /repos/acme/plugin-c" in out and "[dry-run] POST /repos/acme/plugin-c/rulesets" in out
     out = bnb(env, "new", "--dry-run", "--public", "acme/site")
-    assert "--public --add-readme" in out
+    assert "[dry-run] create public acme/site with a README" in out
     assert "[dry-run] PUT /repos/acme/site/contents/SECURITY.md" in out
     assert "exists already" in bnb(env, "new", "acme/web")
     assert "No group 'nope'" in bnb(env, "new", "acme/x", "--group", "nope")

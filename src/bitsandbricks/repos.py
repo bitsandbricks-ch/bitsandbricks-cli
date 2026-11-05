@@ -6,17 +6,15 @@ from __future__ import annotations
 import fnmatch
 import json
 import re
-import subprocess
 import webbrowser
-from concurrent.futures import ThreadPoolExecutor
 
 from bitsandbricks import core, plugins
 from bitsandbricks.config import Config
-from bitsandbricks.core import WEB, ago, api, api_pages, for_each, gh, graphql, newest, say, short, table
+from bitsandbricks.core import WEB, ago, api, api_pages, for_each, graphql, newest, say, short, table
 
 # ── the repo list ────────────────────────────────────────────────────────────
 
-_me: dict = {}
+_me = core.Scoped("me")
 
 
 def me() -> str:
@@ -37,7 +35,7 @@ def owner_repos(owner: str) -> list[dict]:
     return api_pages(f"/users/{owner}/repos?type=owner")
 
 
-_listing: dict[tuple, dict[str, dict]] = {}
+_listing = core.Scoped("listing")  # {(orgs, repos, exclude): {repo: info}}
 
 
 def listing(cfg: Config) -> dict[str, dict]:
@@ -46,8 +44,7 @@ def listing(cfg: Config) -> dict[str, dict]:
     if key in _listing:
         return _listing[key]
     found: dict[str, dict] = {}
-    with ThreadPoolExecutor(core.WORKERS) as pool:
-        for items in pool.map(owner_repos, cfg.orgs):
+    for items in core.pmap(owner_repos, cfg.orgs):
             for r in items:
                 if not r.get("archived"):
                     found[r["full_name"]] = {"topics": r.get("topics") or [], "archived": False}
@@ -135,7 +132,7 @@ REPO_FIELDS = """
   }
 """
 BATCH = 20
-_nodes: dict[str, dict] = {}
+_nodes = core.Scoped("nodes")
 
 
 def nodes(repos: list[str], fresh: bool = False) -> dict[str, dict]:
@@ -166,9 +163,8 @@ def nodes(repos: list[str], fresh: bool = False) -> dict[str, dict]:
             return {repo: data[f"r{i}"] for i, repo in enumerate(batch)}
         return {repo: data.get(f"r{i}") for i, repo in enumerate(batch)}
 
-    with ThreadPoolExecutor(core.WORKERS) as pool:
-        for got in pool.map(one, batches):
-            _nodes.update(got)
+    for got in core.pmap(one, batches):
+        _nodes.update(got)
     return {r: _nodes.get(r) for r in repos}
 
 
@@ -252,11 +248,9 @@ MERGE_STATE = {
 
 
 def pr_detail(repo: str, number: int, diff: bool = False, full_body: bool = False) -> None:
-    p = json.loads(gh("pr", "view", str(number), "--repo", repo, "--json",
-                      "number,title,url,state,isDraft,author,baseRefName,headRefName,createdAt,"
-                      "updatedAt,mergeable,mergeStateStatus,reviewDecision,autoMergeRequest,"
-                      "additions,deletions,changedFiles,files,commits,statusCheckRollup,reviews,"
-                      "labels,body"))
+    from bitsandbricks.transport import PR_DETAIL_FIELDS
+
+    p = core.transport().pr_view(repo, number, PR_DETAIL_FIELDS)
     say(f"#{p['number']} {p['title']}\n{p['url']}\n")
     who = (p.get("author") or {}).get("login", "?")
     say(f"  state    {p['state'].lower()}{' (draft)' if p['isDraft'] else ''}, by {who}, "
@@ -305,7 +299,7 @@ def pr_detail(repo: str, number: int, diff: bool = False, full_body: bool = Fals
         if len(cut) < len(lines):
             say(f"  ... {len(lines) - len(cut)} more lines (--body for all)")
     if diff:
-        say("\n" + gh("pr", "diff", str(number), "--repo", repo))
+        say("\n" + core.transport().pr_diff(repo, number))
 
 
 # ── merge ────────────────────────────────────────────────────────────────────
@@ -324,10 +318,10 @@ def merge_one(repo: str, p: dict, ctx: dict, named: bool) -> None:
             hint = " (add --ready to merge it anyway)" if named else ""
             say(f"   {label}: draft, left open{hint}{link}")
             return
-        if core.DRY_RUN:
+        if core.dry_run():
             say(f"   [dry-run] mark {label} ready for review")
         else:
-            gh("pr", "ready", str(p["number"]), "--repo", repo)
+            core.transport().pr_ready(repo, p["number"])
             say(f"   {label}: marked ready for review")
     if p.get("autoMergeRequest") and not ctx.get("now"):
         say(f"   {label}: auto-merge already on{link}\n      checks: {p['url']}/checks")
@@ -336,16 +330,12 @@ def merge_one(repo: str, p: dict, ctx: dict, named: bool) -> None:
         say(f"   {label}: has conflicts, left open{link}")
         return
     how = "merge now" if ctx.get("now") else "auto-merge"
-    if core.DRY_RUN:
+    if core.dry_run():
         say(f"   [dry-run] {how} {label}{link}")
         return
-    cmd = ["gh", "pr", "merge", str(p["number"]), "--repo", repo, f"--{ctx.get('method') or 'squash'}",
-           "--delete-branch"]
-    if not ctx.get("now"):
-        cmd.append("--auto")
-    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    if proc.returncode != 0:
-        say(f"   {label}: not merged: {proc.stderr.strip()[:200]}{link}")
+    failed = core.transport().pr_merge(repo, p["number"], ctx.get("method") or "squash", auto=not ctx.get("now"))
+    if failed:
+        say(f"   {label}: not merged: {failed}{link}")
     elif ctx.get("now"):
         say(f"   {label}: merged{link}")
     else:
@@ -355,9 +345,9 @@ def merge_one(repo: str, p: dict, ctx: dict, named: bool) -> None:
 def merge(repo: str, ctx: dict) -> None:
     numbers = ctx.get("pick", {}).get(repo)
     if numbers:
-        items = [json.loads(gh("pr", "view", str(n), "--repo", repo, "--json", PR_FIELDS)) for n in numbers]
+        items = [core.transport().pr_view(repo, n, PR_FIELDS) for n in numbers]
     else:
-        items = json.loads(gh("pr", "list", "--repo", repo, "--state", "open", "--json", PR_FIELDS))
+        items = core.transport().pr_list_open(repo, PR_FIELDS)
     if not items:
         say("   no open PRs")
         return
@@ -409,8 +399,7 @@ def all_waiting(repos: list[str]) -> list[tuple[str, dict, list[dict]]]:
         except RuntimeError:
             return []
 
-    with ThreadPoolExecutor(core.WORKERS) as pool:
-        return [w for ws in pool.map(safe, repos) for w in ws]
+    return [w for ws in core.pmap(safe, repos) for w in ws]
 
 
 def approve(repos: list[str], yes: bool) -> None:
@@ -422,7 +411,7 @@ def approve(repos: list[str], yes: bool) -> None:
         names = ", ".join(e["name"] for e in envs)
         print(f"== {repo}  {run.get('head_branch')}  {run.get('name')} ({ago(run.get('created_at'))})")
         print(f"   waits for: {names}\n   {run['html_url']}")
-        if core.DRY_RUN:
+        if core.dry_run():
             print("   [dry-run] would approve")
             continue
         if not yes:
@@ -447,8 +436,7 @@ def runs(repos: list[str], limit: int = 3, failed: bool = False) -> None:
         except RuntimeError as err:
             return repo, [{"error": str(err)}]
 
-    with ThreadPoolExecutor(core.WORKERS) as pool:
-        results = list(pool.map(fetch, repos))
+    results = core.pmap(fetch, repos)
     for repo, items in results:
         if not items:
             continue
@@ -534,8 +522,7 @@ def release_row(info: dict) -> list[str]:
 
 def release_infos(cfg: Config, repos: list[str]) -> list[dict]:
     """release_info for every repo that has a release or a release run."""
-    with ThreadPoolExecutor(core.WORKERS) as pool:
-        found = list(pool.map(lambda r: release_info(cfg, r), repos))
+    found = core.pmap(lambda r: release_info(cfg, r), repos)
     return [i for i in found if i["release"] or i["runs"] or i["error"]]
 
 
@@ -670,7 +657,7 @@ def security(repos: list[str]) -> None:
 
 
 def page_url(repo: str, number: int | None = None, actions: bool = False, releases: bool = False) -> str:
-    url = f"{WEB}/{repo}"
+    url = f"{core.WEB}/{repo}"
     if number:
         url += f"/pull/{number}"
     elif actions:
