@@ -3,7 +3,7 @@
     mortar serve                  run it (gunicorn in production: see the Dockerfile)
     mortar check                  show what the settings allow and what is missing
 
-Every setting comes from the environment (docs/operator.md). The web UI is a single page app in
+Every setting comes from the environment (docs/mortar.md). The web UI is a single page app in
 static/ (built from web/ with Vite); /api/v1 is the JSON API the UI, the CLI and the TUI share.
 """
 
