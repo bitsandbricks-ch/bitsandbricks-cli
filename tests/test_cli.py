@@ -77,6 +77,14 @@ def test_releases(env):
     assert "plugin-b" in out and "plugin-a" not in out and "api" not in out
 
 
+def test_packages(env):
+    out = bnb(env, "packages")
+    assert "acme/api/backend  api   1.2.0" in out and "v1.10.0 missing" in out
+    assert "acme/old" not in out  # its repo is excluded
+    assert "== acme/web: Images failure" in out and 'at step "cosign"' in out
+    assert "api/backend" not in bnb(env, "packages", "web")
+
+
 def test_doctor(env):
     out = bnb(env, "doctor")
     assert "== acme/plugin-tpl (the reference)\n   ok\n   reference of group plugins" in out
