@@ -74,6 +74,16 @@ def test_tui_flow(env, monkeypatch):
             releases.move_cursor(row=releases.get_row_index("acme/plugin-b"))
             await until(pilot, lambda: "cosign" in str(app.query_one("#releases-detail").render()))
             assert "MISSING *.zip" in str(app.query_one("#releases-detail").render())
+            await pilot.press("R")
+            await until(pilot, lambda: "v0.4.0" in str(app.screen.query_one("Label").render()))
+            await pilot.press("y")
+            await pilot.pause(1)
+            await pilot.press("b")
+            await pilot.pause(0.3)
+            await pilot.press("down", "enter")
+            await pilot.pause(0.3)
+            await pilot.press("y")
+            await pilot.pause(1)
             await pilot.press("5")
             images = app.query_one("#packages-table")
             await until(pilot, lambda: images.row_count)
@@ -95,6 +105,8 @@ def test_tui_flow(env, monkeypatch):
             assert any("Prevent self-review" in line for line in log), log
             assert any("[dry-run] re-run the failed jobs of Release on v0.3.0" in line for line in log), log
             assert any("https://example.org/one" in line for line in log), log
+            assert any("[dry-run] push tag v0.4.0 on main" in line for line in log), log
+            assert any("[dry-run] branch bump/v0.5.0" in line for line in log), log
 
     asyncio.run(run())
 

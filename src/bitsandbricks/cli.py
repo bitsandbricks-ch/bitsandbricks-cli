@@ -9,6 +9,8 @@ repo of your orgs. --org and --group narrow that down.
   bnb rerun name [--run ID]         re-run the failed jobs of a run
   bnb releases [--problems]         latest releases, missing assets, failed release runs
   bnb packages [--problems]         container images: newest tags, release images, image builds
+  bnb bump name [patch|minor|1.4.0] a PR with the next version and its changelog section
+  bnb release [names] [--yes]       tag v<version> where it is newer than the latest release
   bnb pr web#12 [--diff]            one PR in detail
   bnb merge [names] [--now]         auto-merge open PRs (drafts and conflicts stay)
   bnb approve                       runs waiting for you (environments, outside contributors)
@@ -25,7 +27,7 @@ import argparse
 import subprocess
 import sys
 
-from bitsandbricks import __version__, config, core, defaults, packages, plugins, repos
+from bitsandbricks import __version__, config, core, defaults, packages, plugins, repos, versions
 
 ON_REPOS = ("status", "prs", "merge", "runs", "rerun", "releases", "packages", "approve",
            "security", "doctor", "sync", "repos")
@@ -82,6 +84,13 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict]:
             sp.add_argument("--fix", action="store_true", help="apply settings and rulesets where they drifted")
         if cmd == "sync":
             sp.add_argument("--only", action="append", metavar="PATH", help="only this file (repeatable)")
+    sp = sub.add_parser("bump", parents=[common], help="open a PR with the next version and changelog section")
+    sp.add_argument("repos", nargs="+", metavar="name", help=f"{names}; the last may be the level")
+    sp.add_argument("--auto-merge", action="store_true", help="merge the PR once its checks pass")
+    sp = sub.add_parser("release", parents=[common], help="tag v<version> where it is newer than the latest release")
+    sp.add_argument("repos", nargs="*", help=f"{names}; none: list what each repo would release")
+    sp.add_argument("--yes", action="store_true", help="push the tags without asking")
+    sp.add_argument("--list", action="store_true", help="only list versions against the latest releases")
     sp = sub.add_parser("pr", parents=[common], help="one PR in detail")
     sp.add_argument("target", help="name#12 or a PR URL")
     sp.add_argument("--diff", action="store_true")
@@ -208,6 +217,17 @@ def main(argv: list[str] | None = None) -> None:
             if not number:
                 sys.exit("Name the PR: bnb pr name#12")
             return repos.pr_detail(repo, number, args.diff, args.body)
+        if args.cmd == "bump":
+            level = "patch"
+            if len(args.repos) > 1 and versions.is_level(args.repos[-1]):
+                level = args.repos.pop()
+            names, _ = repos.pick_repos(cfg, args.repos, args.group)
+            return versions.bump_all(cfg, names, level, args.auto_merge)
+        if args.cmd == "release":
+            names, _ = repos.pick_repos(cfg, args.repos, args.group)
+            if args.list or not args.repos:
+                return versions.summary(cfg, names)
+            return versions.release_all(cfg, names, args.yes)
         names, pick = repos.pick_repos(cfg, args.repos, args.group)
         if pick and args.cmd != "merge":
             sys.exit("name#12 works with merge, pr and open")

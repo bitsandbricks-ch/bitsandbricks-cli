@@ -97,6 +97,44 @@ def test_rerun_and_blocked_approval(env, tmp_path):
     assert 'you can\'t approve it: you started this run' in out and "Prevent self-review" in out
 
 
+def test_bump_and_release(env, tmp_path):
+    log = tmp_path / "calls.log"
+    out = bnb({**env, "FAKE_GH_LOG": str(log)}, "bump", "a", "minor")
+    assert "1.0.0 -> 1.1.0 (plugin.yaml, CHANGELOG.md), 1 PR(s) merged since v1.0.0" in out
+    assert "- Add search (#4)" in out and "Old fix" not in out
+    assert "opened https://github.com/acme/plugin-a/pull/99" in out
+    calls = log.read_text()
+    assert "pr create --repo acme/plugin-a --base main --head bump/v1.1.0" in calls
+    assert "PUT /repos/acme/plugin-a/contents/plugin.yaml" in calls
+    assert "1.0.0 is not newer" in bnb(env, "bump", "a", "1.0.0")
+    rows = [line.split() for line in bnb(env, "release").splitlines()]
+    assert ["plugin-a", "plugin.yaml", "1.0.0", "v1.0.0"] in rows
+    assert ["plugin-b", "plugin.yaml", "0.4.0", "v0.3.0", "v0.4.0"] in rows
+    assert not any(r and r[0] == "api" for r in rows)  # its group names no version file
+    out = bnb(env, "release", "a")
+    assert "v1.0.0 is released" in out
+    out = bnb(env, "release", "b")  # asks; no answer leaves it
+    assert "left as it is" in out
+    log.write_text("")
+    out = bnb({**env, "FAKE_GH_LOG": str(log)}, "release", "b", "--yes")
+    assert "tagged v0.4.0 on main at headsha (was v0.3.0)" in out and "release run: queued" in out
+    assert "api -X POST /repos/acme/plugin-b/git/refs" in log.read_text()
+
+
+def test_version_files():
+    from bitsandbricks import versions as V
+    assert V.read_version('[project]\nname = "x"\nversion = "0.2.0"\n', "app/pyproject.toml") == "0.2.0"
+    assert V.write_version('{\n  "name": "x",\n  "version": "1.2.3"\n}\n', "package.json", "1.3.0") == \
+        '{\n  "name": "x",\n  "version": "1.3.0"\n}\n'
+    assert V.write_version("v2.0.1\n", "VERSION", "2.0.2") == "v2.0.2\n"
+    assert V.next_version("1.2.3", "major") == "2.0.0" and V.next_version("1.2.3", "patch") == "1.2.4"
+    text = V.with_changelog("# Changelog\n\n## [Unreleased]\n- New\n\n## [1.0.0] - 2026-01-01\n", "1.1.0",
+                            "2026-11-05", [])
+    assert "## [Unreleased]\n\n## [1.1.0] - 2026-11-05\n- New" in text
+    assert V.with_changelog("## 1.1.0\n", "1.1.0", "x", []) is None
+    assert V.with_changelog(None, "0.1.0", "x", ["- A (#1)"]) == "# Changelog\n\n## 0.1.0\n\n- A (#1)\n\n"
+
+
 def test_doctor(env):
     out = bnb(env, "doctor")
     assert "== acme/plugin-tpl (the reference)\n   ok\n   reference of group plugins" in out

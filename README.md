@@ -31,6 +31,8 @@ Repos are named as `owner/name`, as a bare `name` when only one repo has it, or 
 | `bnb rerun name [--run ID] [--yes]` | Re-runs the failed jobs of the repo's newest failed run (or of run ID), after listing its jobs and the step that failed. Jobs that passed and approvals already given stay. |
 | `bnb releases [--problems]` | Each repo's latest release, its assets, and its release runs. Flags assets the group's `release_assets` wants but the release lacks, and a failed last release run with the job and step that failed. |
 | `bnb packages [--problems]` | Container images on GHCR of your orgs: newest tags, whether the repo's latest release has an image with its tag, and a failed last image build (a run named or filed like image, docker or container) with the job and step that failed. |
+| `bnb bump name [patch\|minor\|major\|1.4.0] [--auto-merge]` | Opens a PR on `bump/v<new>` that sets the version in the group's `version` file (plugin.yaml, pyproject.toml, package.json, VERSION, ...) and adds the section to each `changelog`: Keep a Changelog `[Unreleased]` entries become `## [1.4.0] - date`, otherwise a `## 1.4.0` section lists the PRs merged since the last release. Default: patch. |
+| `bnb release [names] [--yes]` | Pushes the tag `v<version>` on the default branch of each named repo whose version is newer than its latest release (and whose first changelog has the section), after asking. The repo's own workflow builds and publishes. When the tag is there already it shows its release run. No names: a table of version against latest release. |
 | `bnb approve [--yes]` | Runs waiting for you: environments you review, and outside contributors' runs. A run that waits for someone else says why you can't approve it, for example "Prevent self-review" when you started it and are its only reviewer. |
 | `bnb security` | Open Dependabot, secret scanning and code scanning alerts. |
 | `bnb doctor [names] [--fix]` | Settings, security, release immutability, rulesets and files against the defaults. `--fix` applies them. |
@@ -47,6 +49,7 @@ Security alerts need the `security_events` scope and packages the `read:packages
 `bnb tui` has tabs for Repos, Pull requests, Runs, Releases, Packages, Security, Checks (doctor plus plugin checks) and Settings (defaults repo, orgs, groups, plugins, theme, config file), plus any tabs that plugins add.
 
 - **Runs:** the right side lists the selected run's jobs with the step that failed. **a** approves, **x** re-runs the failed jobs.
+- **Repos and Releases:** **b** bumps the selected repo's version (pick patch, minor or major; opens the PR), **R** pushes its release tag once the bump is merged.
 - **Enter** on a row opens a menu of what you can do with it: merge, mark ready, diff, approve, check or fix a repo, sync its files, open it.
 - **The footer** only shows the keys that work on the current tab.
 - **n** creates a new repo.
@@ -87,6 +90,8 @@ security = { secret_scanning = "enabled", secret_scanning_push_protection = "ena
 immutable_releases = true
 vulnerability_reporting = true
 release_assets = ["*.zip"]                         # files every release must attach (bnb releases)
+version = "pyproject.toml"                         # the file with the version (bnb bump, bnb release)
+changelog = ["CHANGELOG.md"]                       # changelogs bnb bump adds the section to
 rulesets = "rulesets/default"                      # ruleset JSON files (export them from GitHub)
 files = "files/default"                            # copied into each repo, path for path
 ```

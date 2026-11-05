@@ -60,6 +60,7 @@ from bitsandbricks import config, core, plugins
 from bitsandbricks import defaults as D
 from bitsandbricks import packages as P
 from bitsandbricks import repos as R
+from bitsandbricks import versions as V
 from bitsandbricks.config import Config
 
 BASE_TABS = [("repos", "Repos"), ("prs", "Pull requests"), ("runs", "Runs"), ("releases", "Releases"),
@@ -69,6 +70,7 @@ BASE_TABS = [("repos", "Repos"), ("prs", "Pull requests"), ("runs", "Runs"), ("r
 TAB_ACTIONS = {
     "merge": {"repos", "prs"}, "merge_all": {"repos", "prs"}, "pr_filter": {"prs"}, "ready": {"prs"},
     "diff": {"prs"}, "approve": {"runs"}, "rerun": {"runs"}, "fix": {"checks"}, "sync": {"checks"},
+    "bump": {"repos", "releases"}, "release": {"repos", "releases"},
 }
 SETTINGS = [("defaults", "Defaults repo"), ("orgs", "Orgs"), ("groups", "Groups"), ("plugins", "Plugins"),
             ("theme", "Theme"), ("file", "Config file")]
@@ -246,6 +248,8 @@ class BnbTui(App):
         Binding("d", "diff", "Diff"),
         Binding("a", "approve", "Approve"),
         Binding("x", "rerun", "Re-run failed"),
+        Binding("b", "bump", "Bump version"),
+        Binding("R", "release", "Release"),
         Binding("f", "fix", "Fix drift"),
         Binding("s", "sync", "Sync files"),
         Binding("n", "new_repo", "New repo"),
@@ -342,6 +346,9 @@ class BnbTui(App):
             for key, label in t.get("rows") or []:
                 table.add_row(label, key=key)
         for i, (key, description, *_) in enumerate(self.plugin_keys):
+            if self.key_taken(key, self.key_tabs(i)):
+                self.log_line(f"plugin key {key} ({description}) left out: bnb uses {key} on those tabs")
+                continue
             self.bind(key, f"plugin_key({i})", description=description)
         for err in plugins.errors:
             self.log_line(f"plugin broken: {err}")
@@ -400,6 +407,16 @@ class BnbTui(App):
         """Tabs a plugin key works on: its 4th item, or Repos and Pull requests."""
         k = self.plugin_keys[i]
         return set(k[3]) if len(k) > 3 and k[3] else {"repos", "prs"}
+
+    def key_taken(self, key: str, tabs: set[str]) -> bool:
+        """Whether a bnb key already works on one of these tabs (a key may serve bnb and a plugin on
+        different tabs)."""
+        for b in self.BINDINGS:
+            if key in (k.strip() for k in b.key.split(",")):
+                action = b.action.split("(")[0]
+                if action not in TAB_ACTIONS or TAB_ACTIONS[action] & tabs:
+                    return True
+        return False
 
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         """Hide the keys that do nothing on this tab, so the footer shows what you can do here."""
@@ -1138,6 +1155,54 @@ class BnbTui(App):
                           "Jobs that passed and approvals already given stay as they are.",
                           R.rerun_failed, repo, run)
 
+    def version_repo(self) -> str | None:
+        """The repo of the selected row on Repos or Releases, when its group names a version file."""
+        key = self.current_key()
+        if self.tab() not in ("repos", "releases") or not key:
+            self.log_line("b bumps and R releases the selected repo: Repos (1) or Releases (4)")
+            return None
+        if not V.source(self.cfg, key):
+            self.log_line(f"{key}: its group names no version file (version = \"...\" in bitsandbricks.toml)")
+            return None
+        return key
+
+    def action_bump(self) -> None:
+        repo = self.version_repo()
+        if not repo:
+            return
+
+        def picked(level: str | None) -> None:
+            if level:
+                self.confirm_then(f"Open a PR in {repo} that raises the version ({level}) and adds the changelog "
+                                  "section?\nAfter its merge, R pushes the tag.", V.bump, self.cfg, repo, level)
+        self.push_screen(Pick(f"Bump {repo}", [("patch", "patch: fixes (1.2.3 → 1.2.4)"),
+                                               ("minor", "minor: new features (1.2.3 → 1.3.0)"),
+                                               ("major", "major: breaking changes (1.2.3 → 2.0.0)")]), picked)
+
+    def action_release(self) -> None:
+        repo = self.version_repo()
+        if repo:
+            self.log_line(f"{repo}: reading its version …")
+            self.release_state(repo)
+
+    @work(thread=True, group="action")
+    def release_state(self, repo: str) -> None:
+        try:
+            st = V.state(self.cfg, repo)
+        except RuntimeError as err:
+            self.call_from_thread(self.log_line, f"{repo}: {err}")
+            return
+        self.call_from_thread(self.confirm_release, st)
+
+    def confirm_release(self, st: dict) -> None:
+        repo = st["repo"]
+        if not st["todo"]:
+            self.do_job(V.release, self.cfg, repo)  # says where the release stands, pushes nothing
+            return
+        self.confirm_then(f"Push the tag {st['tag']} on {repo} {st['base']}?\n{st['file']} says {st['version']}, "
+                          f"latest release {st['released'] or 'none'}. The repo's release workflow takes it from "
+                          "there.", V.release, self.cfg, repo)
+
     # ── settings ──────────────────────────────────────────────────────────
 
     def settings_text(self, key: str) -> str:
@@ -1165,7 +1230,8 @@ class BnbTui(App):
                 if g.reference:
                     out.append(f"  from      {g.reference}  {core.WEB}/{g.reference}")
                 for label, value in (("settings", g.settings), ("security", g.security), ("require", g.require),
-                                     ("rulesets", g.rulesets), ("files", g.files)):
+                                     ("rulesets", g.rulesets), ("files", g.files),
+                                     ("version", g.version), ("changelog", g.changelog)):
                     if value:
                         out.append(f"  {label:<9} {value}")
                 out.append("")
@@ -1255,7 +1321,10 @@ class BnbTui(App):
                 items.append(("approve", "Approve (a)", self.action_approve))
             if (run.get("conclusion") or "") in R.FAILED:
                 items.append(("rerun", "Re-run its failed jobs (x)", self.action_rerun))
-        elif tab == "releases":
+        if tab in ("repos", "releases") and V.source(self.cfg, key):
+            items += [("bump", "Bump its version: PR with version + changelog (b)", self.action_bump),
+                      ("release", "Release: tag v<version> when it is new (R)", self.action_release)]
+        if tab == "releases":
             runs = self.releases[key]["runs"]
             if runs:
                 items.append(("run", f"Its last release run ({R.run_state(runs[0])})",
