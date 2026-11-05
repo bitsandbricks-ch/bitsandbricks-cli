@@ -385,13 +385,33 @@ def waiting_runs(repo: str) -> list[tuple[str, dict, list[dict]]]:
         envs = [p["environment"] for p in pending if p.get("current_user_can_approve")]
         if envs:
             out.append((repo, run, envs))
+        elif pending:  # waiting, but not for you: say why, so it isn't just missing
+            out.append((repo, run, [dict(p["environment"], blocked=blocked_reason(repo, run, p)) for p in pending]))
     found = api("GET", f"/repos/{repo}/actions/runs?status=action_required&per_page=20") or {}
     for run in found.get("workflow_runs") or []:
         out.append((repo, run, [RUN_APPROVAL]))
     return out
 
 
+def blocked_reason(repo: str, run: dict, pending: dict) -> str:
+    """Why you can't approve a pending deployment."""
+    env = (pending.get("environment") or {}).get("name", "?")
+    names = [(r.get("reviewer") or {}).get("login") or (r.get("reviewer") or {}).get("slug") or "?"
+             for r in pending.get("reviewers") or []]
+    who = me()
+    starter = (run.get("triggering_actor") or run.get("actor") or {}).get("login")
+    if who in names and starter == who:
+        return (f"you started this run and are the only way through, but \"Prevent self-review\" is on for {env}: "
+                f"untick it ({WEB}/{repo}/settings/environments) or have another reviewer approve")
+    return f"waits for {', '.join(names) or 'its reviewers'} ({env}); you aren't one of them"
+
+
+def is_blocked(envs: list[dict]) -> bool:
+    return all(e.get("blocked") for e in envs)
+
+
 def approve_run(repo: str, run: dict, envs: list[dict]) -> None:
+    envs = [e for e in envs if not e.get("blocked")]
     if RUN_APPROVAL in envs:
         api("POST", f"/repos/{repo}/actions/runs/{run['id']}/approve")
     ids = [e["id"] for e in envs if e is not RUN_APPROVAL and e.get("id") is not None]
@@ -422,6 +442,10 @@ def approve(repos: list[str], yes: bool) -> None:
         names = ", ".join(e["name"] for e in envs)
         print(f"== {repo}  {run.get('head_branch')}  {run.get('name')} ({ago(run.get('created_at'))})")
         print(f"   waits for: {names}\n   {run['html_url']}")
+        if is_blocked(envs):
+            for e in envs:
+                print(f"   you can't approve it: {e['blocked']}")
+            continue
         if core.DRY_RUN:
             print("   [dry-run] would approve")
             continue
@@ -435,6 +459,115 @@ def approve(repos: list[str], yes: bool) -> None:
                 continue
         approve_run(repo, run, envs)
         print("   approved")
+
+
+FAILED = ("failure", "timed_out", "cancelled", "startup_failure")
+
+
+def run_jobs(repo: str, run_id: int) -> list[str]:
+    """Every job of a run with its state, and the failed step of a failed one (one REST call)."""
+    jobs = (api("GET", f"/repos/{repo}/actions/runs/{run_id}/jobs?filter=latest&per_page=100") or {}).get("jobs") or []
+    out = []
+    for j in jobs:
+        state = j.get("conclusion") or j.get("status") or "?"
+        line = f"{state:<10} {j.get('name')}"
+        if state in FAILED:
+            steps = [st["name"] for st in j.get("steps") or [] if st.get("conclusion") == "failure"]
+            if steps:
+                line += f"  (step \"{steps[0]}\")"
+            out += [line, f"           {j.get('html_url', '')}"]
+        else:
+            out.append(line)
+    return out
+
+
+def rerun_failed(repo: str, run: dict) -> None:
+    """Re-run the failed jobs of a run (and what depends on them); approvals already given stay."""
+    if core.DRY_RUN:
+        say(f"   [dry-run] re-run the failed jobs of {run.get('name')} on {run.get('head_branch')}")
+        return
+    api("POST", f"/repos/{repo}/actions/runs/{run['id']}/rerun-failed-jobs")
+    say(f"   re-running the failed jobs of {run.get('name')} on {run.get('head_branch')}\n   {run.get('html_url', '')}")
+
+
+ACTIVE = ("queued", "in_progress", "waiting", "requested", "pending")
+LOG_NOISE = re.compile(r"^\d{4}-\d\d-\d\dT[\d:.]+Z ")  # the time stamp on each log line
+
+
+def cancel_run(repo: str, run: dict) -> None:
+    if core.DRY_RUN:
+        say(f"   [dry-run] cancel {run.get('name')} on {run.get('head_branch')}")
+        return
+    api("POST", f"/repos/{repo}/actions/runs/{run['id']}/cancel")
+    say(f"   cancelling {run.get('name')} on {run.get('head_branch')}")
+
+
+def failed_log(repo: str, run_id: int, lines: int = 40) -> list[str]:
+    """The last lines of each failed job's log (time stamps dropped); where most failures explain themselves."""
+    jobs = (api("GET", f"/repos/{repo}/actions/runs/{run_id}/jobs?filter=latest&per_page=100") or {}).get("jobs") or []
+    out = []
+    for j in jobs:
+        if (j.get("conclusion") or "") not in FAILED:
+            continue
+        try:
+            text = core.download(f"/repos/{repo}/actions/jobs/{j['id']}/logs").decode(errors="replace")
+        except RuntimeError as err:
+            out += [f"── {j.get('name')}: no log ({err})", ""]
+            continue
+        tail = [LOG_NOISE.sub("", line) for line in text.splitlines() if line.strip()][-lines:]
+        out += [f"── {j.get('name')} (last {len(tail)} lines)", *tail, ""]
+    return out or ["no failed job with a log"]
+
+
+def update_branch(repo: str, number: int) -> None:
+    """Merge the base branch into the PR's branch (GitHub's Update branch button)."""
+    if core.DRY_RUN:
+        say(f"   [dry-run] update the branch of {repo}#{number}")
+        return
+    api("PUT", f"/repos/{repo}/pulls/{number}/update-branch", {})
+    say(f"   updating the branch of {repo}#{number} from its base")
+
+
+def close_pr(repo: str, number: int) -> None:
+    if core.DRY_RUN:
+        say(f"   [dry-run] close {repo}#{number}")
+        return
+    core.gh("pr", "close", str(number), "--repo", repo)
+    say(f"   closed {repo}#{number}")
+
+
+def comment_pr(repo: str, number: int, text: str) -> None:
+    if core.DRY_RUN:
+        say(f"   [dry-run] comment on {repo}#{number}: {text[:60]}")
+        return
+    url = core.gh("pr", "comment", str(number), "--repo", repo, "--body", text).strip()
+    say(f"   commented on {repo}#{number}  {url}")
+
+
+def rerun(repos: list[str], run_id: int | None, yes: bool) -> None:
+    """bnb rerun: the failed jobs of each repo's newest failed run (or of --run ID)."""
+    for repo in repos:
+        if run_id:
+            run = api("GET", f"/repos/{repo}/actions/runs/{run_id}") or {}
+        else:
+            found = (api("GET", f"/repos/{repo}/actions/runs?per_page=20") or {}).get("workflow_runs") or []
+            run = next((r for r in found if r.get("conclusion") in FAILED), {})
+        say(f"== {repo}")
+        if not run or run.get("conclusion") not in FAILED:
+            say("   no failed run" + (f" {run_id}" if run_id else " among the last 20"))
+            continue
+        say(f"   {run.get('conclusion')}  {run.get('name')} · {run.get('head_branch')} · {ago(run.get('created_at'))}")
+        for line in run_jobs(repo, run["id"]):
+            say(f"   {line}")
+        if not yes and not core.DRY_RUN:
+            try:
+                answer = input("   Re-run its failed jobs? [y/N] ")
+            except EOFError:
+                answer = ""
+            if answer.strip().lower() not in ("y", "yes"):
+                say("   left as it is")
+                continue
+        rerun_failed(repo, run)
 
 
 def runs(repos: list[str], limit: int = 3, failed: bool = False) -> None:
@@ -567,6 +700,11 @@ def release_text(info: dict) -> str:
             lines.append(f"  {a.get('name')}  {a.get('size', 0) / 1024:.0f} KB  {a.get('download_count', 0)} downloads")
         for g in info["missing"]:
             lines.append(f"  MISSING {g} (the group's release_assets)")
+        notes = [line.rstrip() for line in (rel.get("body") or "").strip().splitlines()]
+        if notes:
+            lines += ["", "notes", *[f"  {line}" for line in notes[:25]]]
+            if len(notes) > 25:
+                lines.append(f"  … {len(notes) - 25} more lines: o opens the release")
     else:
         lines.append("no release")
     lines += ["", "release runs" if info["runs"] else "no release runs in the last 30 runs"]

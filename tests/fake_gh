@@ -64,8 +64,11 @@ REPOS = {  # full name: (settings, rulesets, files, immutable)
     "acme/plugin-tpl": (SETTINGS, {"main": ruleset("main")},
                         {".gitignore": GITIGNORE, "LICENSE": LICENSE,
                          ".github/rulesets/main.json": json.dumps(ruleset("main"))}, True),
-    "acme/plugin-a": (SETTINGS, {"main": ruleset("main")}, {".gitignore": GITIGNORE, "LICENSE": LICENSE}, True),
-    "acme/plugin-b": (dict(SETTINGS, has_wiki=True), {}, {".gitignore": GITIGNORE, "LICENSE": "GPL\n"}, False),
+    "acme/plugin-a": (SETTINGS, {"main": ruleset("main")}, {".gitignore": GITIGNORE, "LICENSE": LICENSE,
+                                                            "plugin.yaml": "name: plugin-a\nversion: 1.0.0\n"}, True),
+    "acme/plugin-b": (dict(SETTINGS, has_wiki=True), {}, {
+        ".gitignore": GITIGNORE, "LICENSE": "GPL\n", "plugin.yaml": "name: plugin-b\nversion: \"0.4.0\"\n",
+        "CHANGELOG.md": "# Changelog\n\n## [Unreleased]\n\n## [0.4.0] - 2026-11-05\n- Faster\n"}, False),
     "acme/web": (dict(SETTINGS, delete_branch_on_merge=False), {}, {}, False),
     "acme/api": (SETTINGS, {"main": ruleset("main", approvals=1)},
                  {"SECURITY.md": SECURITY_MD, ".github/rulesets/release.json": json.dumps(RELEASE_RS)}, False),
@@ -87,6 +90,8 @@ from = "acme/plugin-tpl"
 files = [".gitignore", "LICENSE"]
 require = { allow_auto_merge = true }
 release_assets = ["*.zip"]
+version = "plugin.yaml"
+changelog = ["CHANGELOG.md"]
 
 [[group]]
 name = "default"
@@ -218,7 +223,15 @@ if argv[0] == "api":
     if rest.startswith("/git/ref/heads/"):
         out({"object": {"sha": "headsha1234567"}})
     if rest == "/pulls":
-        out([])
+        out([{"number": 4, "title": "Add search", "merged_at": "2026-11-05T10:00:00Z"},
+             {"number": 3, "title": "Old fix", "merged_at": "2026-11-01T10:00:00Z"},
+             {"number": 2, "title": "Closed unmerged", "merged_at": None}] if repo == "acme/plugin-a" else [])
+    if rest.startswith("/git/ref/tags/"):
+        tag = rest.rsplit("/", 1)[1]
+        out({"object": {"sha": "tagsha"}}) if (repo, tag) == ("acme/plugin-a", "v1.0.0") else fail(
+            "gh: Not Found (HTTP 404)")
+    if rest.startswith("/releases/tags/"):
+        out({"tag_name": rest.rsplit("/", 1)[1], "published_at": "2026-11-05T09:00:00Z"})
     if rest == "/releases":
         assets = {"acme/plugin-a": [{"name": "plugin-a-1.0.0.zip", "size": 20480, "download_count": 3}],
                   "acme/plugin-b": [{"name": "notes.txt", "size": 1024, "download_count": 0}]}
@@ -228,13 +241,23 @@ if argv[0] == "api":
             if repo in tags else [])
     if re.match(r"/actions/runs/\d+/jobs$", rest):
         out({"jobs": [{"name": "build", "conclusion": "success", "steps": []},
-                      {"name": "sign", "conclusion": "failure", "html_url": f"{WEB}/{repo}/actions/runs/7/job/8",
+                      {"id": 8, "name": "sign", "conclusion": "failure", "html_url": f"{WEB}/{repo}/actions/runs/7/job/8",
                        "steps": [{"name": "checkout", "conclusion": "success"},
                                  {"name": "cosign", "conclusion": "failure"}]}]})
+    if rest == "/actions/jobs/8/logs":
+        print("2026-11-05T09:00:01.0000000Z Signing ghcr.io/acme/x\n"
+              "2026-11-05T09:00:02.0000000Z Error: createLogEntryConflict (409)")
+        sys.exit(0)
+    if rest == "/actions/runs" and params.get("branch"):
+        out({"workflow_runs": [{"id": 13, "name": "Release", "head_branch": params["branch"], "status": "queued",
+                                "created_at": "2026-11-05T09:00:00Z", "html_url": f"{WEB}/{repo}/actions/runs/13"}]})
     if rest == "/actions/runs":
         if params.get("status") == "waiting" and repo == "acme/api":
             out({"workflow_runs": [{"id": 5, "name": "Deploy", "head_branch": "main",
                                     "created_at": "2026-11-05T09:00:00Z", "html_url": f"{WEB}/{repo}/actions/runs/5"}]})
+        if params.get("status") == "waiting" and repo == "acme/plugin-a":
+            out({"workflow_runs": [{"id": 12, "name": "Release", "head_branch": "v1.0.0", "triggering_actor": {"login": "mike"},
+                                    "created_at": "2026-11-05T09:00:00Z", "html_url": f"{WEB}/{repo}/actions/runs/12"}]})
         if params.get("status") == "action_required" and repo == "acme/web":
             out({"workflow_runs": [{"id": 6, "name": "CI", "head_branch": "fork-pr",
                                     "created_at": "2026-11-05T09:00:00Z", "html_url": f"{WEB}/{repo}/actions/runs/6"}]})
@@ -250,6 +273,12 @@ if argv[0] == "api":
         out({"workflow_runs": [{"id": 9, "name": "CI", "event": "push", "head_branch": "main", "status": "completed",
                                 "conclusion": "success", "created_at": "2026-11-05T09:00:00Z",
                                 "html_url": f"{WEB}/{repo}/actions/runs/9"}] + (images if repo == "acme/web" else [])})
+    if rest == "/actions/runs/12/pending_deployments":
+        out([{"environment": {"id": 78, "name": "release"}, "current_user_can_approve": False,
+              "reviewers": [{"type": "User", "reviewer": {"login": "mike"}}]}])
+    if rest == "/actions/runs/7":
+        out({"id": 7, "name": "Release", "head_branch": "v0.3.0", "conclusion": "failure",
+             "created_at": "2026-11-05T09:00:00Z", "html_url": f"{WEB}/{repo}/actions/runs/7"})
     if rest == "/actions/runs/5/pending_deployments":
         out([{"environment": {"id": 77, "name": "production"}, "current_user_can_approve": True}])
     if rest == "/dependabot/alerts":
@@ -292,7 +321,7 @@ if argv[:2] == ["pr", "view"]:
 if argv[:2] == ["pr", "diff"]:
     print("+print('hi')")
     sys.exit(0)
-if argv[:2] in (["pr", "merge"], ["pr", "ready"]):
+if argv[:2] in (["pr", "merge"], ["pr", "ready"], ["pr", "close"], ["pr", "comment"]):
     sys.exit(0)
 if argv[:2] == ["pr", "create"]:
     print(f"{WEB}/{argv[argv.index('--repo') + 1]}/pull/99")

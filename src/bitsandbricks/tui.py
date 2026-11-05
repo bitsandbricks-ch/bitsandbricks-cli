@@ -4,7 +4,8 @@ Start it with `bnb tui` (needs Textual: the [tui] extra or `pipx inject bitsandb
 
   Repos          group, latest release, PRs, CI per repo
   Pull requests  every open PR; the right side shows the selected one in depth
-  Runs           runs waiting for your approval, then the newest run per repo
+  Runs           runs waiting for your approval (or for someone else, and why), then the newest
+                 run per repo; the right side lists its jobs and what failed, x re-runs failed jobs
   Releases       latest release per repo, missing assets, failed release runs and why
   Packages       container images: newest tags, whether the release has its image, image builds
   Security       open Dependabot, secret scanning and code scanning alerts
@@ -17,8 +18,8 @@ and r reloads the tab you are on. The header shows the API calls left.
 
 Keys: ← → or 1-9 switch tabs · ↑ ↓ move · Enter or o open · r refresh · m auto-merge
 · M merge now · A auto-merge all ready PRs · v filter PRs · y mark ready · d diff
-· a approve a waiting run · f fix drift and s sync files (Checks tab) · n new repo
-· Enter: what you can do with the row · t theme
+· a approve a waiting run · x re-run failed jobs · f fix drift and s sync files (Checks tab) · n new repo
+· Enter: the row as a page (Esc back) · t theme
 · ctrl+p every command · q quit. Every change asks first; --dry-run only shows it.
 """
 
@@ -59,6 +60,7 @@ from bitsandbricks import config, core, plugins
 from bitsandbricks import defaults as D
 from bitsandbricks import packages as P
 from bitsandbricks import repos as R
+from bitsandbricks import versions as V
 from bitsandbricks.config import Config
 
 BASE_TABS = [("repos", "Repos"), ("prs", "Pull requests"), ("runs", "Runs"), ("releases", "Releases"),
@@ -67,8 +69,12 @@ BASE_TABS = [("repos", "Repos"), ("prs", "Pull requests"), ("runs", "Runs"), ("r
 # Which tabs each key works on: the footer shows only the keys of the tab you are on.
 TAB_ACTIONS = {
     "merge": {"repos", "prs"}, "merge_all": {"repos", "prs"}, "pr_filter": {"prs"}, "ready": {"prs"},
-    "diff": {"prs"}, "approve": {"runs"}, "fix": {"checks"}, "sync": {"checks"},
+    "diff": {"prs"}, "approve": {"runs"}, "rerun": {"runs"}, "fix": {"checks"}, "sync": {"checks"},
+    "bump": {"repos", "releases"}, "release": {"repos", "releases"},
+    "update_branch": {"prs"}, "comment": {"prs"}, "close_pr": {"prs"},
+    "logs": {"runs"}, "cancel_run": {"runs"}, "new_repo": {"repos"},
 }
+PAGE_TABS = {"repos", "prs", "runs", "releases", "packages", "security"}  # Enter opens the row as a page
 SETTINGS = [("defaults", "Defaults repo"), ("orgs", "Orgs"), ("groups", "Groups"), ("plugins", "Plugins"),
             ("theme", "Theme"), ("file", "Config file")]
 
@@ -205,6 +211,90 @@ class Pick(ModalScreen[str]):
         self.dismiss("")
 
 
+KEY_HINT = re.compile(r"\(([^()\s])\)$")  # "Merge now (M)" -> M
+
+
+class RowPage(ModalScreen[None]):
+    """One row as a full page: what you can do on the left (Enter or its key), its detail on the right,
+    what the actions printed at the bottom. Esc goes back to the list."""
+
+    DEFAULT_CSS = """
+    RowPage { background: $background; }
+    RowPage #page-title { height: 1; padding: 0 1; background: $panel; color: $accent; text-style: bold; }
+    RowPage #page-body { height: 1fr; }
+    RowPage #page-actions { width: 46; height: 1fr; border-right: solid $primary; background: $surface; }
+    RowPage #page-detail-box { width: 1fr; height: 1fr; padding: 0 1; overflow-x: auto; }
+    RowPage #page-detail { width: auto; }
+    RowPage #page-log { height: 8; border-top: solid $primary; background: $surface; padding: 0 1; }
+    RowPage #page-help { height: 1; padding: 0 1; background: $panel; color: $text-muted; }
+    """
+    BINDINGS: ClassVar = [Binding("escape,backspace", "back", "Back"), Binding("r", "reload", "Refresh")]
+
+    def __init__(self, tab: str, key: str, title: str) -> None:
+        super().__init__()
+        self.tab, self.key, self.title_text = tab, key, title
+        self.items: list[tuple[str, str, object]] = []
+
+    def compose(self) -> ComposeResult:
+        yield Static(self.title_text, id="page-title", markup=False)
+        with Horizontal(id="page-body"):
+            yield OptionList(id="page-actions")
+            with VerticalScroll(id="page-detail-box", can_focus=False):
+                yield Static("Loading …", id="page-detail", markup=False)
+        yield RichLog(id="page-log", wrap=False, markup=False, min_width=40)
+        yield Static("↑ ↓ pick · Enter or the key in ( ) runs it · r refresh · Esc back", id="page-help",
+                     markup=False)
+
+    def on_mount(self) -> None:
+        self.query_one("#page-log", RichLog).can_focus = False
+        self.fill_items()
+        self.app.update_detail()  # shows itself here too (BnbTui.show)
+        self.query_one("#page-actions", OptionList).focus()
+
+    def fill_items(self) -> None:
+        from textual.widgets.option_list import Option
+        self.items = [i for i in self.app.menu_items() if i[0] != "page"]
+        actions = self.query_one("#page-actions", OptionList)
+        highlighted = actions.highlighted
+        actions.clear_options()
+        actions.add_options([Option(label, id=k) for k, label, _ in self.items] or [Option("nothing to do", id="")])
+        actions.highlighted = highlighted if highlighted is not None and highlighted < len(self.items) else 0
+
+    def set_detail(self, text: Text) -> None:
+        with contextlib.suppress(NoMatches):
+            self.query_one("#page-detail", Static).update(text)
+
+    def write(self, line: Text) -> None:
+        with contextlib.suppress(NoMatches):
+            self.query_one("#page-log", RichLog).write(line)
+
+    def run_item(self, k: str) -> None:
+        fn = next((f for i, _, f in self.items if i == k), None)
+        if fn is None:
+            return
+        fn()
+        if self.app.tab() != self.tab:  # the action went to another tab (alerts, the repo of an image)
+            self.dismiss(None)
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        if event.option.id:
+            self.run_item(event.option.id)
+
+    def on_key(self, event) -> None:
+        for k, label, _ in self.items:
+            m = KEY_HINT.search(label)
+            if m and event.character == m.group(1):
+                event.stop()
+                self.run_item(k)
+                return
+
+    def action_back(self) -> None:
+        self.dismiss(None)
+
+    def action_reload(self) -> None:
+        self.app.action_refresh()
+
+
 PR_FILTERS = [("all", "all open"), ("auto", "auto-merge"), ("merged", "recently merged"), ("drafts", "drafts")]
 
 
@@ -244,6 +334,14 @@ class BnbTui(App):
         Binding("y", "ready", "Ready"),
         Binding("d", "diff", "Diff"),
         Binding("a", "approve", "Approve"),
+        Binding("x", "rerun", "Re-run failed"),
+        Binding("l", "logs", "Failed log"),
+        Binding("C", "cancel_run", "Cancel run"),
+        Binding("u", "update_branch", "Update branch"),
+        Binding("c", "comment", "Comment"),
+        Binding("C", "close_pr", "Close PR"),
+        Binding("b", "bump", "Bump version"),
+        Binding("R", "release", "Release"),
         Binding("f", "fix", "Fix drift"),
         Binding("s", "sync", "Sync files"),
         Binding("n", "new_repo", "New repo"),
@@ -266,6 +364,7 @@ class BnbTui(App):
         self.alerts: dict[str, tuple[list[dict], list[str]]] = {}
         self.releases: dict[str, dict] = {}  # repo -> R.release_info
         self.packages: dict[str, dict] = {}  # owner/image -> P.package_infos entry
+        self.versions: dict[str, dict | str] = {}  # repo -> V.state, or an error
         self.last_alerts = 0
         self.plugin_tabs = {t["id"]: t for t in plugins.hook("tui_tabs")}
         self.tabs = BASE_TABS + [(t["id"], t["title"]) for t in self.plugin_tabs.values()]
@@ -340,6 +439,9 @@ class BnbTui(App):
             for key, label in t.get("rows") or []:
                 table.add_row(label, key=key)
         for i, (key, description, *_) in enumerate(self.plugin_keys):
+            if self.key_taken(key, self.key_tabs(i)):
+                self.log_line(f"plugin key {key} ({description}) left out: bnb uses {key} on those tabs")
+                continue
             self.bind(key, f"plugin_key({i})", description=description)
         for err in plugins.errors:
             self.log_line(f"plugin broken: {err}")
@@ -353,6 +455,9 @@ class BnbTui(App):
         line.append_text(linkify(text.strip()))
         with contextlib.suppress(NoMatches):  # the app is closing
             self.query_one("#log", RichLog).write(line)
+        for screen in self.screen_stack:
+            if isinstance(screen, RowPage):
+                screen.write(line)
 
     def focus_table(self, tab_id: str | None = None) -> None:
         with contextlib.suppress(Exception):
@@ -399,16 +504,64 @@ class BnbTui(App):
         k = self.plugin_keys[i]
         return set(k[3]) if len(k) > 3 and k[3] else {"repos", "prs"}
 
+    def key_taken(self, key: str, tabs: set[str]) -> bool:
+        """Whether a bnb key already works on one of these tabs (a key may serve bnb and a plugin on
+        different tabs)."""
+        for b in self.BINDINGS:
+            if key in (k.strip() for k in b.key.split(",")):
+                action = b.action.split("(")[0]
+                if action not in TAB_ACTIONS or TAB_ACTIONS[action] & tabs:
+                    return True
+        return False
+
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         """Hide the keys that do nothing on this tab, so the footer shows what you can do here."""
         tab = self.tab()
         if not tab or isinstance(self.screen, ModalScreen):
             return True
         if action in TAB_ACTIONS:
-            return tab in TAB_ACTIONS[action]
+            return tab in TAB_ACTIONS[action] and self.row_allows(action, tab)
         if action == "plugin_key" and parameters:
             return tab in self.key_tabs(int(parameters[0]))
         return True
+
+    def row_allows(self, action: str, tab: str) -> bool:
+        """Whether a key does something for the selected row, so the footer leaves out the rest
+        (a key that explains why it can't, like approving your own release, stays)."""
+        key = self.current_key(tab)
+        try:
+            if tab == "repos" and action == "merge":
+                return bool(((self.info.get(key) or {}).get("pullRequests") or {}).get("totalCount"))
+            if tab == "prs" and action in ("merge", "update_branch", "comment", "close_pr", "ready"):
+                p = self.prs[key]
+                return not p.get("merged") and (action != "ready" or p["isDraft"])
+            if tab == "runs" and action in ("approve", "rerun", "logs", "cancel_run"):
+                _, run, envs = self.runs[key]
+                state = run.get("conclusion") or run.get("status")
+                return {"approve": bool(envs), "rerun": state in R.FAILED, "logs": state in R.FAILED,
+                        "cancel_run": run.get("status") in R.ACTIVE}[action]
+            if action in ("bump", "release"):
+                return bool(key) and bool(V.source(self.cfg, key))
+        except (KeyError, TypeError):
+            return False
+        return True
+
+    def keys_line(self, tab: str) -> str:
+        """The keys that work on this tab's selected row, for the top of its detail."""
+        keys = []
+        for b in self.BINDINGS:
+            action = b.action.split("(")[0]
+            if action in TAB_ACTIONS and tab in TAB_ACTIONS[action] and self.row_allows(action, tab):
+                keys.append(f"{b.key} {b.description.lower()}")
+        keys += [f"{k[0]} {k[1].lower()}" for i, k in enumerate(self.plugin_keys)
+                 if tab in self.key_tabs(i) and not self.key_taken(k[0], self.key_tabs(i))]
+        out, line = [], ""
+        for k in keys + ["enter more", "o open"]:
+            if line and len(line) + len(k) > 56:
+                out.append(line)
+                line = ""
+            line = f"{line}  ·  {k}" if line else k
+        return "\n".join([*out, line])
 
     def action_plugin_key(self, i: int) -> None:
         try:
@@ -438,8 +591,14 @@ class BnbTui(App):
             return None
 
     def show(self, tab_id: str, text: str) -> None:
+        for screen in self.screen_stack:
+            if isinstance(screen, RowPage) and screen.tab == tab_id and screen.key == self.current_key(tab_id):
+                screen.set_detail(linkify(text))
         with contextlib.suppress(NoMatches):
-            self.query_one(f"#{tab_id}-detail", Static).update(linkify(text))
+            body = linkify(text)
+            if tab_id not in ("settings", "checks") and tab_id not in self.plugin_tabs:
+                body = Text.assemble((self.keys_line(tab_id) + "\n\n", Style(color=SAND, dim=True)), body)
+            self.query_one(f"#{tab_id}-detail", Static).update(body)
 
     # ── loading ───────────────────────────────────────────────────────────
 
@@ -664,7 +823,7 @@ class BnbTui(App):
         text = R.release_text(self.releases[repo]) + "\n\nWhat failed in the last run:\n" + "\n".join(
             f"  {j}" for j in jobs or ["no failed jobs listed"])
         self.detail_cache[f"releases:{repo}"] = text
-        self.call_from_thread(self.show_if_current, "releases", repo, text)
+        self.call_from_thread(self.refresh_version, repo)  # shows it with the version on top
 
     def security_text(self, repo: str) -> str:
         alerts, unread = self.alerts.get(repo, ([], []))
@@ -724,8 +883,11 @@ class BnbTui(App):
             key = f"{repo}|{run['id']}"
             seen.add(run["id"])
             self.runs[key] = (repo, run, envs)
-            table.add_row(self.label(repo), Text("waiting for you", style=f"bold {self.highlight()}"),
+            state = (Text("waiting, not for you", style=WARNING) if R.is_blocked(envs)
+                     else Text("waiting for you", style=f"bold {self.highlight()}"))
+            table.add_row(self.label(repo), state,
                           run.get("name") or "", run.get("head_branch") or "", core.ago(run.get("created_at")), key=key)
+        waiting = [w for w in waiting if not R.is_blocked(w[2])]
         for repo, run in last:
             if not run or run["id"] in seen:
                 continue
@@ -754,6 +916,7 @@ class BnbTui(App):
     # ── detail pane ───────────────────────────────────────────────────────
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        self.refresh_bindings()
         self.update_detail()
 
     def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
@@ -793,22 +956,21 @@ class BnbTui(App):
         elif tab == "releases":
             info = self.releases[key]
             last = info["runs"][0] if info["runs"] else {}
+            head = "\n".join(self.version_lines(key))
+            head = head + "\n\n" if head else ""
             if f"releases:{key}" in self.detail_cache:
-                self.show("releases", self.detail_cache[f"releases:{key}"])
+                self.show("releases", head + self.detail_cache[f"releases:{key}"])
             elif last.get("conclusion") == "failure":
-                self.show("releases", R.release_text(info) + "\n\nLoading what failed …")
+                self.show("releases", head + R.release_text(info) + "\n\nLoading what failed …")
                 self.load_release_jobs(key, last["id"])
             else:
-                self.show("releases", R.release_text(info))
+                self.show("releases", head + R.release_text(info))
         elif tab == "runs":
-            repo, run, envs = self.runs[key]
-            lines = [f"{repo}  {run.get('name')}", run["html_url"], "",
-                     f"event    {run.get('event')}", f"ref      {run.get('head_branch')}",
-                     f"state    {run.get('conclusion') or run.get('status')}",
-                     f"started  {core.ago(run.get('created_at'))}"]
-            if envs:
-                lines += ["", f"Waits for: {', '.join(e['name'] for e in envs)}", "a approves it"]
-            self.show("runs", "\n".join(lines))
+            if f"runs:{key}" in self.detail_cache:
+                self.show("runs", self.detail_cache[f"runs:{key}"])
+            else:
+                self.show("runs", self.run_text(key) + "\n\nLoading its jobs …")
+                self.load_run_jobs(key)
         else:
             cache_key = f"{tab}:{key}"
             if cache_key in self.detail_cache:
@@ -817,13 +979,53 @@ class BnbTui(App):
                 self.show(tab, "Checking …" if tab == "checks" else "Loading …")
                 self.load_view(tab, key)
 
+    def run_text(self, key: str) -> str:
+        repo, run, envs = self.runs[key]
+        state = run.get("conclusion") or run.get("status")
+        lines = [f"{repo}  {run.get('name')}", run["html_url"], "",
+                 f"event    {run.get('event')}", f"ref      {run.get('head_branch')}",
+                 f"state    {state}", f"started  {core.ago(run.get('created_at'))}"]
+        if run.get("run_attempt", 1) > 1:
+            lines.append(f"attempt  {run['run_attempt']}")
+        if envs and R.is_blocked(envs):
+            lines += ["", f"Waits for: {', '.join(e['name'] for e in envs)}, but you can't approve it:"]
+            lines += [f"  {e['blocked']}" for e in envs]
+        elif envs:
+            lines += ["", f"Waits for your approval: {', '.join(e['name'] for e in envs)}"]
+        return "\n".join(lines)
+
+    @work(thread=True, group="detail")
+    def load_run_jobs(self, key: str) -> None:
+        """The run's jobs under its detail: the steps of a release at a glance, and what failed."""
+        repo, run, _ = self.runs[key]
+        try:
+            jobs = R.run_jobs(repo, run["id"])
+        except core.RateLimited as err:
+            self.call_from_thread(self.rate_limited, err)
+            return
+        except RuntimeError as err:
+            jobs = [f"error: {err}"]
+        text = self.run_text(key) + "\n\nJobs:\n" + "\n".join(f"  {j}" for j in jobs or ["none listed"])
+        self.detail_cache[f"runs:{key}"] = text
+        self.call_from_thread(self.show_if_current, "runs", key, text)
+
     def repo_text(self, repo: str) -> str:
         node = self.info.get(repo) or {}
         g = R.group_of(self.cfg, repo)
         tags = [r["tagName"] for r in (node.get("releases") or {}).get("nodes") or []]
         last = core.newest(tags)
+        ci = ((((node.get("defaultBranchRef") or {}).get("target") or {}).get("statusCheckRollup")) or {}).get("state")
+        branch = (node.get("defaultBranchRef") or {}).get("name") or "main"
         lines = [repo, f"{core.WEB}/{repo}", "", f"group        {g.name if g else '-'}"]
         lines.append(f"released     {last or '-'}" + (f"  {core.WEB}/{repo}/releases/tag/{last}" if last else ""))
+        lines += self.version_lines(repo)
+        lines.append(f"CI on {branch:<6} {(ci or '-').lower()}  {core.WEB}/{repo}/actions")
+        if repo in self.alerts:
+            alerts, _ = self.alerts[repo]
+            lines.append(f"alerts       {len(alerts) or 'none'}" + ("  (Security tab)" if alerts else ""))
+        info = self.releases.get(repo)
+        if info and info["missing"]:
+            lines.append(f"release      missing {', '.join(info['missing'])}")
         lines += plugins.hook("repo_detail", repo, node)
         lines += ["", "Open PRs:"]
         for p in sorted(((node.get("pullRequests") or {}).get("nodes") or []), key=lambda p: p["number"]):
@@ -831,8 +1033,39 @@ class BnbTui(App):
             lines.append(f"     {p['url']}")
         if lines[-1] == "Open PRs:":
             lines.append("  none")
-        lines += ["", f"Actions  {core.WEB}/{repo}/actions"]
         return "\n".join(lines)
+
+    def version_lines(self, repo: str) -> list[str]:
+        """The version file against the latest release, once loaded (a background call per repo)."""
+        if not V.source(self.cfg, repo):
+            return []
+        st = self.versions.get(repo)
+        if st is None:
+            self.versions[repo] = "…"
+            self.load_version(repo)
+            return ["version      …"]
+        if isinstance(st, str):
+            return [f"version      {st}"]
+        if not st["version"]:
+            return [f"version      none found in {st['file']}"]
+        todo = f"  → R releases {st['tag']}" if st["todo"] else "  (released; b bumps it)"
+        return [f"version      {st['version']} in {st['file']}{todo}"]
+
+    @work(thread=True, group="version")
+    def load_version(self, repo: str) -> None:
+        try:
+            self.versions[repo] = V.state(self.cfg, repo)
+        except core.RateLimited as err:
+            self.versions.pop(repo, None)
+            self.call_from_thread(self.rate_limited, err)
+            return
+        except RuntimeError as err:
+            self.versions[repo] = f"error: {err}"
+        self.call_from_thread(self.refresh_version, repo)
+
+    def refresh_version(self, repo: str) -> None:
+        if self.current_key() == repo and self.tab() in ("repos", "releases"):
+            self.update_detail()
 
     @work(thread=True, group="detail")
     def load_pr(self, key: str, diff: bool = False) -> None:
@@ -872,6 +1105,7 @@ class BnbTui(App):
     def action_refresh(self) -> None:
         """r: everything on the tab you are on, fresh (the Repos and PR list are one query)."""
         self.detail_cache.clear()
+        self.versions.clear()
         R._nodes.clear()
         self.loaded.pop(self.tab(), None)
         core.CACHE = None  # r means fresh: no answers from gh's cache
@@ -996,6 +1230,9 @@ class BnbTui(App):
     def after_action(self, text: str) -> None:
         if not self.tab():
             return
+        for screen in self.screen_stack:
+            if isinstance(screen, RowPage):
+                screen.call_after_refresh(screen.fill_items)
         for line in text.splitlines():
             if line.strip():
                 self.log_line(line)
@@ -1061,6 +1298,76 @@ class BnbTui(App):
             self.show("prs", "Loading diff …")
             self.load_pr(key, diff=True)
 
+    def selected_pr(self) -> dict | None:
+        key = self.current_key()
+        if self.tab() != "prs" or not key:
+            return None
+        p = self.prs[key]
+        if p.get("merged"):
+            self.log_line(f"{p['repo']}#{p['number']} is merged")
+            return None
+        return p
+
+    def action_update_branch(self) -> None:
+        p = self.selected_pr()
+        if p:
+            self.detail_cache.pop(f"{p['repo']}#{p['number']}", None)
+            self.confirm_then(f"Merge {p['baseRefName'] if p.get('baseRefName') else 'the base branch'} into "
+                              f"{p['repo']}#{p['number']}'s branch (Update branch)?\n{p['title']}",
+                              R.update_branch, p["repo"], p["number"])
+
+    def action_close_pr(self) -> None:
+        p = self.selected_pr()
+        if p:
+            self.confirm_then(f"Close {p['repo']}#{p['number']} without merging?\n{p['title']}",
+                              R.close_pr, p["repo"], p["number"])
+
+    def action_comment(self) -> None:
+        p = self.selected_pr()
+        if not p:
+            return
+
+        def write(text: str | None) -> None:
+            if text and text.strip():
+                self.detail_cache.pop(f"{p['repo']}#{p['number']}", None)
+                self.do_job(R.comment_pr, p["repo"], p["number"], text.strip())
+        self.ask(f"Comment on {p['repo']}#{p['number']} (Enter posts it, Esc cancels)", write)
+
+    def action_logs(self) -> None:
+        key = self.current_key()
+        if self.tab() != "runs" or not key:
+            return
+        repo, run, _ = self.runs[key]
+        if (run.get("conclusion") or "") not in R.FAILED:
+            self.log_line(f"{run.get('name')} didn't fail: no failed log to show")
+            return
+        self.show("runs", self.run_text(key) + "\n\nLoading the failed log …")
+        self.load_failed_log(key)
+
+    @work(thread=True, group="detail")
+    def load_failed_log(self, key: str) -> None:
+        repo, run, _ = self.runs[key]
+        try:
+            lines = R.failed_log(repo, run["id"])
+        except core.RateLimited as err:
+            self.call_from_thread(self.rate_limited, err)
+            return
+        except RuntimeError as err:
+            lines = [f"error: {err}"]
+        text = self.run_text(key) + "\n\nFailed log:\n" + "\n".join(lines)
+        self.call_from_thread(self.show_if_current, "runs", key, text)
+
+    def action_cancel_run(self) -> None:
+        key = self.current_key()
+        if self.tab() != "runs" or not key:
+            return
+        repo, run, _ = self.runs[key]
+        if run.get("status") not in R.ACTIVE:
+            self.log_line(f"{run.get('name')} isn't running ({run.get('conclusion') or run.get('status')})")
+            return
+        self.detail_cache.pop(f"runs:{key}", None)
+        self.confirm_then(f"Cancel {repo} {run.get('name')} on {run.get('head_branch')}?", R.cancel_run, repo, run)
+
     def action_approve(self) -> None:
         key = self.current_key()
         if self.tab() != "runs" or not key:
@@ -1069,6 +1376,10 @@ class BnbTui(App):
         repo, run, envs = self.runs[key]
         if not envs:
             self.log_line("That run isn't waiting for your approval")
+            return
+        if R.is_blocked(envs):
+            for e in envs:
+                self.log_line(f"You can't approve it: {e['blocked']}")
             return
 
         def approve(repo, run, envs) -> None:
@@ -1084,6 +1395,69 @@ class BnbTui(App):
             question = f"Approve {', '.join(e['name'] for e in envs)} for {repo} {run.get('head_branch')}?"
         self.confirm_then(question, approve, repo, run, envs)
 
+
+    def action_rerun(self) -> None:
+        key = self.current_key()
+        if self.tab() != "runs" or not key:
+            self.log_line("x re-runs a failed run: Runs tab (3)")
+            return
+        repo, run, _ = self.runs[key]
+        state = run.get("conclusion") or run.get("status")
+        if state not in R.FAILED:
+            self.log_line(f"{run.get('name')} didn't fail ({state}): nothing to re-run")
+            return
+        self.detail_cache.pop(f"runs:{key}", None)
+        self.confirm_then(f"Re-run the failed jobs of {repo} {run.get('name')} on {run.get('head_branch')}?\n"
+                          "Jobs that passed and approvals already given stay as they are.",
+                          R.rerun_failed, repo, run)
+
+    def version_repo(self) -> str | None:
+        """The repo of the selected row on Repos or Releases, when its group names a version file."""
+        key = self.current_key()
+        if self.tab() not in ("repos", "releases") or not key:
+            self.log_line("b bumps and R releases the selected repo: Repos (1) or Releases (4)")
+            return None
+        if not V.source(self.cfg, key):
+            self.log_line(f"{key}: its group names no version file (version = \"...\" in bitsandbricks.toml)")
+            return None
+        return key
+
+    def action_bump(self) -> None:
+        repo = self.version_repo()
+        if not repo:
+            return
+
+        def picked(level: str | None) -> None:
+            if level:
+                self.confirm_then(f"Open a PR in {repo} that raises the version ({level}) and adds the changelog "
+                                  "section?\nAfter its merge, R pushes the tag.", V.bump, self.cfg, repo, level)
+        self.push_screen(Pick(f"Bump {repo}", [("patch", "patch: fixes (1.2.3 → 1.2.4)"),
+                                               ("minor", "minor: new features (1.2.3 → 1.3.0)"),
+                                               ("major", "major: breaking changes (1.2.3 → 2.0.0)")]), picked)
+
+    def action_release(self) -> None:
+        repo = self.version_repo()
+        if repo:
+            self.log_line(f"{repo}: reading its version …")
+            self.release_state(repo)
+
+    @work(thread=True, group="action")
+    def release_state(self, repo: str) -> None:
+        try:
+            st = V.state(self.cfg, repo)
+        except RuntimeError as err:
+            self.call_from_thread(self.log_line, f"{repo}: {err}")
+            return
+        self.call_from_thread(self.confirm_release, st)
+
+    def confirm_release(self, st: dict) -> None:
+        repo = st["repo"]
+        if not st["todo"]:
+            self.do_job(V.release, self.cfg, repo)  # says where the release stands, pushes nothing
+            return
+        self.confirm_then(f"Push the tag {st['tag']} on {repo} {st['base']}?\n{st['file']} says {st['version']}, "
+                          f"latest release {st['released'] or 'none'}. The repo's release workflow takes it from "
+                          "there.", V.release, self.cfg, repo)
 
     # ── settings ──────────────────────────────────────────────────────────
 
@@ -1112,7 +1486,8 @@ class BnbTui(App):
                 if g.reference:
                     out.append(f"  from      {g.reference}  {core.WEB}/{g.reference}")
                 for label, value in (("settings", g.settings), ("security", g.security), ("require", g.require),
-                                     ("rulesets", g.rulesets), ("files", g.files)):
+                                     ("rulesets", g.rulesets), ("files", g.files),
+                                     ("version", g.version), ("changelog", g.changelog)):
                     if value:
                         out.append(f"  {label:<9} {value}")
                 out.append("")
@@ -1194,11 +1569,24 @@ class BnbTui(App):
                           ("merge-now", "Merge now (M)", lambda: self.action_merge(True))]
                 if p["isDraft"]:
                     items.append(("ready", "Mark ready for review (y)", self.action_ready))
+                items += [("update", "Update its branch from the base (u)", self.action_update_branch),
+                          ("comment", "Comment on it (c)", self.action_comment),
+                          ("close", "Close it without merging (C)", self.action_close_pr)]
                 items.append(("diff", "Show the diff (d)", self.action_diff))
             items.append(("checks", "Its checks page", lambda: self.action_open_link(f"{p['url']}/checks")))
-        elif tab == "runs" and self.runs[key][2]:
-            items.append(("approve", "Approve (a)", self.action_approve))
-        elif tab == "releases":
+        elif tab == "runs":
+            run, envs = self.runs[key][1], self.runs[key][2]
+            if envs and not R.is_blocked(envs):
+                items.append(("approve", "Approve (a)", self.action_approve))
+            if (run.get("conclusion") or "") in R.FAILED:
+                items += [("rerun", "Re-run its failed jobs (x)", self.action_rerun),
+                          ("logs", "Show the end of the failed log (l)", self.action_logs)]
+            if run.get("status") in R.ACTIVE:
+                items.append(("cancel", "Cancel it (C)", self.action_cancel_run))
+        if tab in ("repos", "releases") and V.source(self.cfg, key):
+            items += [("bump", "Bump its version: PR with version + changelog (b)", self.action_bump),
+                      ("release", "Release: tag v<version> when it is new (R)", self.action_release)]
+        if tab == "releases":
             runs = self.releases[key]["runs"]
             if runs:
                 items.append(("run", f"Its last release run ({R.run_state(runs[0])})",
@@ -1231,6 +1619,13 @@ class BnbTui(App):
         if self.tab() == "prs":
             p = self.prs[title]
             title = f"{self.label(p['repo'])}#{p['number']} {p['title'][:60]}"
+        elif self.tab() == "runs":
+            repo, run, _ = self.runs[title]
+            title = f"{self.label(repo)} · {run.get('name')} · {run.get('head_branch')}"
+        if self.tab() in PAGE_TABS:
+            tab_title = dict(self.tabs).get(self.tab(), "")
+            self.push_screen(RowPage(self.tab(), self.current_key() or "", f"{tab_title} › {title}"))
+            return
 
         def chosen(choice: str | None) -> None:
             if choice:
