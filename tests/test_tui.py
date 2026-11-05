@@ -19,8 +19,8 @@ async def until(pilot, check, seconds: float = 20) -> None:
 def test_tui_flow(env, monkeypatch):
     for key in ("PATH", "FAKE_GH_LOG", "XDG_CONFIG_HOME", "BNB_DEFAULTS", "BNB_OPEN", "BNB_PLUGINS"):
         monkeypatch.setenv(key, env[key])
-    from bitsandbricks import config, core, plugins, tui
-    from bitsandbricks.plugins import Plugin
+    from mortar import config, core, plugins, tui
+    from mortar.plugins import Plugin
 
     class Demo(Plugin):
         name = "demo"
@@ -134,7 +134,7 @@ def test_tui_menu_footer_settings_new(env, monkeypatch, tmp_path):
     for key in ("PATH", "FAKE_GH_LOG", "BNB_DEFAULTS", "BNB_OPEN", "BNB_PLUGINS"):
         monkeypatch.setenv(key, env[key])
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    from bitsandbricks import config, core, tui
+    from mortar import config, core, tui
 
     core.DRY_RUN = True
     config._loaded.clear()

@@ -6,4 +6,4 @@ dist/
 build/
 .venv/
 node_modules/
-src/bitsandbricks/operator/static/
+src/mortar/server/static/

@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 def bnb(env, *args) -> str:
-    proc = subprocess.run([sys.executable, "-m", "bitsandbricks", *args], env=env, capture_output=True,
+    proc = subprocess.run([sys.executable, "-m", "mortar", *args], env=env, capture_output=True,
                           text=True, stdin=subprocess.DEVNULL, timeout=60, check=False)
     return proc.stdout + proc.stderr
 
@@ -122,7 +122,7 @@ def test_bump_and_release(env, tmp_path):
 
 
 def test_version_files():
-    from bitsandbricks import versions as V
+    from mortar import versions as V
     assert V.read_version('[project]\nname = "x"\nversion = "0.2.0"\n', "app/pyproject.toml") == "0.2.0"
     assert V.write_version('{\n  "name": "x",\n  "version": "1.2.3"\n}\n', "package.json", "1.3.0") == \
         '{\n  "name": "x",\n  "version": "1.3.0"\n}\n'
@@ -140,7 +140,7 @@ def test_run_and_pr_actions(env, monkeypatch, tmp_path):
     for key in ("PATH", "BNB_DEFAULTS"):
         monkeypatch.setenv(key, env[key])
     monkeypatch.setenv("FAKE_GH_LOG", str(log))
-    from bitsandbricks import core, repos
+    from mortar import core, repos
 
     core.DRY_RUN = False
     lines = repos.failed_log("acme/plugin-b", 7)
@@ -218,7 +218,7 @@ def test_plugins(env, tmp_path):
     pkg = tmp_path / "demo_plugin"
     pkg.mkdir()
     (pkg / "__init__.py").write_text('''
-from bitsandbricks.plugins import Plugin
+from mortar.plugins import Plugin
 
 class Demo(Plugin):
     name = "demo"
@@ -241,7 +241,7 @@ class Demo(Plugin):
     dist = tmp_path / "demo_plugin-0.1.dist-info"
     dist.mkdir()
     (dist / "METADATA").write_text("Metadata-Version: 2.1\nName: demo-plugin\nVersion: 0.1\n")
-    (dist / "entry_points.txt").write_text("[bitsandbricks.plugins]\ndemo = demo_plugin:Demo\n")
+    (dist / "entry_points.txt").write_text("[mortar.plugins]\ndemo = demo_plugin:Demo\n")
     e = {**env, "PYTHONPATH": str(tmp_path)}
     assert "demo             a test plugin" in bnb(e, "plugins")
     assert "hello from demo" in bnb(e, "hello")
@@ -251,14 +251,14 @@ class Demo(Plugin):
 
 
 def test_core_helpers():
-    from bitsandbricks.core import git_blob_sha, newest
+    from mortar.core import git_blob_sha, newest
 
     assert git_blob_sha("hello\n") == "ce013625030ba8dba906f756967f9e9ca394464a"  # git hash-object
     assert newest(["v1.2.0", "v1.10.0", "v1.9.9"]) == "v1.10.0"
 
 
 def test_readme_names_every_command():
-    from bitsandbricks.cli import ON_REPOS
+    from mortar.cli import ON_REPOS
 
     readme = (Path(__file__).parent.parent / "README.md").read_text()
     for cmd in (*ON_REPOS, "pr", "open", "init", "config", "plugins", "tui", "new", "login", "logout", "whoami",
@@ -276,3 +276,16 @@ def test_new_repo(env):
     assert "[dry-run] PUT /repos/acme/site/contents/SECURITY.md" in out
     assert "exists already" in bnb(env, "new", "acme/web")
     assert "No group 'nope'" in bnb(env, "new", "acme/x", "--group", "nope")
+
+
+def test_old_names_still_work(env):
+    """Formerly bitsandbricks: the old module, `python -m bitsandbricks` and plugin imports keep working."""
+    import bitsandbricks.core
+    import mortar.core
+    from bitsandbricks import plugins
+
+    assert bitsandbricks.core is mortar.core and plugins.GROUP == "mortar.plugins"
+    assert "bitsandbricks.plugins" in plugins.OLD_GROUPS
+    proc = subprocess.run([sys.executable, "-m", "bitsandbricks", "--version"], env=env, capture_output=True,
+                          text=True, check=False)
+    assert proc.stdout.startswith("mortar ")

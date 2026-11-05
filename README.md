@@ -1,13 +1,15 @@
-# bitsandbricks
+# Mortar
 
-`bitsandbricks` (short: `bnb`) is a terminal tool and TUI for looking after many GitHub repositories at once, across orgs and user accounts: status, pull requests, merges, workflow runs and approvals, security alerts, and drift checks against shared defaults.
+Mortar (`mortar`, short: `bnb`) is a terminal tool, TUI and web app for looking after many GitHub (and, in the web app, GitLab) repositories at once, across orgs and user accounts: status, pull requests, merges, workflow runs and approvals, security alerts, stats, and drift checks against shared defaults. It holds your bricks together.
+
+Formerly bitsandbricks: the `bnb` and `bitsandbricks` commands, `import bitsandbricks`, plugins registered under `bitsandbricks.plugins`, `~/.config/bitsandbricks` and the `BNB_OPERATOR_*` settings all keep working.
 
 The defaults live in a repository you choose. Point `bnb` at any repo (or local folder) that holds a `bitsandbricks.toml`, and it checks your repos against it. Nothing is tied to one org: every user can keep their own defaults repo.
 
 ## Install
 
 ```sh
-pipx install "git+https://github.com/bitsandbricks-ch/bitsandbricks-cli#egg=bitsandbricks-cli[tui]"
+pipx install "mortar-cli[tui] @ git+https://github.com/bitsandbricks-ch/bitsandbricks-cli"
 gh auth login          # bnb talks to GitHub through the gh CLI and never sees a token
 bnb init your-org/your-defaults
 ```
@@ -42,6 +44,7 @@ Repos are named as `owner/name`, as a bare `name` when only one repo has it, or 
 | `bnb stats [--days 30]` | Pull requests merged and opened, median time to merge, open and stale PRs, workflow runs with success rate and duration, releases. |
 | `bnb plugins` | Installed plugins. |
 | `bnb market [install NAME]` | Plugins in the signed plugin index; `install` adds one (only from a verified index). `keygen`, `sign` and `verify` are for whoever publishes an index. |
+| `mortar serve [--check]` | Run Mortar, the web app (`pipx inject mortar-cli 'mortar-cli[server]'`); `--check` shows what its settings allow. See [docs/mortar.md](docs/mortar.md). |
 | `bnb login https://mortar` | Go through [Mortar](docs/mortar.md), the web app, with an API key: approve a code in the browser, and every command and the TUI then work without gh or a GitHub token here. `bnb logout` forgets the key, `bnb whoami` says how bnb reaches GitHub. |
 | `bnb tui` | Everything above, full screen. |
 
@@ -65,7 +68,7 @@ Security alerts need the `security_events` scope and packages the `read:packages
 
 ## Configuration
 
-Your own config is `~/.config/bitsandbricks/config.toml` (`bnb init` writes it):
+Your own config is `~/.config/mortar/config.toml` (or `~/.config/bitsandbricks/` from before the rename) (`bnb init` writes it):
 
 ```toml
 defaults = "your-org/your-defaults"   # a GitHub repo, or a local folder
@@ -110,20 +113,20 @@ Unknown keys on a group stay there for plugins (`group.extra`).
 
 ## Plugins
 
-A plugin is a Python package with an entry point in the `bitsandbricks.plugins` group. It can add commands, `status` columns (with extra GraphQL fields), doctor checks and hints, TUI tabs and palette commands. See `src/bitsandbricks/plugins.py`.
+A plugin is a Python package with an entry point in the `mortar.plugins` group (`bitsandbricks.plugins` still works). It can add commands, `status` columns (with extra GraphQL fields), doctor checks and hints, TUI tabs and palette commands. See `src/mortar/plugins.py`.
 
 ```toml
-[project.entry-points."bitsandbricks.plugins"]
+[project.entry-points."mortar.plugins"]
 hubra = "hubra_cli.bnb:HubraPlugin"
 ```
 
-Install one next to bnb with `pipx inject bitsandbricks-cli <package>`. `BNB_PLUGINS=none` (or a comma separated list of names) limits which plugins load.
+Install one next to bnb with `pipx inject mortar-cli <package>`. `BNB_PLUGINS=none` (or a comma separated list of names) limits which plugins load.
 
 hubra-cli is one: it adds Hubra plugin releases, signing checks and a Hubra tab.
 
 ## Mortar (web app)
 
-`mortar` runs bnb as a web app: people sign in with GitHub and GitLab (OAuth, their own tokens), and
+`mortar serve` runs bnb as a web app: people sign in with GitHub and GitLab (OAuth, their own tokens), and
 get every command and TUI view in a terminal-style browser UI, plus a defaults editor with templates,
 stats, a console, plugins and a signed plugin marketplace. `bnb login https://your-mortar` points the CLI
 and TUI at it with an API key, so a laptop needs neither gh nor a token.

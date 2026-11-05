@@ -6,14 +6,14 @@ move it to "Done" when it ships.
 ## Next
 
 - **hubra-cli on the operator.** hubra-cli still has its own gh plumbing and token file, so in the
-  operator its commands don't run with the signed-in user's token. Port it to `bitsandbricks.core`
+  operator its commands don't run with the signed-in user's token. Port it to `mortar.core`
   (transport-aware `api`/`graphql`), read the Hubra token with `plugins.secret("hubra_token")`, and expose
   `web_secrets()`, `web_actions()` (sign, release, verify) and `web_commands`. Follow-up PR in hubra-cli.
 - **GitLab in the CLI and TUI.** The operator speaks GitLab; `bnb status/prs/runs/doctor` on a laptop still
   only know GitHub. Move `operator/gitlab.py` behind the transport so the CLI can use a GitLab token or the
   operator.
 - **Signed official plugin index.** Make the project key, sign `plugins/index.json` in CI, ship the public
-  key in `src/bitsandbricks/keys/`.
+  key in `src/mortar/keys/`.
 - **Live updates.** GitHub/GitLab webhooks (or a GitHub App) into the operator, pushed to the browser with
   server-sent events, so lists refresh themselves and the cache can be invalidated precisely.
 - **Scheduled checks.** Run `doctor` nightly per user or group, keep the results, and show drift over time;

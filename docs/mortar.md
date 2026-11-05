@@ -37,11 +37,11 @@ On a phone (the layout adapts below 700px; it can be added to the home screen):
 ## Run it
 
 ```sh
-pip install -e ".[operator]"                 # flask, sqlalchemy, cryptography, gunicorn
-(cd web && npm ci && npm run build)          # the UI, into src/bitsandbricks/operator/static
+pip install -e ".[server]"                   # flask, sqlalchemy, cryptography, gunicorn
+(cd web && npm ci && npm run build)          # the UI, into src/mortar/server/static
 export GITHUB_CLIENT_ID=... GITHUB_CLIENT_SECRET=...
-export BNB_OPERATOR_ADMINS=github:you BNB_OPERATOR_DEV=1
-mortar check                           # what the settings allow, and what is missing
+export MORTAR_ADMINS=github:you MORTAR_DEV=1
+mortar serve --check                    # what the settings allow, and what is missing
 mortar serve                           # http://localhost:8080 (development server)
 ```
 
@@ -49,15 +49,15 @@ UI development: `cd web && npm run dev` serves the UI on :5173 and passes `/api`
 
 In production use the image: `docker build -t mortar .`, or `deploy/docker-compose.yml`
 (Mortar + Postgres; copy `deploy/mortar.env.example` to `deploy/mortar.env`). Put it behind a TLS
-proxy and set `BNB_OPERATOR_TRUSTED_PROXIES=1` so it sees the real client address. The image runs
+proxy and set `MORTAR_TRUSTED_PROXIES=1` so it sees the real client address. The image runs
 gunicorn with one process and many threads, which keeps each user's API cache in one place.
 
 ## OAuth apps
 
 | provider | where | callback URL | scopes |
 | --- | --- | --- | --- |
-| GitHub | Settings › Developer settings › OAuth Apps | `{BNB_OPERATOR_URL}/api/v1/auth/github/callback` | `repo read:org workflow security_events read:packages` |
-| GitLab | Preferences (or Admin) › Applications, confidential | `{BNB_OPERATOR_URL}/api/v1/auth/gitlab/callback` | `api` |
+| GitHub | Settings › Developer settings › OAuth Apps | `{MORTAR_URL}/api/v1/auth/github/callback` | `repo read:org workflow security_events read:packages` |
+| GitLab | Preferences (or Admin) › Applications, confidential | `{MORTAR_URL}/api/v1/auth/gitlab/callback` | `api` |
 
 GitHub Enterprise: set `GITHUB_URL` (and `GITHUB_API_URL` if it isn't `{GITHUB_URL}/api/v3`). Self-managed
 GitLab: set `GITLAB_URL`. Someone signed in with one provider connects the other in Settings › Accounts.
@@ -66,22 +66,22 @@ GitLab: set `GITLAB_URL`. Someone signed in with one provider connects the other
 
 | variable | meaning |
 | --- | --- |
-| `BNB_OPERATOR_URL` | where people reach it; must be `https://` unless `BNB_OPERATOR_DEV=1` |
-| `BNB_OPERATOR_SECRET_KEY` | encrypts stored tokens and secrets; made once in the data folder when unset |
-| `BNB_OPERATOR_DATA` | data folder (default `./data`, `/data` in the image) |
+| `MORTAR_URL` | where people reach it; must be `https://` unless `MORTAR_DEV=1` |
+| `MORTAR_SECRET_KEY` | encrypts stored tokens and secrets; made once in the data folder when unset |
+| `MORTAR_DATA` | data folder (default `./data`, `/data` in the image) |
 | `DATABASE_URL` | SQLAlchemy URL; SQLite in the data folder by default, `postgresql+psycopg://…` with `[postgres]` |
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_URL`, `GITHUB_API_URL`, `GITHUB_SCOPES` | the GitHub login |
 | `GITLAB_CLIENT_ID`, `GITLAB_CLIENT_SECRET`, `GITLAB_URL`, `GITLAB_SCOPES` | the GitLab login |
-| `BNB_OPERATOR_ALLOW_USERS` | who may sign in: `github:mike, gitlab:ann`, or a bare login for either |
-| `BNB_OPERATOR_ALLOW_ORGS` | members of these GitHub orgs or GitLab groups may sign in |
-| `BNB_OPERATOR_ADMINS` | admins (may sign in too): everyone's audit log, plugins for everyone, installs |
-| `BNB_OPERATOR_ALLOW_ANYONE` | `1` lets any account sign in (on purpose only) |
-| `BNB_OPERATOR_IDLE_HOURS`, `BNB_OPERATOR_SESSION_DAYS` | session idle timeout (12) and lifetime (7) |
-| `BNB_OPERATOR_CACHE` | how long GET answers are cached per user (`60s`); ETags make refreshes cheap |
+| `MORTAR_ALLOW_USERS` | who may sign in: `github:mike, gitlab:ann`, or a bare login for either |
+| `MORTAR_ALLOW_ORGS` | members of these GitHub orgs or GitLab groups may sign in |
+| `MORTAR_ADMINS` | admins (may sign in too): everyone's audit log, plugins for everyone, installs |
+| `MORTAR_ALLOW_ANYONE` | `1` lets any account sign in (on purpose only) |
+| `MORTAR_IDLE_HOURS`, `MORTAR_SESSION_DAYS` | session idle timeout (12) and lifetime (7) |
+| `MORTAR_CACHE` | how long GET answers are cached per user (`60s`); ETags make refreshes cheap |
 | `BNB_PLUGIN_INDEX`, `BNB_PLUGIN_INDEX_KEYS` | the plugin index (URL or file) and the keys it must be signed with |
-| `BNB_OPERATOR_PLUGIN_INSTALL` | `1` lets admins install plugins from the marketplace page |
-| `BNB_OPERATOR_TRUSTED_PROXIES` | how many proxies in front set `X-Forwarded-*` (0) |
-| `BNB_OPERATOR_DEV` | `1`: http allowed, plain cookie names (local development only) |
+| `MORTAR_PLUGIN_INSTALL` | `1` lets admins install plugins from the marketplace page |
+| `MORTAR_TRUSTED_PROXIES` | how many proxies in front set `X-Forwarded-*` (0) |
+| `MORTAR_DEV` | `1`: http allowed, plain cookie names (local development only) |
 
 Mortar refuses to start when no login is configured, nobody may sign in, or the URL isn't https.
 
@@ -118,7 +118,7 @@ bnb tui
 bnb logout                                # forgets the key here (revoke it in Settings › API keys)
 ```
 
-The key is kept in `~/.config/bitsandbricks/operator.json` (0600). `BNB_OPERATOR` and `BNB_OPERATOR_KEY`
+The key is kept in `~/.config/mortar/operator.json` (0600). `BNB_OPERATOR` and `BNB_OPERATOR_KEY`
 do the same for CI. The defaults repo and orgs then come from your Mortar settings.
 
 ## Defaults
@@ -157,8 +157,8 @@ Each user switches plugins on or off for themselves; admins can switch one off f
 
 The marketplace reads a plugin index (`plugins/index.json` by default) signed with Ed25519 (`bnb market
 keygen`, `bnb market sign`). Unsigned or wrongly signed indexes are shown but nothing installs from them.
-Installing from the web is off unless `BNB_OPERATOR_PLUGIN_INSTALL=1`, and only admins can do it; restart
-Mortar after an install. The signing code is adapted from labdex (relicensed into bitsandbricks
+Installing from the web is off unless `MORTAR_PLUGIN_INSTALL=1`, and only admins can do it; restart
+Mortar after an install. The signing code is adapted from labdex (relicensed into Mortar (formerly bitsandbricks)
 under MIT by its author).
 
 ## API

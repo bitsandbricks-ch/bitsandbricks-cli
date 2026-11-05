@@ -1,4 +1,4 @@
-# Mortar (bnb as a web app) with Postgres. Put it behind a TLS proxy (Caddy, Traefik, nginx) at BNB_OPERATOR_URL.
+# Mortar (bnb as a web app) with Postgres. Put it behind a TLS proxy (Caddy, Traefik, nginx) at MORTAR_URL.
 #   cp mortar.env.example mortar.env   # fill in the OAuth apps and who may sign in
 #   docker compose up -d
 services:
@@ -7,7 +7,7 @@ services:
     env_file: mortar.env
     environment:
       DATABASE_URL: postgresql+psycopg://bnb:bnb@db/bnb
-      BNB_OPERATOR_TRUSTED_PROXIES: "1"
+      MORTAR_TRUSTED_PROXIES: "1"
     ports: ["127.0.0.1:8080:8080"]
     volumes: [data:/data]
     depends_on: [db]

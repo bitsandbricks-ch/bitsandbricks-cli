@@ -2,7 +2,7 @@
 .venv
 **/__pycache__
 **/node_modules
-src/bitsandbricks/operator/static
+src/mortar/server/static
 .pytest_cache
 .ruff_cache
 dist

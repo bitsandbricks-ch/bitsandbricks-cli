@@ -37,7 +37,7 @@ async function run() {
   remember(l)
   at.value = -1
   line.value = ''
-  const words = l.replace(/^(bnb|bitsandbricks)\s+/, '').split(/\s+/)
+  const words = l.replace(/^(bnb|mortar|bitsandbricks)\s+/, '').split(/\s+/)
   if (writes.value.has(words[0]) && !words.includes('--dry-run')) {
     const a = await ask(`Run "${l}"? It can change repos.`)
     if (!a) { out.value.push({ line: l, text: 'cancelled' }); return }
@@ -66,7 +66,7 @@ function key(e) {
   <div class="view" @click.self="input?.focus()">
     <div ref="screen" class="scroll pad console-out">
       <div v-for="(o, i) in out" :key="i" style="margin-bottom: 10px">
-        <div v-if="o.line"><span class="accent">$ bnb</span> {{ o.line.replace(/^(bnb|bitsandbricks)\s+/, '') }}</div>
+        <div v-if="o.line"><span class="accent">$ bnb</span> {{ o.line.replace(/^(bnb|mortar|bitsandbricks)\s+/, '') }}</div>
         <TextPane :text="o.text" />
       </div>
       <div v-if="running" class="warn cursor">running </div>

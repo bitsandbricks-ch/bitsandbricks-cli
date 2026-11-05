@@ -29,7 +29,7 @@ onMounted(load)
         <span class="accent">{{ idx.name || 'plugin index' }}</span> <span class="dim">{{ idx.index }}</span><br>
         signature: <span :class="idx.status === 'verified' ? 'ok' : 'bad'">{{ idx.status }}</span> <span class="dim">{{ idx.detail }}</span>
         <div v-if="idx.description" class="dim">{{ idx.description }}</div>
-        <div v-if="!idx.can_install" class="dim">installing from here is for admins with BNB_OPERATOR_PLUGIN_INSTALL=1; otherwise <span class="accent">pip install</span> next to Mortar, or <span class="accent">bnb market install NAME</span> on your machine.</div>
+        <div v-if="!idx.can_install" class="dim">installing from here is for admins with MORTAR_PLUGIN_INSTALL=1; otherwise <span class="accent">pip install</span> next to Mortar, or <span class="accent">bnb market install NAME</span> on your machine.</div>
       </div>
       <div v-for="p in idx.plugins" :key="p.package" class="box">
         <div class="row">
