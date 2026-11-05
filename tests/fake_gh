@@ -1,0 +1,266 @@
+#!/usr/bin/env python3
+"""Stand-in for gh: canned answers for a made-up org `acme` and user `mike`; logs every call.
+
+acme: web, api, plugin-tpl (the plugins' reference), plugin-a (in line), plugin-b (drifted),
+      legacy (excluded by the defaults), old (archived), defaults (a defaults repo).
+mike: dotfiles (a user, not an org: /orgs/mike/repos is a 404).
+FAKE_GH_LOG names a file that gets one line per call.
+"""
+import base64
+import hashlib
+import json
+import os
+import re
+import sys
+
+LOG = os.environ.get("FAKE_GH_LOG", "/dev/null")
+argv = sys.argv[1:]
+stdin = sys.stdin.read() if "--input" in argv else ""
+with open(LOG, "a") as f:
+    f.write(" ".join(argv) + "\n")
+
+WEB = "https://github.com"
+ACME = ["web", "api", "plugin-tpl", "plugin-a", "plugin-b", "legacy", "old", "defaults"]
+TOPICS = {"web": ["frontend"]}
+
+
+def blob(text):
+    data = text.encode()
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
+def out(obj):
+    print(json.dumps(obj))
+    sys.exit(0)
+
+
+def fail(msg, code=1):
+    print(msg, file=sys.stderr)
+    sys.exit(code)
+
+
+def ruleset(name, approvals=0, rules=("deletion", "non_fast_forward", "pull_request")):
+    full = []
+    for t in rules:
+        if t == "pull_request":
+            full.append({"type": t, "parameters": {"required_approving_review_count": approvals,
+                                                   "dismiss_stale_reviews_on_push": False}})
+        else:
+            full.append({"type": t})
+    return {"name": name, "target": "branch", "enforcement": "active",
+            "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+            "rules": full, "bypass_actors": []}
+
+
+RELEASE_RS = {"name": "release", "target": "tag", "enforcement": "active",
+              "conditions": {"ref_name": {"include": ["refs/tags/v*"], "exclude": []}},
+              "rules": [{"type": "deletion"}, {"type": "update"}]}
+SECURITY_MD = "Report security issues privately.\n"
+GITIGNORE = "__pycache__/\n"
+LICENSE = "MIT License\n"
+
+SETTINGS = {"allow_auto_merge": True, "delete_branch_on_merge": True, "has_wiki": False}
+REPOS = {  # full name: (settings, rulesets, files, immutable)
+    "acme/plugin-tpl": (SETTINGS, {"main": ruleset("main")},
+                        {".gitignore": GITIGNORE, "LICENSE": LICENSE,
+                         ".github/rulesets/main.json": json.dumps(ruleset("main"))}, True),
+    "acme/plugin-a": (SETTINGS, {"main": ruleset("main")}, {".gitignore": GITIGNORE, "LICENSE": LICENSE}, True),
+    "acme/plugin-b": (dict(SETTINGS, has_wiki=True), {}, {".gitignore": GITIGNORE, "LICENSE": "GPL\n"}, False),
+    "acme/web": (dict(SETTINGS, delete_branch_on_merge=False), {}, {}, False),
+    "acme/api": (SETTINGS, {"main": ruleset("main", approvals=1)},
+                 {"SECURITY.md": SECURITY_MD, ".github/rulesets/release.json": json.dumps(RELEASE_RS)}, False),
+    "acme/legacy": ({}, {}, {}, False),
+    "acme/old": ({}, {}, {}, False),
+    "acme/defaults": ({}, {}, {}, False),
+    "mike/dotfiles": (SETTINGS, {"main": ruleset("main", rules=("deletion", "non_fast_forward", "pull_request",
+                                                                 "required_linear_history"))},
+                      {"SECURITY.md": SECURITY_MD}, False),
+}
+DEFAULTS_TOML = """\
+orgs = ["acme", "mike"]
+exclude = ["acme/legacy", "acme/defaults"]
+
+[[group]]
+name = "plugins"
+match = { org = "acme", prefix = "plugin-" }
+from = "acme/plugin-tpl"
+files = [".gitignore", "LICENSE"]
+require = { allow_auto_merge = true }
+
+[[group]]
+name = "default"
+settings = { delete_branch_on_merge = true }
+rulesets = "rulesets/default"
+files = "files/default"
+"""
+DEFAULTS_MAIN = {"name": "main", "target": "branch", "enforcement": "active",
+                 "rules": [{"type": "deletion"}, {"type": "non_fast_forward"}, {"type": "pull_request"}]}
+REPOS["acme/defaults"] = ({}, {}, {"bitsandbricks.toml": DEFAULTS_TOML,
+                                   "rulesets/default/main.json": json.dumps(DEFAULTS_MAIN),
+                                   "files/default/SECURITY.md": SECURITY_MD}, False)
+RS_IDS = {}
+for repo, (_, rsets, _, _) in REPOS.items():
+    for i, name in enumerate(rsets):
+        RS_IDS[(repo, i + 1)] = name
+
+PRS = {
+    "acme/web": [
+        dict(number=7, title="Add login page", isDraft=False, mergeable="MERGEABLE", autoMergeRequest=None, state="OPEN"),
+        dict(number=8, title="WIP: dark mode", isDraft=True, mergeable="MERGEABLE", autoMergeRequest=None, state="OPEN"),
+        dict(number=9, title="Conflicting change", isDraft=False, mergeable="CONFLICTING", autoMergeRequest=None,
+             state="OPEN"),
+    ],
+    "acme/api": [dict(number=3, title="Old", isDraft=False, mergeable="MERGEABLE", autoMergeRequest=None,
+                      state="MERGED")],
+}
+for repo, prs in PRS.items():
+    for p in prs:
+        p["url"] = f"{WEB}/{repo}/pull/{p['number']}"
+
+
+def info(repo):
+    owner, name = repo.split("/")
+    settings = REPOS[repo][0]
+    return {"full_name": repo, "name": name, "owner": {"login": owner}, "archived": name == "old",
+            "default_branch": "main", "topics": TOPICS.get(name, []), "private": owner == "mike",
+            "security_and_analysis": {"secret_scanning": {"status": "enabled" if repo != "acme/web" else "disabled"}},
+            **settings}
+
+
+def node(repo):
+    prs = [p for p in PRS.get(repo, []) if p["state"] == "OPEN"]
+    return {
+        "nameWithOwner": repo, "isArchived": repo.endswith("/old"),
+        "defaultBranchRef": {"name": "main", "target": {"statusCheckRollup": {
+            "state": "FAILURE" if repo == "acme/api" else "SUCCESS"}}},
+        "releases": {"nodes": [{"tagName": "v1.2.0"}, {"tagName": "v1.10.0"}] if repo == "acme/api" else []},
+        "pullRequests": {"totalCount": len(prs), "nodes": [dict(p, reviewDecision=None, headRefName="feat",
+                                                                author={"login": "ann"},
+                                                                commits={"nodes": [{"commit": {"statusCheckRollup": {
+                                                                    "state": "PENDING"}}}]}) for p in prs]},
+        "merged": {"nodes": []},
+        **({"extra": {"text": "from a plugin"}} if "extra:" in QUERY else {}),
+    }
+
+
+if argv[:2] in (["auth", "status"], ["auth", "token"]):
+    sys.exit(0)
+
+QUERY = ""
+if argv[:2] == ["api", "graphql"]:
+    QUERY = json.loads(stdin)["query"]
+    data = {}
+    for alias, owner, name in re.findall(r'(r\d+): repository\(owner: "([^"]+)", name: "([^"]+)"\)', QUERY):
+        repo = f"{owner}/{name}"
+        if repo not in REPOS:
+            out({"data": {alias: None}, "errors": [{"message": f"Could not resolve to a Repository with the name '{repo}'."}]})
+        data[alias] = node(repo)
+    out({"data": data})
+
+
+def contents(repo, path):
+    files = REPOS[repo][2]
+    if path in files:
+        out({"content": base64.b64encode(files[path].encode()).decode(), "sha": blob(files[path])})
+    entries = sorted({p[len(path) + 1:].split("/")[0] for p in files if p.startswith(path + "/")})
+    if entries:
+        out([{"name": e, "path": f"{path}/{e}", "type": "file"} for e in entries])
+    fail("gh: Not Found (HTTP 404)")
+
+
+if argv[0] == "api":
+    method = argv[argv.index("-X") + 1] if "-X" in argv else "GET"
+    path = next(a for a in argv[1:] if a.startswith("/"))
+    route, _, query = path.partition("?")
+    params = dict(q.split("=", 1) for q in query.split("&") if "=" in q)
+    if method != "GET":
+        out({"id": 99, "number": 99, "html_url": f"{WEB}/x/pull/99"})
+    if route == "/user":
+        out({"login": "mike", "id": 1})
+    if route == "/orgs/acme/repos":
+        page = int(params.get("page", 1))
+        out([info(f"acme/{n}") for n in ACME] if page == 1 else [])
+    if route == "/orgs/mike/repos":
+        fail("gh: Not Found (HTTP 404)")
+    if route == "/user/repos":
+        out([info("mike/dotfiles")] if params.get("page", "1") == "1" else [])
+    m = re.match(r"/repos/([\w.-]+/[\w.-]+)(/.*)?$", route)
+    if not m or m.group(1) not in REPOS:
+        fail("gh: Not Found (HTTP 404)")
+    repo, rest = m.group(1), m.group(2) or ""
+    settings, rsets, files, immutable = REPOS[repo]
+    if rest == "":
+        out(info(repo))
+    if rest == "/immutable-releases":
+        out({"enabled": True}) if immutable else fail("gh: Not Found (HTTP 404)")
+    if rest == "/private-vulnerability-reporting":
+        out({"enabled": repo != "acme/web"})
+    if rest == "/rulesets":
+        out([{"id": i + 1, "name": n} for i, n in enumerate(rsets)])
+    m = re.match(r"/rulesets/(\d+)$", rest)
+    if m:
+        out(rsets[RS_IDS[(repo, int(m.group(1)))]])
+    if rest.startswith("/contents/"):
+        contents(repo, rest[len("/contents/"):])
+    if rest.startswith("/git/trees/"):
+        out({"tree": [{"path": p, "type": "blob", "sha": blob(t)} for p, t in files.items()]})
+    if rest.startswith("/git/ref/heads/"):
+        out({"object": {"sha": "headsha1234567"}})
+    if rest == "/pulls":
+        out([])
+    if rest == "/actions/runs":
+        if params.get("status") == "waiting" and repo == "acme/api":
+            out({"workflow_runs": [{"id": 5, "name": "Deploy", "head_branch": "main",
+                                    "created_at": "2026-11-05T09:00:00Z", "html_url": f"{WEB}/{repo}/actions/runs/5"}]})
+        if params.get("status") == "action_required" and repo == "acme/web":
+            out({"workflow_runs": [{"id": 6, "name": "CI", "head_branch": "fork-pr",
+                                    "created_at": "2026-11-05T09:00:00Z", "html_url": f"{WEB}/{repo}/actions/runs/6"}]})
+        if params.get("status"):
+            out({"workflow_runs": []})
+        out({"workflow_runs": [{"id": 9, "name": "CI", "event": "push", "head_branch": "main", "status": "completed",
+                                "conclusion": "success", "created_at": "2026-11-05T09:00:00Z",
+                                "html_url": f"{WEB}/{repo}/actions/runs/9"}]})
+    if rest == "/actions/runs/5/pending_deployments":
+        out([{"environment": {"id": 77, "name": "production"}, "current_user_can_approve": True}])
+    if rest == "/dependabot/alerts":
+        if repo == "acme/api":
+            out([{"html_url": f"{WEB}/{repo}/security/dependabot/1",
+                  "security_advisory": {"severity": "high", "summary": "ReDoS"},
+                  "dependency": {"package": {"name": "picomatch"}, "manifest_path": "package-lock.json"}}])
+        if repo == "mike/dotfiles":
+            fail("gh: Forbidden (HTTP 403)")
+        out([])
+    if rest == "/secret-scanning/alerts":
+        out([])
+    if rest == "/code-scanning/alerts":
+        fail("gh: no analysis found (HTTP 404)")
+    fail(f"fake gh: no answer for GET {path}")
+
+
+if argv[:2] == ["pr", "list"]:
+    repo = argv[argv.index("--repo") + 1]
+    out([p for p in PRS.get(repo, []) if p["state"] == "OPEN"])
+if argv[:2] == ["pr", "view"]:
+    repo = argv[argv.index("--repo") + 1]
+    num = int(argv[2])
+    p = next((p for p in PRS.get(repo, []) if p["number"] == num), None)
+    if not p:
+        fail("no pull requests found")
+    if "mergeStateStatus" in argv[argv.index("--json") + 1]:
+        p = dict(p, author={"login": "ann"}, baseRefName="main", headRefName="feat", createdAt="2026-11-05T08:00:00Z",
+                 updatedAt="2026-11-05T09:00:00Z", mergeStateStatus="BLOCKED", reviewDecision="REVIEW_REQUIRED",
+                 additions=10, deletions=2, changedFiles=1, files=[{"path": "app.py", "additions": 10, "deletions": 2}],
+                 commits=[{"oid": "abcdef123", "messageHeadline": "Add login"}],
+                 statusCheckRollup=[{"name": "test", "workflowName": "CI", "conclusion": "FAILURE",
+                                     "detailsUrl": f"{WEB}/{repo}/actions/runs/1/job/2"}],
+                 reviews=[], labels=[], body="Adds a login page.")
+    out(p)
+if argv[:2] == ["pr", "diff"]:
+    print("+print('hi')")
+    sys.exit(0)
+if argv[:2] in (["pr", "merge"], ["pr", "ready"]):
+    sys.exit(0)
+if argv[:2] == ["pr", "create"]:
+    print(f"{WEB}/{argv[argv.index('--repo') + 1]}/pull/99")
+    sys.exit(0)
+fail(f"fake gh: unknown call {argv}")

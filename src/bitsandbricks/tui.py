@@ -1,0 +1,865 @@
+"""bnb tui: one full-screen view of your repos across orgs.
+
+Start it with `bnb tui` (needs Textual: the [tui] extra or `pipx inject bitsandbricks-cli textual`).
+
+  Repos          group, latest release, PRs, CI per repo
+  Pull requests  every open PR; the right side shows the selected one in depth
+  Runs           runs waiting for your approval, then the newest run per repo
+  Security       open Dependabot, secret scanning and code scanning alerts
+  Checks         the repos against the defaults (doctor), plus plugin checks
+  ...            tabs from plugins
+
+Keys: ← → or 1-9 switch tabs · ↑ ↓ move · Enter or o open · r refresh · m auto-merge
+· M merge now · A auto-merge all ready PRs · v filter PRs · y mark ready · d diff
+· a approve a waiting run · f fix drift and s sync files (Checks tab) · t theme
+· ctrl+p every command · q quit. Every change asks first; --dry-run only shows it.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import re
+import time
+import webbrowser
+from concurrent.futures import ThreadPoolExecutor
+from typing import ClassVar
+
+from rich.style import Style
+from rich.text import Text
+from textual import work
+from textual.app import App, ComposeResult, SystemCommand
+from textual.binding import Binding
+from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.css.query import NoMatches
+from textual.screen import ModalScreen
+from textual.theme import Theme
+from textual.widgets import (
+    Button,
+    DataTable,
+    Footer,
+    Header,
+    Input,
+    Label,
+    OptionList,
+    RichLog,
+    Static,
+    TabbedContent,
+    TabPane,
+)
+from textual.widgets.data_table import CellDoesNotExist, RowDoesNotExist
+
+from bitsandbricks import core, plugins
+from bitsandbricks import defaults as D
+from bitsandbricks import repos as R
+from bitsandbricks.config import Config
+
+BASE_TABS = [("repos", "Repos"), ("prs", "Pull requests"), ("runs", "Runs"), ("security", "Security"),
+             ("checks", "Checks")]
+
+# bitsandbricks: brick red and a warm sand on graphite.
+BRICK, SAND, SKY = "#e2674a", "#f2c46d", "#6cb6d9"
+SUCCESS, WARNING, DANGER = "#3fa76a", "#e0a43a", "#d9534f"
+THEMES = [
+    Theme(name="bnb", dark=True, primary=SKY, secondary=BRICK, accent=SAND,
+          foreground="#e9e7e4", background="#121314", surface="#1a1c1e", panel="#24272a",
+          success=SUCCESS, warning=WARNING, error=DANGER,
+          variables={"footer-key-foreground": SAND, "block-cursor-background": "#2f5d75",
+                     "block-cursor-foreground": "#ffffff", "link-color": SKY, "border": "#2e3134"}),
+    Theme(name="bnb-light", dark=False, primary="#1f6f94", secondary=BRICK, accent="#b24a2f",
+          foreground="#1d1f21", background="#f7f6f3", surface="#ffffff", panel="#ece9e3",
+          success="#2a7d4f", warning=WARNING, error=DANGER,
+          variables={"footer-key-foreground": "#b24a2f", "block-cursor-background": "#1f6f94",
+                     "block-cursor-foreground": "#ffffff", "link-color": "#1f6f94", "border": "#e2ded6"}),
+]
+
+STATE_STYLE = {
+    "success": SUCCESS, "passing": SUCCESS, "ok": SUCCESS, "ready": SUCCESS,
+    "failure": DANGER, "failing": DANGER, "error": DANGER, "conflicts": DANGER,
+    "pending": WARNING, "running": WARNING, "waiting": WARNING, "in_progress": WARNING, "auto-merge": SKY,
+}
+URL = re.compile(r"https?://[^\s)\]>,'\"]+")
+
+
+def styled(value: str) -> Text:
+    for word, style in STATE_STYLE.items():
+        if value.lower().startswith(word):
+            return Text(value, style=style)
+    return Text(value)
+
+
+def link_label(url: str) -> str:
+    for prefix in (f"{core.WEB}/", "https://"):
+        if url.startswith(prefix):
+            return url[len(prefix):]
+    return url
+
+
+def linkify(text: str, color: str = SKY) -> Text:
+    """Text with every URL as a short, clickable label: one unbroken word, so it never wraps apart."""
+    out = Text()
+    pos = 0
+    for m in URL.finditer(text):
+        out.append(text[pos:m.start()])
+        url = m.group(0).rstrip(".")
+        out.append(link_label(url), style=Style(color=color, underline=True,
+                                                meta={"@click": f"app.open_link({url!r})"}))
+        pos = m.start() + len(url)
+    out.append(text[pos:])
+    return out
+
+
+class Confirm(ModalScreen[bool]):
+    DEFAULT_CSS = """
+    Confirm { align: center middle; }
+    Confirm > Vertical { width: 80; height: auto; border: thick $accent; background: $surface; padding: 1 2; }
+    Confirm Horizontal { height: auto; margin-top: 1; }
+    Confirm Button { margin-right: 2; }
+    """
+    BINDINGS: ClassVar = [Binding("y", "answer(True)", "Yes"), Binding("n,escape", "answer(False)", "No")]
+
+    def __init__(self, question: str) -> None:
+        super().__init__()
+        self.question = question
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label(Text(self.question))
+            with Horizontal():
+                yield Button("Yes (y)", variant="warning", id="yes")
+                yield Button("No (n)", id="no")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id == "yes")
+
+    def action_answer(self, value: bool) -> None:
+        self.dismiss(value)
+
+
+class Ask(ModalScreen[str]):
+    """One line of input; Enter answers, Esc cancels."""
+
+    DEFAULT_CSS = """
+    Ask { align: center middle; }
+    Ask > Vertical { width: 80; height: auto; border: thick $accent; background: $surface; padding: 1 2; }
+    Ask Input { margin-top: 1; }
+    """
+    BINDINGS: ClassVar = [Binding("escape", "cancel", "Cancel")]
+
+    def __init__(self, question: str, password: bool = False, value: str = "") -> None:
+        super().__init__()
+        self.question, self.password, self.value = question, password, value
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label(Text(self.question))
+            yield Input(value=self.value, password=self.password)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self.dismiss(event.value.strip())
+
+    def action_cancel(self) -> None:
+        self.dismiss("")
+
+
+class Pick(ModalScreen[str]):
+    """Choose one of a few options; Enter picks, Esc cancels."""
+
+    DEFAULT_CSS = """
+    Pick { align: center middle; }
+    Pick > Vertical { width: 80; height: auto; border: thick $accent; background: $surface; padding: 1 2; }
+    Pick OptionList { height: auto; max-height: 12; margin-top: 1; }
+    """
+    BINDINGS: ClassVar = [Binding("escape", "cancel", "Cancel")]
+
+    def __init__(self, question: str, options: list[tuple[str, str]]) -> None:
+        super().__init__()
+        self.question, self.options = question, options
+
+    def compose(self) -> ComposeResult:
+        from textual.widgets.option_list import Option
+        with Vertical():
+            yield Label(Text(self.question))
+            yield OptionList(*[Option(label, id=key) for key, label in self.options])
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        self.dismiss(event.option.id or "")
+
+    def action_cancel(self) -> None:
+        self.dismiss("")
+
+
+PR_FILTERS = [("all", "all open"), ("auto", "auto-merge"), ("merged", "recently merged"), ("drafts", "drafts")]
+
+
+class BnbTui(App):
+    TITLE = "bitsandbricks"
+    CSS = """
+    Screen { background: $background; }
+    Header { background: $panel; color: $foreground; }
+    #tabs { height: 1fr; }
+    #tabs ContentSwitcher { height: 1fr; }
+    Tabs .underline--bar { color: $accent; background: $panel; }
+    Tab.-active { color: $accent; text-style: bold; }
+    TabPane { height: 1fr; padding: 0; }
+    .split { height: 1fr; }
+    .split DataTable { width: 3fr; height: 1fr; background: $surface; }
+    .split DataTable:focus { border-left: tall $accent; }
+    .split DataTable.narrow { width: 24; }
+    DataTable > .datatable--header { background: $panel; color: $primary; text-style: bold; }
+    .detail { width: 2fr; height: 1fr; border-left: solid $primary; padding: 0 1;
+              overflow-x: auto; overflow-y: auto; background: $background; }
+    .detail Static { width: auto; }
+    #log { height: 8; border-top: solid $primary; background: $surface; padding: 0 1; scrollbar-size-horizontal: 1; }
+    * { scrollbar-background: $surface; scrollbar-background-hover: $surface;
+        scrollbar-color: $primary 40%; scrollbar-color-hover: $primary 70%; scrollbar-color-active: $primary; }
+    """
+    BINDINGS: ClassVar = [
+        Binding("left", "next_tab(-1)", "Prev tab", show=False, priority=True),
+        Binding("right", "next_tab(1)", "Next tab", show=False, priority=True),
+        *(Binding(str(i), f"tab_number({i})", show=False) for i in range(1, 10)),
+        Binding("r", "refresh", "Refresh"),
+        Binding("o", "open", "Open"),
+        Binding("t", "toggle_theme", "Theme", show=False),
+        Binding("m", "merge(False)", "Auto-merge"),
+        Binding("M", "merge(True)", "Merge now"),
+        Binding("A", "merge_all", "Auto-merge all"),
+        Binding("v", "pr_filter", "PR filter"),
+        Binding("y", "ready", "Ready"),
+        Binding("d", "diff", "Diff"),
+        Binding("a", "approve", "Approve"),
+        Binding("f", "fix", "Fix drift", show=False),
+        Binding("s", "sync", "Sync files", show=False),
+        Binding("q", "quit", "Quit"),
+    ]
+
+    def __init__(self, cfg: Config, dry_run: bool = False, group: str | None = None) -> None:
+        super().__init__()
+        self.cfg, self.dry_run, self.group = cfg, dry_run, group
+        self.base_title = "dry run: nothing changes" if dry_run else (", ".join(cfg.orgs) or "no orgs")
+        self.sub_title = self.base_title
+        self.repos: list[str] = []
+        self.prs: dict[str, dict] = {}       # "owner/repo#12" -> PR node
+        self.runs: dict[str, tuple] = {}     # key -> (repo, run, envs)
+        self.detail_cache: dict[str, str] = {}
+        self.info: dict[str, dict] = {}
+        self.last_summary = ""
+        self.last_waiting = 0
+        self.pr_filter = "all"
+        self.alerts: dict[str, tuple[list[dict], list[str]]] = {}
+        self.last_alerts = 0
+        self.plugin_tabs = {t["id"]: t for t in plugins.hook("tui_tabs")}
+        self.tabs = BASE_TABS + [(t["id"], t["title"]) for t in self.plugin_tabs.values()]
+        self.checks = [("doctor", "Defaults (doctor)", None)] + plugins.hook("tui_checks")
+        self.plugin_keys = plugins.hook("tui_keys")
+        self.themes = THEMES + plugins.hook("tui_themes")
+
+    # ── helpers for plugins ───────────────────────────────────────────────
+
+    def label(self, repo: str) -> str:
+        """owner/name, or just name when there is one org."""
+        return core.short(repo) if len(self.cfg.orgs) <= 1 and repo.split("/")[0] in self.cfg.orgs else repo
+
+    def selected_repo(self) -> str | None:
+        """The repo of the selected row in Repos, Pull requests, Runs or Security."""
+        tab, key = self.tab(), self.current_key()
+        if not key:
+            return None
+        if tab == "prs":
+            return self.prs[key]["repo"]
+        if tab == "runs":
+            return self.runs[key][0]
+        return key if tab in ("repos", "security") else None
+
+    def ask(self, question: str, then, password: bool = False) -> None:
+        self.push_screen(Ask(question, password), then)
+
+    def pick(self, question: str, options: list[tuple[str, str]], then) -> None:
+        self.push_screen(Pick(question, options), then)
+
+    # ── layout ────────────────────────────────────────────────────────────
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        with TabbedContent(id="tabs"):
+            for tab_id, title in self.tabs:
+                narrow = tab_id == "checks" or tab_id in self.plugin_tabs
+                with TabPane(title, id=tab_id), Horizontal(classes="split"):
+                    yield DataTable(id=f"{tab_id}-table", cursor_type="row", zebra_stripes=True,
+                                    classes="narrow" if narrow else "")
+                    with VerticalScroll(classes="detail", can_focus=False):
+                        yield Static(id=f"{tab_id}-detail", markup=False)
+        yield RichLog(id="log", wrap=False, markup=False, min_width=40)
+        yield Footer()
+
+    def on_mount(self) -> None:
+        for theme in self.themes:
+            self.register_theme(theme)
+        self.theme = self.themes[0].name
+        self.query_one("#log", RichLog).can_focus = False
+        heads = {"repos": R.status_head(), "prs": ["repo", "#", "title", "state", "checks"],
+                 "runs": ["repo", "state", "workflow", "ref", "when"], "security": ["repo", "alerts", "worst", "kinds"],
+                 "checks": ["check"], **{t: ["view"] for t in self.plugin_tabs}}
+        for tab_id, head in heads.items():
+            self.query_one(f"#{tab_id}-table", DataTable).add_columns(*head)
+        checks = self.query_one("#checks-table", DataTable)
+        for key, label, _ in self.checks:
+            checks.add_row(label, key=key)
+        for tab_id, t in self.plugin_tabs.items():
+            table = self.query_one(f"#{tab_id}-table", DataTable)
+            for key, label in t.get("rows") or []:
+                table.add_row(label, key=key)
+        for i, (key, description, _) in enumerate(self.plugin_keys):
+            self.bind(key, f"plugin_key({i})", description=description)
+        for err in plugins.errors:
+            self.log_line(f"plugin broken: {err}")
+        self.log_line(f"Loading … ← → or 1-{min(len(self.tabs), 9)} switch tabs, ↑ ↓ move, Enter opens, "
+                      "r refreshes, ctrl+p all commands, q quits")
+        self.focus_table()
+        self.load_github()
+        self.set_interval(120, self.action_refresh)
+
+    def log_line(self, text: str) -> None:
+        line = Text(time.strftime("%H:%M:%S "), style="dim")
+        line.append_text(linkify(text.strip()))
+        with contextlib.suppress(NoMatches):  # the app is closing
+            self.query_one("#log", RichLog).write(line)
+
+    def focus_table(self, tab_id: str | None = None) -> None:
+        with contextlib.suppress(Exception):
+            self.query_one(f"#{tab_id or self.tab()}-table", DataTable).focus()
+
+    def action_tab(self, tab_id: str) -> None:
+        self.query_one("#tabs", TabbedContent).active = tab_id
+        self.focus_table(tab_id)
+
+    def action_tab_number(self, n: int) -> None:
+        if n <= len(self.tabs):
+            self.action_tab(self.tabs[n - 1][0])
+
+    def highlight(self) -> str:
+        return "#b24a2f" if self.theme == "bnb-light" else SAND
+
+    def action_next_tab(self, step: int) -> None:
+        if not isinstance(self.screen, ModalScreen):
+            order = [t for t, _ in self.tabs]
+            self.action_tab(order[(order.index(self.tab()) + step) % len(order)])
+        else:  # in a dialog the arrows move between the buttons
+            self.screen.focus_next() if step > 0 else self.screen.focus_previous()
+
+    def action_toggle_theme(self) -> None:
+        names = [t.name for t in self.themes]
+        self.theme = names[(names.index(self.theme) + 1) % len(names)] if self.theme in names else names[0]
+        self.action_refresh()
+
+    def action_open_link(self, url: str) -> None:
+        mode = core.open_mode()
+        if mode == "browser":
+            self.log_line(f"open {url}")
+            webbrowser.open(url)
+            return
+        line = Text(time.strftime("%H:%M:%S "), style="dim")
+        if mode == "copy":
+            self.copy_to_clipboard(url)  # OSC 52: your own terminal's clipboard, also over SSH
+            line.append("copied ")
+        line.append(url, style=Style(underline=True, link=url))
+        with contextlib.suppress(NoMatches):
+            self.query_one("#log", RichLog).write(line)
+
+    def action_plugin_key(self, i: int) -> None:
+        try:
+            self.plugin_keys[i][2](self)
+        except Exception as err:
+            self.log_line(f"plugin key failed: {err}")
+
+    def tab(self) -> str:
+        try:
+            return self.query_one("#tabs", TabbedContent).active
+        except NoMatches:  # the app is closing
+            return ""
+
+    def current_key(self, tab_id: str | None = None) -> str | None:
+        tab_id = tab_id or self.tab()
+        if not tab_id:
+            return None
+        try:
+            table = self.query_one(f"#{tab_id}-table", DataTable)
+        except NoMatches:
+            return None
+        if table.row_count == 0:
+            return None
+        try:
+            return table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value
+        except (KeyError, IndexError, ValueError, CellDoesNotExist):
+            return None
+
+    def show(self, tab_id: str, text: str) -> None:
+        with contextlib.suppress(NoMatches):
+            self.query_one(f"#{tab_id}-detail", Static).update(linkify(text))
+
+    # ── loading ───────────────────────────────────────────────────────────
+
+    @work(thread=True, exclusive=True, group="github")
+    def load_github(self) -> None:
+        R._listing.clear()
+        try:
+            self.repos = R.pick_repos(self.cfg, [], self.group)[0]
+            rows = R.status_rows(self.cfg, self.repos)
+            info = R.nodes(self.repos)
+        except RuntimeError as err:
+            self.call_from_thread(self.log_line, f"GitHub: {err}")
+            return
+        prs = {}
+        for repo in self.repos:
+            for p in ((info.get(repo) or {}).get("pullRequests") or {}).get("nodes") or []:
+                prs[f"{repo}#{p['number']}"] = dict(p, repo=repo)
+        self.call_from_thread(self.fill_github, rows, prs, info)
+        self.load_runs()
+        self.load_security()
+
+    def fill_github(self, rows: list[list[str]], prs: dict[str, dict], info: dict) -> None:
+        with contextlib.suppress(NoMatches):
+            self._fill_github(rows, prs, info)
+
+    def _fill_github(self, rows: list[list[str]], prs: dict[str, dict], info: dict) -> None:
+        self.prs, self.info, self.detail_cache = prs, info, {}
+        table = self.query_one("#repos-table", DataTable)
+        keep = self.current_key("repos")
+        table.clear()
+        for repo, row in zip(self.repos, rows):
+            cells = [Text(c) for c in row]
+            cells[0] = Text(self.label(repo))
+            cells[4] = styled(row[4])
+            table.add_row(*cells, key=repo)
+        self.restore(table, keep)
+        for repo in self.repos:
+            for p in ((info.get(repo) or {}).get("merged") or {}).get("nodes") or []:
+                self.prs[f"{repo}#{p['number']}"] = dict(p, repo=repo, merged=True, isDraft=False)
+        self.fill_prs()
+        summary = f"{len(self.repos)} repos, {len(prs)} open PRs"
+        auto = sum(1 for p in prs.values() if p.get("autoMergeRequest"))
+        if auto:
+            summary += f", {auto} auto-merging (v filters the PR list)"
+        if summary != self.last_summary:
+            self.last_summary = summary
+            self.log_line(summary)
+        self.update_detail()
+
+    def fill_prs(self) -> None:
+        table = self.query_one("#prs-table", DataTable)
+        keep = self.current_key("prs")
+        table.clear()
+        rows = []
+        for key, p in self.prs.items():
+            if p.get("merged"):
+                state, checks, sort = Text(f"merged {core.ago(p.get('mergedAt'))}", style=SUCCESS), Text(""), 3
+            else:
+                commit = (p["commits"]["nodes"] or [{}])[0].get("commit") or {}
+                word = R.checks_word(commit.get("statusCheckRollup"))
+                checks, sort = styled(word), 1
+                if p.get("mergeable") == "CONFLICTING":
+                    state = styled("conflicts")
+                elif p.get("autoMergeRequest"):
+                    state = Text(f"auto-merge · {'blocked' if word == 'failing' else 'waits for checks'}",
+                                 style=DANGER if word == "failing" else SKY)
+                    sort = 0
+                else:
+                    state = styled("draft" if p["isDraft"] else "ready")
+                    sort = 2 if p["isDraft"] else 1
+            keep_row = {"all": not p.get("merged"), "auto": bool(p.get("autoMergeRequest")) or p.get("merged"),
+                        "merged": p.get("merged"), "drafts": p.get("isDraft")}[self.pr_filter]
+            if keep_row:
+                rows.append((sort, key, [self.label(p["repo"]), str(p["number"]), Text(p["title"][:60]),
+                                         state, checks]))
+        for _, key, cells in sorted(rows, key=lambda r: r[0]):
+            table.add_row(*cells, key=key)
+        self.restore(table, keep)
+        label = dict(PR_FILTERS)[self.pr_filter]
+        auto = sum(1 for p in self.prs.values() if p.get("autoMergeRequest"))
+        with contextlib.suppress(NoMatches):
+            self.query_one("#tabs", TabbedContent).get_tab("prs").label = (
+                "Pull requests" + (f" ({label})" if self.pr_filter != "all" else "")
+                + (f" · {auto} auto-merging" if auto else ""))
+
+    @work(thread=True, exclusive=True, group="security")
+    def load_security(self) -> None:
+        try:
+            with ThreadPoolExecutor(core.WORKERS) as pool:
+                found = dict(zip(self.repos, pool.map(R.repo_alerts, self.repos)))
+        except RuntimeError as err:
+            self.call_from_thread(self.log_line, f"Security: {err}")
+            return
+        self.call_from_thread(self.fill_security, found)
+
+    def fill_security(self, found: dict) -> None:
+        with contextlib.suppress(NoMatches):
+            self.alerts = found
+            table = self.query_one("#security-table", DataTable)
+            keep = self.current_key("security")
+            table.clear()
+            rank = R.SEVERITY_ORDER
+            rows = sorted(found.items(), key=lambda kv: (rank.get(kv[1][0][0]["severity"], 5) if kv[1][0] else 9,
+                                                          -len(kv[1][0]), kv[0]))
+            for repo, (alerts, unread) in rows:
+                worst = alerts[0]["severity"] if alerts else ("?" if unread else "-")
+                style = DANGER if worst in ("critical", "high", "secret") else WARNING if alerts else ""
+                kinds = ", ".join(sorted({a["kind"] for a in alerts})) or ("can't read all" if unread else "")
+                table.add_row(self.label(repo), Text(str(len(alerts)), style=style), Text(worst, style=style),
+                              kinds, key=repo)
+            self.restore(table, keep)
+            total = sum(len(a) for a, _ in found.values())
+            self.query_one("#tabs", TabbedContent).get_tab("security").label = (
+                f"Security ({total})" if total else "Security")
+            if total and total != self.last_alerts:
+                self.log_line(f"{total} open security alert(s): Security tab (4)")
+            self.last_alerts = total
+            self.update_detail()
+
+    def security_text(self, repo: str) -> str:
+        alerts, unread = self.alerts.get(repo, ([], []))
+        lines = [repo, f"{core.WEB}/{repo}/security", ""]
+        for a in alerts:
+            lines.append(f"{a['severity']:<9} {a['kind']:<16} {a['title']}")
+            if a["where"]:
+                lines.append(f"{'':<26} {a['where']}")
+            lines.append(f"{'':<26} {a['url']}")
+        if not alerts:
+            lines.append("No open alerts.")
+        if unread:
+            lines += ["", "Couldn't read:"] + [f"  {u}" for u in unread]
+        return "\n".join(lines)
+
+    def action_pr_filter(self) -> None:
+        order = [k for k, _ in PR_FILTERS]
+        self.pr_filter = order[(order.index(self.pr_filter) + 1) % len(order)]
+        self.action_tab("prs")
+        self.fill_prs()
+        self.log_line(f"Pull requests: {dict(PR_FILTERS)[self.pr_filter]} (v switches)")
+
+    @work(thread=True, exclusive=True, group="runs")
+    def load_runs(self) -> None:
+        def latest(repo):
+            try:
+                found = (core.api("GET", f"/repos/{repo}/actions/runs?per_page=1") or {}).get("workflow_runs") or []
+            except RuntimeError:
+                found = []
+            return repo, found[0] if found else None
+
+        waiting = R.all_waiting(self.repos)
+        with ThreadPoolExecutor(core.WORKERS) as pool:
+            last = list(pool.map(latest, self.repos))
+        self.call_from_thread(self.fill_runs, waiting, last)
+
+    def fill_runs(self, waiting, last) -> None:
+        with contextlib.suppress(NoMatches):
+            self._fill_runs(waiting, last)
+
+    def _fill_runs(self, waiting, last) -> None:
+        table = self.query_one("#runs-table", DataTable)
+        keep = self.current_key("runs")
+        table.clear()
+        self.runs = {}
+        seen = set()
+        for repo, run, envs in waiting:
+            key = f"{repo}|{run['id']}"
+            seen.add(run["id"])
+            self.runs[key] = (repo, run, envs)
+            table.add_row(self.label(repo), Text("waiting for you", style=f"bold {self.highlight()}"),
+                          run.get("name") or "", run.get("head_branch") or "", core.ago(run.get("created_at")), key=key)
+        for repo, run in last:
+            if not run or run["id"] in seen:
+                continue
+            key = f"{repo}|{run['id']}"
+            self.runs[key] = (repo, run, [])
+            state = "waiting" if run.get("status") == "waiting" else (run.get("conclusion") or run.get("status") or "?")
+            table.add_row(self.label(repo), styled(state), run.get("name") or "",
+                          run.get("head_branch") or "", core.ago(run.get("created_at")), key=key)
+        self.restore(table, keep)
+        if len(waiting) != self.last_waiting and waiting:
+            self.log_line(f"{len(waiting)} run(s) wait for your approval: Runs tab (3), key a")
+        self.last_waiting = len(waiting)
+        self.sub_title = f"{self.base_title} · {len(waiting)} to approve (3, a)" if waiting else self.base_title
+        with contextlib.suppress(NoMatches):
+            self.query_one("#tabs", TabbedContent).get_tab("runs").label = (
+                f"Runs ({len(waiting)} to approve)" if waiting else "Runs")
+        self.update_detail()
+
+    @staticmethod
+    def restore(table: DataTable, key: str | None) -> None:
+        if key is None:
+            return
+        with contextlib.suppress(RowDoesNotExist):
+            table.move_cursor(row=table.get_row_index(key))
+
+    # ── detail pane ───────────────────────────────────────────────────────
+
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        self.update_detail()
+
+    def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        self.focus_table()
+        self.update_detail()
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        self.action_open()
+
+    def update_detail(self) -> None:
+        tab, key = self.tab(), self.current_key()
+        if not key:
+            return
+        if tab == "repos":
+            self.show("repos", self.repo_text(key))
+        elif tab == "prs":
+            if key in self.detail_cache:
+                self.show("prs", self.detail_cache[key])
+            else:
+                self.show("prs", "Loading …")
+                self.load_pr(key)
+        elif tab == "security":
+            self.show("security", self.security_text(key))
+        elif tab == "runs":
+            repo, run, envs = self.runs[key]
+            lines = [f"{repo}  {run.get('name')}", run["html_url"], "",
+                     f"event    {run.get('event')}", f"ref      {run.get('head_branch')}",
+                     f"state    {run.get('conclusion') or run.get('status')}",
+                     f"started  {core.ago(run.get('created_at'))}"]
+            if envs:
+                lines += ["", f"Waits for: {', '.join(e['name'] for e in envs)}", "a approves it"]
+            self.show("runs", "\n".join(lines))
+        else:
+            cache_key = f"{tab}:{key}"
+            if cache_key in self.detail_cache:
+                self.show(tab, self.detail_cache[cache_key])
+            else:
+                self.show(tab, "Checking …" if tab == "checks" else "Loading …")
+                self.load_view(tab, key)
+
+    def repo_text(self, repo: str) -> str:
+        node = self.info.get(repo) or {}
+        g = R.group_of(self.cfg, repo)
+        tags = [r["tagName"] for r in (node.get("releases") or {}).get("nodes") or []]
+        last = core.newest(tags)
+        lines = [repo, f"{core.WEB}/{repo}", "", f"group        {g.name if g else '-'}"]
+        lines.append(f"released     {last or '-'}" + (f"  {core.WEB}/{repo}/releases/tag/{last}" if last else ""))
+        lines += plugins.hook("repo_detail", repo, node)
+        lines += ["", "Open PRs:"]
+        for p in sorted(((node.get("pullRequests") or {}).get("nodes") or []), key=lambda p: p["number"]):
+            lines.append(f"  #{p['number']} {p['title']}{' (draft)' if p['isDraft'] else ''}")
+            lines.append(f"     {p['url']}")
+        if lines[-1] == "Open PRs:":
+            lines.append("  none")
+        lines += ["", f"Actions  {core.WEB}/{repo}/actions"]
+        return "\n".join(lines)
+
+    @work(thread=True, group="detail")
+    def load_pr(self, key: str, diff: bool = False) -> None:
+        repo, number = key.rsplit("#", 1)
+        text = core.capture(R.pr_detail, repo, int(number), diff, False)
+        if not diff:
+            self.detail_cache[key] = text
+        self.call_from_thread(self.show_if_current, "prs", key, text)
+
+    @work(thread=True, group="detail")
+    def load_view(self, tab: str, key: str) -> None:
+        if tab in self.plugin_tabs:
+            try:
+                text = self.plugin_tabs[tab]["text"](key)
+            except Exception as err:
+                text = f"error: {err}"
+        elif key == "doctor":
+            text = core.capture(D.doctor_all, self.cfg, self.repos)
+            text += "\nf applies the fixes (doctor --fix) · s opens PRs with the shared files (sync)\n"
+        else:
+            run = next(fn for k, _, fn in self.checks if k == key)
+            try:
+                text = run(self.repos)
+            except Exception as err:
+                text = f"error: {err}"
+        self.detail_cache[f"{tab}:{key}"] = text
+        self.call_from_thread(self.show_if_current, tab, key, text)
+
+    def show_if_current(self, tab: str, key: str, text: str) -> None:
+        if self.tab() == tab and self.current_key(tab) == key:
+            self.show(tab, text)
+
+    # ── actions ───────────────────────────────────────────────────────────
+
+    def action_refresh(self) -> None:
+        self.detail_cache.clear()
+        R._nodes.clear()
+        self.load_github()
+        if self.tab() not in ("repos", "prs", "runs", "security"):
+            self.update_detail()
+
+    def action_open(self) -> None:
+        tab, key = self.tab(), self.current_key()
+        if not key:
+            return
+        url = None
+        if tab == "repos":
+            url = f"{core.WEB}/{key}"
+        elif tab == "prs":
+            url = self.prs[key]["url"]
+        elif tab == "runs":
+            url = self.runs[key][1]["html_url"]
+        elif tab == "security":
+            alerts = self.alerts.get(key, ([], []))[0]
+            url = alerts[0]["url"] if len(alerts) == 1 else f"{core.WEB}/{key}/security"
+        elif tab == "checks":
+            src = self.cfg.source
+            url = f"{core.WEB}/{src.where}" if src and not src.local else None
+        elif tab in self.plugin_tabs and self.plugin_tabs[tab].get("url"):
+            url = self.plugin_tabs[tab]["url"](key)
+        if url:
+            self.action_open_link(url)
+
+    def action_fix(self) -> None:
+        if self.tab() != "checks" or self.current_key() != "doctor":
+            self.log_line("f fixes drift from the Checks tab › Defaults")
+            return
+        self.confirm_then("Apply the defaults' settings, security and rulesets (and each repo's own rulesets\n"
+                          "files) to every repo that drifted? (bnb doctor --fix)",
+                          D.doctor_all, self.cfg, list(self.repos), True)
+
+    def action_sync(self) -> None:
+        if self.tab() != "checks" or self.current_key() != "doctor":
+            self.log_line("s syncs files from the Checks tab › Defaults")
+            return
+
+        def sync_all(repos) -> None:
+            core.for_each(repos, D.sync, D.sync_ctx(self.cfg, repos))
+        self.confirm_then("Open a PR in each repo whose shared files differ from its group's? (bnb sync)",
+                          sync_all, list(self.repos))
+
+    def get_system_commands(self, screen):
+        yield from super().get_system_commands(screen)
+        commands = [
+            ("Auto-merge all ready PRs", "A · every ready PR merges once its checks pass", self.action_merge_all),
+            ("Filter pull requests", "v · all, auto-merge, recently merged, drafts", self.action_pr_filter),
+            ("Approve waiting run", "a · an environment you review or an outside contributor's run",
+             self.action_approve),
+            ("Check defaults", "Checks › Defaults (doctor)", lambda: self.show_check("doctor")),
+            ("Fix drift", "f · bnb doctor --fix (Checks tab)", self.action_fix),
+            ("Sync shared files", "s · PRs with each group's files", self.action_sync),
+            ("Security alerts", "4 · Dependabot, secret and code scanning", lambda: self.action_tab("security")),
+            ("Switch theme", "t", self.action_toggle_theme),
+        ]
+        for title, help_text, callback in commands:
+            yield SystemCommand(title, help_text, callback)
+        for key, label, _ in self.checks[1:]:
+            yield SystemCommand(f"Check: {label}", "Checks tab", lambda k=key: self.show_check(k))
+        for title, help_text, fn in plugins.hook("tui_commands"):
+            yield SystemCommand(title, help_text, lambda fn=fn: fn(self))
+
+    def show_check(self, key: str) -> None:
+        self.action_tab("checks")
+        self.restore(self.query_one("#checks-table", DataTable), key)
+
+    def confirm_then(self, question: str, job, *args) -> None:
+        if self.dry_run:
+            question += "\n\n(dry run: only shows what it would do)"
+
+        def done(yes: bool | None) -> None:
+            if yes:
+                self.do_job(job, *args)
+        self.push_screen(Confirm(question), done)
+
+    @work(thread=True, group="action")
+    def do_job(self, job, *args) -> None:
+        text = core.capture(job, *args)
+        self.call_from_thread(self.after_action, text)
+
+    def after_action(self, text: str) -> None:
+        if not self.tab():
+            return
+        for line in text.splitlines():
+            if line.strip():
+                self.log_line(line)
+        self.action_refresh()
+
+    def action_merge(self, now: bool) -> None:
+        tab, key = self.tab(), self.current_key()
+        if not key or tab not in ("repos", "prs"):
+            return
+        if tab == "prs":
+            p = self.prs[key]
+            if p.get("merged"):
+                self.log_line(f"{p['repo']}#{p['number']} is already merged")
+                return
+            repo = p["repo"]
+            ctx = {"pick": {repo: [p["number"]]}, "now": now, "ready": False}
+            what = f"{'Merge now' if now else 'Turn on auto-merge for'} {repo}#{p['number']}\n{p['title']}?"
+        else:
+            repo = key
+            ctx = {"pick": {}, "now": now, "ready": False}
+            what = f"{'Merge now' if now else 'Auto-merge'} every ready PR in {repo}?"
+        self.confirm_then(what, R.merge, repo, ctx)
+
+    def action_merge_all(self) -> None:
+        ready = [p for p in self.prs.values() if not p["isDraft"] and not p.get("merged")
+                 and p.get("mergeable") != "CONFLICTING" and not p.get("autoMergeRequest")]
+        if not ready:
+            self.log_line("No ready PRs without auto-merge (drafts and conflicts are left alone)")
+            return
+        pick: dict[str, list[int]] = {}
+        for p in ready:
+            pick.setdefault(p["repo"], []).append(p["number"])
+        names = "\n".join(f"  {self.label(p['repo'])}#{p['number']} {p['title'][:60]}" for p in ready[:15])
+        if len(ready) > 15:
+            names += f"\n  … and {len(ready) - 15} more"
+
+        def merge_all(pick: dict[str, list[int]]) -> None:
+            core.for_each(list(pick), R.merge, {"pick": pick, "now": False, "ready": False})
+        self.confirm_then(f"Turn on auto-merge for {len(ready)} ready PR(s)? Each merges once its checks pass.\n\n"
+                          f"{names}", merge_all, pick)
+
+    def action_ready(self) -> None:
+        key = self.current_key()
+        if self.tab() != "prs" or not key:
+            self.log_line("y marks a draft PR ready: pick one in the Pull requests tab (2)")
+            return
+        p = self.prs[key]
+        if not p["isDraft"]:
+            self.log_line(f"{p['repo']}#{p['number']} is already {'merged' if p.get('merged') else 'ready for review'}")
+            return
+
+        def ready(repo: str, number: int) -> None:
+            if core.DRY_RUN:
+                core.say(f"[dry-run] mark {repo}#{number} ready for review")
+            else:
+                core.gh("pr", "ready", str(number), "--repo", repo)
+                core.say(f"{repo}#{number} is ready for review")
+        self.confirm_then(f"Mark {p['repo']}#{p['number']} ready for review?", ready, p["repo"], p["number"])
+
+    def action_diff(self) -> None:
+        key = self.current_key()
+        if self.tab() == "prs" and key:
+            self.show("prs", "Loading diff …")
+            self.load_pr(key, diff=True)
+
+    def action_approve(self) -> None:
+        key = self.current_key()
+        if self.tab() != "runs" or not key:
+            self.log_line("a approves a run waiting for you: Runs tab (3)")
+            return
+        repo, run, envs = self.runs[key]
+        if not envs:
+            self.log_line("That run isn't waiting for your approval")
+            return
+
+        def approve(repo, run, envs) -> None:
+            if core.DRY_RUN:
+                core.say(f"[dry-run] approve {repo} {run.get('head_branch')}")
+            else:
+                R.approve_run(repo, run, envs)
+                core.say(f"approved {', '.join(e['name'] for e in envs)} for {repo} {run.get('head_branch')}")
+        if R.RUN_APPROVAL in envs:
+            question = (f"Let {repo} run {run.get('name')} on {run.get('head_branch')}?\n"
+                        f"It comes from an outside contributor: check the PR's changes first.\n{run.get('html_url')}")
+        else:
+            question = f"Approve {', '.join(e['name'] for e in envs)} for {repo} {run.get('head_branch')}?"
+        self.confirm_then(question, approve, repo, run, envs)
+
+
+def run(cfg: Config, dry_run: bool = False, group: str | None = None) -> None:
+    core.DRY_RUN = dry_run
+    BnbTui(cfg, dry_run=dry_run, group=group).run()
