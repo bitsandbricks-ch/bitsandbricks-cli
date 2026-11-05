@@ -15,11 +15,20 @@ BNB_PLUGINS=none (or a comma separated list of names) limits which plugins load.
 
 from __future__ import annotations
 
+import contextvars
 import os
 import sys
 from typing import Any, Callable, ClassVar
 
 GROUP = "bitsandbricks.plugins"
+# The signed-in user's secrets for plugins (the operator sets it per request): plugins.secret("hubra_token").
+SECRETS: contextvars.ContextVar = contextvars.ContextVar("bnb_plugin_secrets", default=None)
+
+
+def secret(name: str) -> str | None:
+    """A secret of the current user (in the operator), or None: plugins fall back to their own config."""
+    found = SECRETS.get()
+    return (found or {}).get(name) or None
 
 
 class Plugin:
@@ -30,6 +39,8 @@ class Plugin:
     # Extra GraphQL fields for each repo node of `bnb status` and the TUI, e.g.
     # 'manifest: object(expression: "HEAD:plugin.yaml") { ... on Blob { text } }'
     graphql_fields: ClassVar[str] = ""
+    # Commands of add_commands that are safe in the operator's web console (no local files, no prompts).
+    web_commands: ClassVar[tuple] = ()
 
     def add_commands(self, sub) -> dict[str, Callable[[Any], None]]:
         """Add argparse subparsers to `sub`; return {command: handler(args)}."""
@@ -75,6 +86,23 @@ class Plugin:
 
     def tui_themes(self) -> list:
         """Textual Theme objects; t cycles through every theme."""
+        return []
+
+    # ── the operator (web app) ──────────────────────────────────────────────
+    # tui_tabs, tui_checks, status_columns, repo_detail and doctor work there as they are.
+
+    def web_actions(self) -> list[dict]:
+        """Buttons in the web UI, each a dict:
+            id, title, help   the button
+            repo              True: works on the selected repo (run gets it), False: on nothing
+            write             True: changes something (needs a write key, asks first, has a dry run)
+            params            [{"name", "label", "choices": [...] (optional)}] asked before running
+            run(repo, params) does it; print or core.say what happened (core.dry_run() tells a dry run)
+        """
+        return []
+
+    def web_secrets(self) -> list[tuple[str, str]]:
+        """Secrets a user may keep in the operator for this plugin: [(name, label)]; read with secret(name)."""
         return []
 
 

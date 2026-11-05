@@ -36,7 +36,10 @@ Repos are named as `owner/name`, as a bare `name` when only one repo has it, or 
 | `bnb sync [names] [--only PATH]` | Opens a PR per repo whose shared files differ. |
 | `bnb new owner/name [--group G] [--public]` | Creates a repo the way its group wants it: from the reference repo when that is a GitHub template, the group's files committed, then its settings, security and rulesets applied. Private unless `--public`. |
 | `bnb open web#12` | Prints the link, and opens it (or copies it over SSH; `BNB_OPEN=browser\|copy\|print`). |
+| `bnb stats [--days 30]` | Pull requests merged and opened, median time to merge, open and stale PRs, workflow runs with success rate and duration, releases. |
 | `bnb plugins` | Installed plugins. |
+| `bnb market [install NAME]` | Plugins in the signed plugin index; `install` adds one (only from a verified index). `keygen`, `sign` and `verify` are for whoever publishes an index. |
+| `bnb login https://operator` | Go through an [operator](docs/operator.md) with an API key: approve a code in the browser, and every command and the TUI then work without gh or a GitHub token here. `bnb logout` forgets the key, `bnb whoami` says how bnb reaches GitHub. |
 | `bnb tui` | Everything above, full screen. |
 
 Security alerts need the `security_events` scope and packages the `read:packages` scope: `gh auth refresh -s security_events,read:packages`.

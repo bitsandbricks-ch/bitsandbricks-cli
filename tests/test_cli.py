@@ -190,7 +190,8 @@ def test_readme_names_every_command():
     from bitsandbricks.cli import ON_REPOS
 
     readme = (Path(__file__).parent.parent / "README.md").read_text()
-    for cmd in (*ON_REPOS, "pr", "open", "init", "config", "plugins", "tui", "new"):
+    for cmd in (*ON_REPOS, "pr", "open", "init", "config", "plugins", "tui", "new", "login", "logout", "whoami",
+                "market"):
         assert f"bnb {cmd}" in readme, cmd
 
 

@@ -6,6 +6,7 @@ repo of your orgs. --org and --group narrow that down.
 
   bnb init your-org/your-defaults   point bnb at a defaults repo (or a local folder)
   bnb status | prs | runs           what's going on
+  bnb stats [--days 30]             PRs merged, time to merge, CI success, releases
   bnb releases [--problems]         latest releases, missing assets, failed release runs
   bnb packages [--problems]         container images: newest tags, release images, image builds
   bnb pr web#12 [--diff]            one PR in detail
@@ -16,17 +17,19 @@ repo of your orgs. --org and --group narrow that down.
   bnb sync [names]                  PRs that bring shared files in line
   bnb new owner/name [--group G]    a new repo, set up the way its group wants
   bnb tui                           all of it, full screen
+  bnb login https://operator        go through an operator (web app) with an API key: no gh needed
+  bnb market [install NAME]         plugins from the signed plugin index
 """
 
 from __future__ import annotations
 
 import argparse
-import subprocess
 import sys
 
 from bitsandbricks import __version__, config, core, defaults, packages, plugins, repos
 
-ON_REPOS = ("status", "prs", "merge", "runs", "releases", "packages", "approve", "security", "doctor", "sync", "repos")
+ON_REPOS = ("status", "prs", "merge", "runs", "releases", "packages", "approve", "security", "doctor", "sync", "repos",
+            "stats")
 
 
 def common_parser() -> argparse.ArgumentParser:
@@ -57,6 +60,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict]:
         "doctor": "check repos against the defaults",
         "sync": "open PRs with the group's shared files",
         "repos": "the repos bnb sees and their groups",
+        "stats": "PRs merged, time to merge, CI success, releases over the last days",
     }
     for cmd in ON_REPOS:
         sp = sub.add_parser(cmd, parents=[common], help=helps[cmd])
@@ -74,6 +78,8 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict]:
             sp.add_argument("--problems", action="store_true", help="only what's missing or failed")
         if cmd == "doctor":
             sp.add_argument("--fix", action="store_true", help="apply settings and rulesets where they drifted")
+        if cmd == "stats":
+            sp.add_argument("--days", type=int, default=30)
         if cmd == "sync":
             sp.add_argument("--only", action="append", metavar="PATH", help="only this file (repeatable)")
     sp = sub.add_parser("pr", parents=[common], help="one PR in detail")
@@ -93,6 +99,17 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict]:
     sp.add_argument("--public", action="store_true", help="public (default: private)")
     sp.add_argument("--description", default="")
     sub.add_parser("config", help="show where bnb looks and what it found")
+    sp = sub.add_parser("login", help="sign in to an operator (the web app) with an API key")
+    sp.add_argument("url", help="the operator, e.g. https://bnb.example.org")
+    sp.add_argument("--read", action="store_true", help="a read-only key")
+    sp.add_argument("--key", help="use this API key instead of approving a code in the browser")
+    sub.add_parser("logout", help="forget the operator's API key")
+    sub.add_parser("whoami", help="how bnb reaches GitHub, and as whom")
+    sp = sub.add_parser("market", help="plugins in the plugin index: list, install, sign")
+    sp.add_argument("action", nargs="?", default="list", choices=("list", "install", "keygen", "sign", "verify"))
+    sp.add_argument("name", nargs="?", help="plugin to install, or the index file to sign/verify")
+    sp.add_argument("--index", help="index URL or file (default: BNB_PLUGIN_INDEX or the official one)")
+    sp.add_argument("--key", help="sign: the private key (PEM); verify/list: trusted public keys, comma separated")
     sub.add_parser("plugins", help="installed plugins")
     sp = sub.add_parser("tui", parents=[common], help="full screen (needs: pipx inject bitsandbricks-cli textual)")
 
@@ -173,6 +190,14 @@ def main(argv: list[str] | None = None) -> None:
             return init(args)
         if args.cmd == "config":
             return show_config()
+        if args.cmd in ("login", "logout", "whoami"):
+            from bitsandbricks import login
+            if args.cmd == "login":
+                return login.login(args.url, "read" if args.read else "write", args.key)
+            return login.logout() if args.cmd == "logout" else login.whoami()
+        if args.cmd == "market":
+            from bitsandbricks import market
+            return market.command(args.action, args.name, args.index, args.key)
         if args.cmd == "plugins":
             for p in plugins.load():
                 print(f"{p.name:<16} {p.description}")
@@ -181,8 +206,8 @@ def main(argv: list[str] | None = None) -> None:
             if not plugins.load() and not plugins.errors:
                 print("No plugins installed (pipx inject bitsandbricks-cli <package>).")
             return None
-        if subprocess.run(["gh", "auth", "token"], capture_output=True, check=False).returncode != 0:
-            sys.exit("Log in first: gh auth login")
+        if not core.transport().logged_in():
+            sys.exit("Log in first: gh auth login (or bnb login <operator URL>)")
         if args.cmd in handlers:
             return handlers[args.cmd](args)
         cfg = config.load(getattr(args, "org", None))
@@ -215,6 +240,9 @@ def run(cfg, args, names: list[str], pick: dict) -> None:
         return list_repos(cfg, names)
     if args.cmd == "status":
         return repos.status(cfg, names)
+    if args.cmd == "stats":
+        from bitsandbricks import stats
+        return stats.show(names, args.days)
     if args.cmd == "prs":
         return repos.prs(cfg, names)
     if args.cmd == "runs":

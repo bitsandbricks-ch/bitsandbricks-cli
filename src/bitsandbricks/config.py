@@ -38,6 +38,7 @@ Two files:
 
 from __future__ import annotations
 
+import contextvars
 import fnmatch
 import json
 import os
@@ -56,6 +57,11 @@ else:  # pragma: no cover
 
 DEFAULTS_FILE = "bitsandbricks.toml"
 REPO_NAME = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+GITLAB_NAME = re.compile(r"^gitlab:[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$")
+# The GitLab client of this context (the operator sets it): defaults repos named gitlab:group/project.
+GITLAB: contextvars.ContextVar = contextvars.ContextVar("bnb_gitlab", default=None)
+# A user's settings in place of the config file (the operator's web console sets it).
+OVERRIDE: contextvars.ContextVar = contextvars.ContextVar("bnb_config_override", default=None)
 GROUP_KEYS = {"name", "match", "from", "files", "require", "settings", "security", "immutable_releases",
               "vulnerability_reporting", "rulesets", "release_assets"}
 
@@ -96,13 +102,14 @@ def save_user_config(values: dict) -> Path:
 
 
 class Source:
-    """Read files from the defaults: a local folder or a GitHub repo at a ref."""
+    """Read files from the defaults: a local folder, a GitHub repo or a GitLab project (gitlab:group/name) at a ref."""
 
     def __init__(self, where: str, ref: str | None = None, allow_local: bool = True):
         self.where = where
         self.ref = ref
         self.local = Path(os.path.expanduser(where)) if allow_local and _is_local(where) else None
-        if not self.local and not REPO_NAME.match(where):
+        self.gitlab = where[len("gitlab:"):] if not self.local and GITLAB_NAME.match(where) else None
+        if not self.local and not self.gitlab and not REPO_NAME.match(where):
             raise RuntimeError(f"Not a repo (owner/name) or a folder: {where}")
 
     def __str__(self) -> str:
@@ -114,7 +121,15 @@ class Source:
         if self.local:
             f = self.local / path
             return f.read_text() if f.is_file() else None
+        if self.gitlab:
+            return self._gitlab().file(self.gitlab, path, self.ref)
         return file_on(self.where, path, self.ref)
+
+    def _gitlab(self):
+        gl = GITLAB.get()
+        if gl is None:
+            raise RuntimeError(f"{self.where}: GitLab defaults need a GitLab login (the operator)")
+        return gl
 
     def tree(self, folder: str) -> list[str]:
         """Every file under `folder`, as paths relative to it."""
@@ -124,6 +139,9 @@ class Source:
             if not root.is_dir():
                 return []
             return sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.is_file())
+        if self.gitlab:
+            pre = folder + "/"
+            return sorted(p[len(pre):] for p in self._gitlab().blobs(self.gitlab, self.ref) if p.startswith(pre))
         ref = self.ref or "HEAD"
         try:
             t = api("GET", f"/repos/{self.where}/git/trees/{ref}?recursive=1") or {}
@@ -157,7 +175,12 @@ class Group:
         m = self.match
         if not m:
             return True
+        provider = "gitlab" if repo.startswith("gitlab:") else "github"
+        if m.get("provider") and m["provider"] != provider:
+            return False
+        repo = repo[len("gitlab:"):] if provider == "gitlab" else repo
         owner, _, name = repo.partition("/")
+        name = name.rsplit("/", 1)[-1]  # GitLab: group/subgroup/project
         orgs = _list(m.get("org"))
         if orgs and owner not in orgs:
             return False
@@ -175,7 +198,7 @@ class Group:
 
     def alias(self, repo: str) -> str:
         """A short name for the repo inside its group: the prefix dropped (plugin-budgets -> budgets)."""
-        name = repo.split("/", 1)[-1]
+        name = repo.rsplit("/", 1)[-1] if repo.startswith("gitlab:") else repo.split("/", 1)[-1]
         prefix = self.match.get("prefix") or ""
         return name[len(prefix):] if prefix and name.startswith(prefix) and len(name) > len(prefix) else name
 
@@ -259,6 +282,8 @@ _loaded = core.Scoped("config")
 def load(orgs: list[str] | None = None, mine: dict | None = None, env: bool = True) -> Config:
     """Your config plus the defaults repo's bitsandbricks.toml. `orgs` (from --org) narrows the orgs.
     The operator passes each user's settings as `mine` (env=False: no BNB_* variables, no local folders)."""
+    if mine is None and OVERRIDE.get() is not None:
+        mine, env = OVERRIDE.get(), False
     server = mine is not None
     if mine is None:
         mine = user_config()
