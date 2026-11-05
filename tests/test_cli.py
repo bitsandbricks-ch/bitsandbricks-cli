@@ -66,6 +66,25 @@ def test_runs_approve_security(env):
     assert "== acme/web\n   no open alerts\n" in out
 
 
+def test_releases(env):
+    out = bnb(env, "releases")
+    assert "plugin-a  v1.0.0" in out and "plugin-a-1.0.0.zip" in out
+    assert "missing *.zip" in out  # plugin-b's group wants a zip
+    assert "acme/plugin-b: missing *.zip; Release failure" in out
+    assert 'sign: failure at step "cosign"' in out and "runs/7/job/8" in out
+    assert "dotfiles" not in out  # no releases
+    out = bnb(env, "releases", "--problems")
+    assert "plugin-b" in out and "plugin-a" not in out and "api" not in out
+
+
+def test_packages(env):
+    out = bnb(env, "packages")
+    assert "acme/api/backend  api   1.2.0" in out and "v1.10.0 missing" in out
+    assert "acme/old" not in out  # its repo is excluded
+    assert "== acme/web: Images failure" in out and 'at step "cosign"' in out
+    assert "api/backend" not in bnb(env, "packages", "web")
+
+
 def test_doctor(env):
     out = bnb(env, "doctor")
     assert "== acme/plugin-tpl (the reference)\n   ok\n   reference of group plugins" in out

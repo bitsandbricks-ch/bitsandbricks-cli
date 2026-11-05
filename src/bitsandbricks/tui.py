@@ -5,12 +5,14 @@ Start it with `bnb tui` (needs Textual: the [tui] extra or `pipx inject bitsandb
   Repos          group, latest release, PRs, CI per repo
   Pull requests  every open PR; the right side shows the selected one in depth
   Runs           runs waiting for your approval, then the newest run per repo
+  Releases       latest release per repo, missing assets, failed release runs and why
+  Packages       container images: newest tags, whether the release has its image, image builds
   Security       open Dependabot, secret scanning and code scanning alerts
   Checks         the repos against the defaults (doctor), plus plugin checks
   ...            tabs from plugins
 
 Nothing reloads on its own: the repo and PR list (one GraphQL query) loads at the
-start, Runs and Security (API calls per repo) the first time you open their tab,
+start, Runs, Releases, Packages and Security (API calls per repo) the first time you open their tab,
 and r reloads the tab you are on. The header shows the API calls left.
 
 Keys: ← → or 1-9 switch tabs · ↑ ↓ move · Enter or o open · r refresh · m auto-merge
@@ -55,10 +57,12 @@ from textual.widgets.data_table import CellDoesNotExist, RowDoesNotExist
 
 from bitsandbricks import config, core, plugins
 from bitsandbricks import defaults as D
+from bitsandbricks import packages as P
 from bitsandbricks import repos as R
 from bitsandbricks.config import Config
 
-BASE_TABS = [("repos", "Repos"), ("prs", "Pull requests"), ("runs", "Runs"), ("security", "Security"),
+BASE_TABS = [("repos", "Repos"), ("prs", "Pull requests"), ("runs", "Runs"), ("releases", "Releases"),
+             ("packages", "Packages"), ("security", "Security"),
              ("checks", "Checks"), ("settings", "Settings")]
 # Which tabs each key works on: the footer shows only the keys of the tab you are on.
 TAB_ACTIONS = {
@@ -260,6 +264,8 @@ class BnbTui(App):
         self.last_waiting = 0
         self.pr_filter = "all"
         self.alerts: dict[str, tuple[list[dict], list[str]]] = {}
+        self.releases: dict[str, dict] = {}  # repo -> R.release_info
+        self.packages: dict[str, dict] = {}  # owner/image -> P.package_infos entry
         self.last_alerts = 0
         self.plugin_tabs = {t["id"]: t for t in plugins.hook("tui_tabs")}
         self.tabs = BASE_TABS + [(t["id"], t["title"]) for t in self.plugin_tabs.values()]
@@ -285,7 +291,9 @@ class BnbTui(App):
             return self.prs[key]["repo"]
         if tab == "runs":
             return self.runs[key][0]
-        return key if tab in ("repos", "security") else None
+        if tab == "packages":
+            return self.packages[key]["repo"]
+        return key if tab in ("repos", "security", "releases") else None
 
     def ask(self, question: str, then, password: bool = False) -> None:
         self.push_screen(Ask(question, password), then)
@@ -314,7 +322,10 @@ class BnbTui(App):
         self.theme = self.themes[0].name
         self.query_one("#log", RichLog).can_focus = False
         heads = {"repos": R.status_head(), "prs": ["repo", "#", "title", "state", "checks"],
-                 "runs": ["repo", "state", "workflow", "ref", "when"], "security": ["repo", "alerts", "worst", "kinds"],
+                 "runs": ["repo", "state", "workflow", "ref", "when"],
+                 "releases": ["repo", "release", "when", "assets", "release run"],
+                 "packages": ["image", "newest", "updated", "release", "image build"],
+                 "security": ["repo", "alerts", "worst", "kinds"],
                  "checks": ["check"], "settings": ["setting"], **{t: ["view"] for t in self.plugin_tabs}}
         for tab_id, head in heads.items():
             self.query_one(f"#{tab_id}-table", DataTable).add_columns(*head)
@@ -551,9 +562,109 @@ class BnbTui(App):
             self.query_one("#tabs", TabbedContent).get_tab("security").label = (
                 f"Security ({total})" if total else "Security")
             if total and total != self.last_alerts:
-                self.log_line(f"{total} open security alert(s): Security tab (4)")
+                self.log_line(f"{total} open security alert(s): Security tab (6)")
             self.last_alerts = total
             self.update_detail()
+
+    @work(thread=True, exclusive=True, group="releases")
+    def load_releases(self) -> None:
+        self.loaded["releases"] = time.time()
+        try:
+            found = R.release_infos(self.cfg, self.repos)
+        except core.RateLimited as err:
+            self.call_from_thread(self.rate_limited, err)
+            return
+        self.call_from_thread(self.fill_releases, found)
+
+    def fill_releases(self, found: list[dict]) -> None:
+        with contextlib.suppress(NoMatches):
+            self.releases = {i["repo"]: i for i in found}
+            table = self.query_one("#releases-table", DataTable)
+            keep = self.current_key("releases")
+            table.clear()
+            bad = 0
+            for i in sorted(found, key=lambda i: (not R.release_problems(i), i["repo"])):
+                tag, when, files, run = R.release_row(i)
+                problems = R.release_problems(i)
+                bad += bool(problems)
+                last = i["runs"][0] if i["runs"] else {}
+                table.add_row(self.label(i["repo"]), tag, when,
+                              Text(files, style=DANGER if i["missing"] else ""),
+                              Text(run, style=STATE_STYLE.get(R.run_state(last), "") if last else ""), key=i["repo"])
+            self.restore(table, keep)
+            self.query_one("#tabs", TabbedContent).get_tab("releases").label = (
+                f"Releases ({bad})" if bad else "Releases")
+            if bad:
+                self.log_line(f"{bad} repo(s) with release problems: Releases tab (4)")
+            self.update_detail()
+
+    @work(thread=True, exclusive=True, group="packages")
+    def load_packages(self) -> None:
+        self.loaded["packages"] = time.time()
+        try:
+            found, err = P.package_infos(self.cfg, self.repos, self.info)
+        except core.RateLimited as err:
+            self.call_from_thread(self.rate_limited, err)
+            return
+        self.call_from_thread(self.fill_packages, found, err)
+
+    def fill_packages(self, found: list[dict], err: str) -> None:
+        with contextlib.suppress(NoMatches):
+            self.packages = {f"{i['owner']}/{i['name']}": i for i in found}
+            table = self.query_one("#packages-table", DataTable)
+            keep = self.current_key("packages")
+            table.clear()
+            bad = 0
+            for key, i in sorted(self.packages.items(), key=lambda kv: (not P.problems(kv[1]), kv[0])):
+                newest, updated, release, run = P.row(i)
+                bad += bool(P.problems(i))
+                last = i["runs"][0] if i["runs"] else {}
+                table.add_row(key, newest, updated, Text(release, style=DANGER if "missing" in release else ""),
+                              Text(run, style=STATE_STYLE.get(R.run_state(last), "") if last else ""), key=key)
+            self.restore(table, keep)
+            self.query_one("#tabs", TabbedContent).get_tab("packages").label = (
+                f"Packages ({bad})" if bad else "Packages")
+            if err:
+                self.log_line(f"Packages: {err}")
+                self.show("packages", err)
+            elif not found:
+                self.show("packages", "No container images in your orgs.")
+            elif bad:
+                self.log_line(f"{bad} image(s) with problems: Packages tab (5)")
+            self.update_detail()
+
+    @work(thread=True, group="detail")
+    def load_image_jobs(self, key: str, repo: str, run_id: int) -> None:
+        try:
+            jobs = R.failed_jobs(repo, run_id)
+        except core.RateLimited as err:
+            self.call_from_thread(self.rate_limited, err)
+            return
+        except RuntimeError as err:
+            jobs = [f"error: {err}"]
+        text = P.text(self.packages[key]) + "\n\nWhat failed in the last image build:\n" + "\n".join(
+            f"  {j}" for j in jobs or ["no failed jobs listed"])
+        self.detail_cache[f"packages:{key}"] = text
+        self.call_from_thread(self.show_if_current, "packages", key, text)
+
+    def release_url(self, repo: str) -> str:
+        rel = (self.releases.get(repo) or {}).get("release") or {}
+        return rel.get("html_url") or f"{core.WEB}/{repo}/releases"
+
+    @work(thread=True, group="detail")
+    def load_release_jobs(self, repo: str, run_id: int) -> None:
+        """The failed jobs and steps of a repo's last release run, under its release detail."""
+        try:
+            jobs = R.failed_jobs(repo, run_id)
+        except core.RateLimited as err:
+            self.call_from_thread(self.rate_limited, err)
+            return
+        except RuntimeError as err:
+            jobs = [f"error: {err}"]
+        text = R.release_text(self.releases[repo]) + "\n\nWhat failed in the last run:\n" + "\n".join(
+            f"  {j}" for j in jobs or ["no failed jobs listed"])
+        self.detail_cache[f"releases:{repo}"] = text
+        self.call_from_thread(self.show_if_current, "releases", repo, text)
 
     def security_text(self, repo: str) -> str:
         alerts, unread = self.alerts.get(repo, ([], []))
@@ -669,6 +780,26 @@ class BnbTui(App):
                 self.load_pr(key)
         elif tab == "security":
             self.show("security", self.security_text(key))
+        elif tab == "packages":
+            info = self.packages[key]
+            last = info["runs"][0] if info["runs"] else {}
+            if f"packages:{key}" in self.detail_cache:
+                self.show("packages", self.detail_cache[f"packages:{key}"])
+            elif last.get("conclusion") == "failure":
+                self.show("packages", P.text(info) + "\n\nLoading what failed …")
+                self.load_image_jobs(key, info["repo"], last["id"])
+            else:
+                self.show("packages", P.text(info))
+        elif tab == "releases":
+            info = self.releases[key]
+            last = info["runs"][0] if info["runs"] else {}
+            if f"releases:{key}" in self.detail_cache:
+                self.show("releases", self.detail_cache[f"releases:{key}"])
+            elif last.get("conclusion") == "failure":
+                self.show("releases", R.release_text(info) + "\n\nLoading what failed …")
+                self.load_release_jobs(key, last["id"])
+            else:
+                self.show("releases", R.release_text(info))
         elif tab == "runs":
             repo, run, envs = self.runs[key]
             lines = [f"{repo}  {run.get('name')}", run["html_url"], "",
@@ -746,14 +877,17 @@ class BnbTui(App):
         core.CACHE = None  # r means fresh: no answers from gh's cache
         self.force = True
         self.load_github()
-        if self.tab() not in ("repos", "prs", "runs", "security"):
+        if self.tab() not in ("repos", "prs", "runs", "releases", "packages", "security"):
             self.update_detail()
 
     def load_tab_data(self) -> None:
-        """Runs and security cost API calls per repo: they load the first time you open their tab, then on r."""
+        """Runs, releases, packages and security cost API calls per repo: they load the first time you open their tab,
+        then on r."""
         tab, force, self.force = self.tab(), self.force, False
-        if tab in ("runs", "security") and (force or tab not in self.loaded) and self.repos:
-            (self.load_runs if tab == "runs" else self.load_security)()
+        loaders = {"runs": self.load_runs, "releases": self.load_releases, "packages": self.load_packages,
+                   "security": self.load_security}
+        if tab in loaders and (force or tab not in self.loaded) and self.repos:
+            loaders[tab]()
 
     def rate_limited(self, err: core.RateLimited) -> None:
         self.log_line(f"{err}. r tries again.")
@@ -788,6 +922,10 @@ class BnbTui(App):
             url = self.prs[key]["url"]
         elif tab == "runs":
             url = self.runs[key][1]["html_url"]
+        elif tab == "releases":
+            url = self.release_url(key)
+        elif tab == "packages":
+            url = self.packages[key]["url"]
         elif tab == "security":
             alerts = self.alerts.get(key, ([], []))[0]
             url = alerts[0]["url"] if len(alerts) == 1 else f"{core.WEB}/{key}/security"
@@ -1060,6 +1198,19 @@ class BnbTui(App):
             items.append(("checks", "Its checks page", lambda: self.action_open_link(f"{p['url']}/checks")))
         elif tab == "runs" and self.runs[key][2]:
             items.append(("approve", "Approve (a)", self.action_approve))
+        elif tab == "releases":
+            runs = self.releases[key]["runs"]
+            if runs:
+                items.append(("run", f"Its last release run ({R.run_state(runs[0])})",
+                              lambda: self.action_open_link(runs[0]["html_url"])))
+            items.append(("all", "All its releases", lambda: self.action_open_link(f"{core.WEB}/{key}/releases")))
+        elif tab == "packages":
+            info = self.packages[key]
+            if info["runs"]:
+                items.append(("run", f"Its last image build ({R.run_state(info['runs'][0])})",
+                              lambda: self.action_open_link(info["runs"][0]["html_url"])))
+            if info["repo"]:
+                items.append(("repo", f"Its repo {info['repo']}", lambda: self.goto("repos", info["repo"])))
         elif tab == "checks" and key == "doctor":
             items += [("fix", "Apply the defaults where repos drifted (f)", self.action_fix),
                       ("sync", "Open PRs with the shared files (s)", self.action_sync),

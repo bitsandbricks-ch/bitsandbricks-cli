@@ -29,6 +29,7 @@ Two files:
       security = { secret_scanning = "enabled" }
       immutable_releases = true
       rulesets = "rulesets/default"         # folder of ruleset JSON in the defaults repo
+      release_assets = ["*.zip"]            # files every release must attach (`bnb releases`)
       files = "files/default"               # folder copied into each repo, path for path
 
   The first group that matches a repo is its group. Keys bnb doesn't know stay on
@@ -53,7 +54,7 @@ else:  # pragma: no cover
 
 DEFAULTS_FILE = "bitsandbricks.toml"
 GROUP_KEYS = {"name", "match", "from", "files", "require", "settings", "security", "immutable_releases",
-              "vulnerability_reporting", "rulesets"}
+              "vulnerability_reporting", "rulesets", "release_assets"}
 
 
 def config_dir() -> Path:
@@ -144,6 +145,7 @@ class Group:
     immutable_releases: bool | None = None
     vulnerability_reporting: bool | None = None
     rulesets: str | None = None
+    release_assets: list[str] = field(default_factory=list)  # globs every release must attach
     extra: dict = field(default_factory=dict)
 
     def matches(self, repo: str, topics: list[str] | None = None) -> bool:
@@ -241,6 +243,7 @@ def make_group(raw: dict, i: int) -> Group:
         immutable_releases=raw.get("immutable_releases"),
         vulnerability_reporting=raw.get("vulnerability_reporting"),
         rulesets=raw.get("rulesets"),
+        release_assets=_list(raw.get("release_assets")),
         extra={k: v for k, v in raw.items() if k not in GROUP_KEYS},
     )
 

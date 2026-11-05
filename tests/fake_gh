@@ -86,6 +86,7 @@ match = { org = "acme", prefix = "plugin-" }
 from = "acme/plugin-tpl"
 files = [".gitignore", "LICENSE"]
 require = { allow_auto_merge = true }
+release_assets = ["*.zip"]
 
 [[group]]
 name = "default"
@@ -180,6 +181,16 @@ if argv[0] == "api":
     if route == "/orgs/acme/repos":
         page = int(params.get("page", 1))
         out([info(f"acme/{n}") for n in ACME] if page == 1 else [])
+    if route == "/orgs/acme/packages":
+        out([{"name": n, "repository": {"full_name": r}, "html_url": f"{WEB}/orgs/acme/packages/container/package/{n}"}
+             for n, r in (("api/backend", "acme/api"), ("web", "acme/web"), ("old", "acme/legacy"))]
+            if params.get("page", "1") == "1" else [])
+    if route == "/orgs/acme/packages/container/api%2Fbackend/versions":
+        out([{"name": "sha256:aaa", "updated_at": "2026-11-05T09:00:00Z",
+              "metadata": {"container": {"tags": ["1.2.0", "latest"]}}}])
+    if route == "/orgs/acme/packages/container/web/versions":
+        out([{"name": "sha256:bbb", "updated_at": "2026-11-05T09:00:00Z",
+              "metadata": {"container": {"tags": ["main-20261105-abc"]}}}])
     if route == "/orgs/mike/repos":
         fail("gh: Not Found (HTTP 404)")
     if route == "/user/repos":
@@ -208,6 +219,18 @@ if argv[0] == "api":
         out({"object": {"sha": "headsha1234567"}})
     if rest == "/pulls":
         out([])
+    if rest == "/releases":
+        assets = {"acme/plugin-a": [{"name": "plugin-a-1.0.0.zip", "size": 20480, "download_count": 3}],
+                  "acme/plugin-b": [{"name": "notes.txt", "size": 1024, "download_count": 0}]}
+        tags = {"acme/plugin-a": "v1.0.0", "acme/plugin-b": "v0.3.0", "acme/api": "v1.10.0"}
+        out([{"tag_name": tags[repo], "draft": False, "prerelease": False, "published_at": "2026-11-05T09:00:00Z",
+              "html_url": f"{WEB}/{repo}/releases/tag/{tags[repo]}", "assets": assets.get(repo, [])}]
+            if repo in tags else [])
+    if re.match(r"/actions/runs/\d+/jobs$", rest):
+        out({"jobs": [{"name": "build", "conclusion": "success", "steps": []},
+                      {"name": "sign", "conclusion": "failure", "html_url": f"{WEB}/{repo}/actions/runs/7/job/8",
+                       "steps": [{"name": "checkout", "conclusion": "success"},
+                                 {"name": "cosign", "conclusion": "failure"}]}]})
     if rest == "/actions/runs":
         if params.get("status") == "waiting" and repo == "acme/api":
             out({"workflow_runs": [{"id": 5, "name": "Deploy", "head_branch": "main",
@@ -217,9 +240,16 @@ if argv[0] == "api":
                                     "created_at": "2026-11-05T09:00:00Z", "html_url": f"{WEB}/{repo}/actions/runs/6"}]})
         if params.get("status"):
             out({"workflow_runs": []})
+        if repo == "acme/plugin-b":
+            out({"workflow_runs": [{"id": 7, "name": "Release", "path": ".github/workflows/release.yml", "event": "push",
+                                    "head_branch": "v0.3.0", "status": "completed", "conclusion": "failure",
+                                    "created_at": "2026-11-05T09:00:00Z", "html_url": f"{WEB}/{repo}/actions/runs/7"}]})
+        images = [{"id": 11, "name": "Images", "path": ".github/workflows/images.yml", "event": "push",
+                   "head_branch": "main", "status": "completed", "conclusion": "failure",
+                   "created_at": "2026-11-05T08:00:00Z", "html_url": f"{WEB}/{repo}/actions/runs/11"}]
         out({"workflow_runs": [{"id": 9, "name": "CI", "event": "push", "head_branch": "main", "status": "completed",
                                 "conclusion": "success", "created_at": "2026-11-05T09:00:00Z",
-                                "html_url": f"{WEB}/{repo}/actions/runs/9"}]})
+                                "html_url": f"{WEB}/{repo}/actions/runs/9"}] + (images if repo == "acme/web" else [])})
     if rest == "/actions/runs/5/pending_deployments":
         out([{"environment": {"id": 77, "name": "production"}, "current_user_can_approve": True}])
     if rest == "/dependabot/alerts":

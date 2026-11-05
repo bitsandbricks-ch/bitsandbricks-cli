@@ -6,6 +6,8 @@ repo of your orgs. --org and --group narrow that down.
 
   bnb init your-org/your-defaults   point bnb at a defaults repo (or a local folder)
   bnb status | prs | runs           what's going on
+  bnb releases [--problems]         latest releases, missing assets, failed release runs
+  bnb packages [--problems]         container images: newest tags, release images, image builds
   bnb pr web#12 [--diff]            one PR in detail
   bnb merge [names] [--now]         auto-merge open PRs (drafts and conflicts stay)
   bnb approve                       runs waiting for you (environments, outside contributors)
@@ -22,9 +24,9 @@ import argparse
 import subprocess
 import sys
 
-from bitsandbricks import __version__, config, core, defaults, plugins, repos
+from bitsandbricks import __version__, config, core, defaults, packages, plugins, repos
 
-ON_REPOS = ("status", "prs", "merge", "runs", "approve", "security", "doctor", "sync", "repos")
+ON_REPOS = ("status", "prs", "merge", "runs", "releases", "packages", "approve", "security", "doctor", "sync", "repos")
 
 
 def common_parser() -> argparse.ArgumentParser:
@@ -48,6 +50,8 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict]:
         "prs": "open PRs with checks, reviews, conflicts, auto-merge",
         "merge": "auto-merge (or --now) open PRs",
         "runs": "latest workflow runs",
+        "releases": "latest release, its assets and release runs",
+        "packages": "container images: newest tags, release images, image builds",
         "approve": "approve runs waiting for you",
         "security": "open security alerts",
         "doctor": "check repos against the defaults",
@@ -66,6 +70,8 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict]:
         if cmd == "runs":
             sp.add_argument("--limit", type=int, default=3)
             sp.add_argument("--failed", action="store_true")
+        if cmd in ("releases", "packages"):
+            sp.add_argument("--problems", action="store_true", help="only what's missing or failed")
         if cmd == "doctor":
             sp.add_argument("--fix", action="store_true", help="apply settings and rulesets where they drifted")
         if cmd == "sync":
@@ -213,6 +219,10 @@ def run(cfg, args, names: list[str], pick: dict) -> None:
         return repos.prs(cfg, names)
     if args.cmd == "runs":
         return repos.runs(names, args.limit, args.failed)
+    if args.cmd == "releases":
+        return repos.releases(cfg, names, args.problems)
+    if args.cmd == "packages":
+        return packages.packages(cfg, names, args.problems)
     if args.cmd == "approve":
         return repos.approve(names, args.yes)
     if args.cmd == "security":
