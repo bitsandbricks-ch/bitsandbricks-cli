@@ -119,3 +119,7 @@ pip install -e ".[dev]"
 pytest          # runs every command against tests/fake_gh, a stand-in for gh
 ruff check .
 ```
+
+## License
+
+MIT, see [LICENSE](LICENSE).
