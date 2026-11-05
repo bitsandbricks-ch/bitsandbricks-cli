@@ -152,7 +152,10 @@ def list_repos(cfg, names: list[str]) -> None:
 
 def main(argv: list[str] | None = None) -> None:
     parser, handlers = build_parser()
-    args = parser.parse_args(argv)
+    args, extra = parser.parse_known_args(argv)
+    if extra and args.cmd not in handlers:
+        parser.error(f"unrecognized arguments: {' '.join(extra)}")
+    args._extra = extra  # plugin commands pass these on (options before their own arguments)
     core.DRY_RUN = getattr(args, "dry_run", False)
     try:
         if args.cmd == "init":
