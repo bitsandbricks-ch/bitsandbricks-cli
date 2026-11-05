@@ -17,7 +17,7 @@ async def until(pilot, check, seconds: float = 20) -> None:
 
 
 def test_tui_flow(env, monkeypatch):
-    for key in ("PATH", "FAKE_GH_LOG", "XDG_CONFIG_HOME", "BNB_DEFAULTS", "BNB_OPEN"):
+    for key in ("PATH", "FAKE_GH_LOG", "XDG_CONFIG_HOME", "BNB_DEFAULTS", "BNB_OPEN", "BNB_PLUGINS"):
         monkeypatch.setenv(key, env[key])
     from bitsandbricks import config, core, plugins, tui
     from bitsandbricks.plugins import Plugin

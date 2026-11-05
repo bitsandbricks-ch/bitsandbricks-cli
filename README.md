@@ -89,7 +89,9 @@ A plugin is a Python package with an entry point in the `bitsandbricks.plugins` 
 hubra = "hubra_cli.bnb:HubraPlugin"
 ```
 
-Install one next to bnb with `pipx inject bitsandbricks-cli <package>`.
+Install one next to bnb with `pipx inject bitsandbricks-cli <package>`. `BNB_PLUGINS=none` (or a comma separated list of names) limits which plugins load.
+
+hubra-cli is one: it adds Hubra plugin releases, signing checks and a Hubra tab.
 
 ## Roadmap
 
