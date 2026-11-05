@@ -53,7 +53,7 @@ Security alerts need the `security_events` scope and packages the `read:packages
 - **Runs:** the right side lists the selected run's jobs with the step that failed. **a** approves, **x** re-runs the failed jobs, **l** shows the end of each failed job's log, **C** cancels a running run.
 - **Repos** show the version file against the latest release, CI on the default branch, alerts and missing release assets. **Releases** show the version, the release notes and what failed in the last release run.
 - **Repos and Releases:** **b** bumps the selected repo's version (pick patch, minor or major; opens the PR), **R** pushes its release tag once the bump is merged.
-- **Enter** on a row opens a menu of what you can do with it: merge, mark ready, diff, approve, check or fix a repo, sync its files, open it.
+- **Enter** on a row opens it as a full page: what you can do with it on the left (Enter or the key in brackets runs it), its whole detail on the right, and what the actions printed at the bottom. **Esc** goes back to the list. On Checks and Settings, Enter opens a short menu instead.
 - **The footer** only shows the keys that work on the current tab.
 - **n** creates a new repo.
 - **ctrl+p** lists every command.

@@ -154,10 +154,19 @@ def test_tui_menu_footer_settings_new(env, monkeypatch, tmp_path):
             assert app.check_action("merge", ()) is True
             await pilot.press("enter")
             await pilot.pause(0.3)
-            assert isinstance(app.screen, tui.Pick)
+            assert isinstance(app.screen, tui.RowPage)  # Enter opens the row as a page
             labels = [str(o.prompt) for o in app.screen.query_one("OptionList").options]
             assert "Check it against the defaults" in labels and "Open in the browser (o)" in labels
+            await until(pilot, lambda: "Open PRs:" in str(app.screen.query_one("#page-detail").render()))
+            assert "Repos › acme/web" in str(app.screen.query_one("#page-title").render())
+            await pilot.press("m")  # its key runs it from the page
+            await pilot.pause(0.3)
+            await pilot.press("y")
+            await until(pilot, lambda: "auto-merge" in "".join(
+                str(x.text) for x in app.screen.query_one("#page-log").lines))
             await pilot.press("escape")
+            await pilot.pause(0.2)
+            assert not isinstance(app.screen, tui.RowPage)
             await pilot.press("2")
             await pilot.pause(0.2)
             assert app.check_action("diff", ()) is True and app.check_action("approve", ()) is False

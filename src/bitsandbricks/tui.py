@@ -19,7 +19,7 @@ and r reloads the tab you are on. The header shows the API calls left.
 Keys: ← → or 1-9 switch tabs · ↑ ↓ move · Enter or o open · r refresh · m auto-merge
 · M merge now · A auto-merge all ready PRs · v filter PRs · y mark ready · d diff
 · a approve a waiting run · x re-run failed jobs · f fix drift and s sync files (Checks tab) · n new repo
-· Enter: what you can do with the row · t theme
+· Enter: the row as a page (Esc back) · t theme
 · ctrl+p every command · q quit. Every change asks first; --dry-run only shows it.
 """
 
@@ -74,6 +74,7 @@ TAB_ACTIONS = {
     "update_branch": {"prs"}, "comment": {"prs"}, "close_pr": {"prs"},
     "logs": {"runs"}, "cancel_run": {"runs"}, "new_repo": {"repos"},
 }
+PAGE_TABS = {"repos", "prs", "runs", "releases", "packages", "security"}  # Enter opens the row as a page
 SETTINGS = [("defaults", "Defaults repo"), ("orgs", "Orgs"), ("groups", "Groups"), ("plugins", "Plugins"),
             ("theme", "Theme"), ("file", "Config file")]
 
@@ -208,6 +209,90 @@ class Pick(ModalScreen[str]):
 
     def action_cancel(self) -> None:
         self.dismiss("")
+
+
+KEY_HINT = re.compile(r"\(([^()\s])\)$")  # "Merge now (M)" -> M
+
+
+class RowPage(ModalScreen[None]):
+    """One row as a full page: what you can do on the left (Enter or its key), its detail on the right,
+    what the actions printed at the bottom. Esc goes back to the list."""
+
+    DEFAULT_CSS = """
+    RowPage { background: $background; }
+    RowPage #page-title { height: 1; padding: 0 1; background: $panel; color: $accent; text-style: bold; }
+    RowPage #page-body { height: 1fr; }
+    RowPage #page-actions { width: 46; height: 1fr; border-right: solid $primary; background: $surface; }
+    RowPage #page-detail-box { width: 1fr; height: 1fr; padding: 0 1; overflow-x: auto; }
+    RowPage #page-detail { width: auto; }
+    RowPage #page-log { height: 8; border-top: solid $primary; background: $surface; padding: 0 1; }
+    RowPage #page-help { height: 1; padding: 0 1; background: $panel; color: $text-muted; }
+    """
+    BINDINGS: ClassVar = [Binding("escape,backspace", "back", "Back"), Binding("r", "reload", "Refresh")]
+
+    def __init__(self, tab: str, key: str, title: str) -> None:
+        super().__init__()
+        self.tab, self.key, self.title_text = tab, key, title
+        self.items: list[tuple[str, str, object]] = []
+
+    def compose(self) -> ComposeResult:
+        yield Static(self.title_text, id="page-title", markup=False)
+        with Horizontal(id="page-body"):
+            yield OptionList(id="page-actions")
+            with VerticalScroll(id="page-detail-box", can_focus=False):
+                yield Static("Loading …", id="page-detail", markup=False)
+        yield RichLog(id="page-log", wrap=False, markup=False, min_width=40)
+        yield Static("↑ ↓ pick · Enter or the key in ( ) runs it · r refresh · Esc back", id="page-help",
+                     markup=False)
+
+    def on_mount(self) -> None:
+        self.query_one("#page-log", RichLog).can_focus = False
+        self.fill_items()
+        self.app.update_detail()  # shows itself here too (BnbTui.show)
+        self.query_one("#page-actions", OptionList).focus()
+
+    def fill_items(self) -> None:
+        from textual.widgets.option_list import Option
+        self.items = [i for i in self.app.menu_items() if i[0] != "page"]
+        actions = self.query_one("#page-actions", OptionList)
+        highlighted = actions.highlighted
+        actions.clear_options()
+        actions.add_options([Option(label, id=k) for k, label, _ in self.items] or [Option("nothing to do", id="")])
+        actions.highlighted = highlighted if highlighted is not None and highlighted < len(self.items) else 0
+
+    def set_detail(self, text: Text) -> None:
+        with contextlib.suppress(NoMatches):
+            self.query_one("#page-detail", Static).update(text)
+
+    def write(self, line: Text) -> None:
+        with contextlib.suppress(NoMatches):
+            self.query_one("#page-log", RichLog).write(line)
+
+    def run_item(self, k: str) -> None:
+        fn = next((f for i, _, f in self.items if i == k), None)
+        if fn is None:
+            return
+        fn()
+        if self.app.tab() != self.tab:  # the action went to another tab (alerts, the repo of an image)
+            self.dismiss(None)
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        if event.option.id:
+            self.run_item(event.option.id)
+
+    def on_key(self, event) -> None:
+        for k, label, _ in self.items:
+            m = KEY_HINT.search(label)
+            if m and event.character == m.group(1):
+                event.stop()
+                self.run_item(k)
+                return
+
+    def action_back(self) -> None:
+        self.dismiss(None)
+
+    def action_reload(self) -> None:
+        self.app.action_refresh()
 
 
 PR_FILTERS = [("all", "all open"), ("auto", "auto-merge"), ("merged", "recently merged"), ("drafts", "drafts")]
@@ -370,6 +455,9 @@ class BnbTui(App):
         line.append_text(linkify(text.strip()))
         with contextlib.suppress(NoMatches):  # the app is closing
             self.query_one("#log", RichLog).write(line)
+        for screen in self.screen_stack:
+            if isinstance(screen, RowPage):
+                screen.write(line)
 
     def focus_table(self, tab_id: str | None = None) -> None:
         with contextlib.suppress(Exception):
@@ -503,6 +591,9 @@ class BnbTui(App):
             return None
 
     def show(self, tab_id: str, text: str) -> None:
+        for screen in self.screen_stack:
+            if isinstance(screen, RowPage) and screen.tab == tab_id and screen.key == self.current_key(tab_id):
+                screen.set_detail(linkify(text))
         with contextlib.suppress(NoMatches):
             body = linkify(text)
             if tab_id not in ("settings", "checks") and tab_id not in self.plugin_tabs:
@@ -1139,6 +1230,9 @@ class BnbTui(App):
     def after_action(self, text: str) -> None:
         if not self.tab():
             return
+        for screen in self.screen_stack:
+            if isinstance(screen, RowPage):
+                screen.call_after_refresh(screen.fill_items)
         for line in text.splitlines():
             if line.strip():
                 self.log_line(line)
@@ -1525,6 +1619,13 @@ class BnbTui(App):
         if self.tab() == "prs":
             p = self.prs[title]
             title = f"{self.label(p['repo'])}#{p['number']} {p['title'][:60]}"
+        elif self.tab() == "runs":
+            repo, run, _ = self.runs[title]
+            title = f"{self.label(repo)} · {run.get('name')} · {run.get('head_branch')}"
+        if self.tab() in PAGE_TABS:
+            tab_title = dict(self.tabs).get(self.tab(), "")
+            self.push_screen(RowPage(self.tab(), self.current_key() or "", f"{tab_title} › {title}"))
+            return
 
         def chosen(choice: str | None) -> None:
             if choice:
