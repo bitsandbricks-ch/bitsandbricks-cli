@@ -368,7 +368,6 @@ class BnbTui(App):
     def action_toggle_theme(self) -> None:
         names = [t.name for t in self.themes]
         self.theme = names[(names.index(self.theme) + 1) % len(names)] if self.theme in names else names[0]
-        self.action_refresh()
 
     def action_open_link(self, url: str) -> None:
         mode = core.open_mode()
