@@ -241,9 +241,13 @@ if argv[0] == "api":
             if repo in tags else [])
     if re.match(r"/actions/runs/\d+/jobs$", rest):
         out({"jobs": [{"name": "build", "conclusion": "success", "steps": []},
-                      {"name": "sign", "conclusion": "failure", "html_url": f"{WEB}/{repo}/actions/runs/7/job/8",
+                      {"id": 8, "name": "sign", "conclusion": "failure", "html_url": f"{WEB}/{repo}/actions/runs/7/job/8",
                        "steps": [{"name": "checkout", "conclusion": "success"},
                                  {"name": "cosign", "conclusion": "failure"}]}]})
+    if rest == "/actions/jobs/8/logs":
+        print("2026-11-05T09:00:01.0000000Z Signing ghcr.io/acme/x\n"
+              "2026-11-05T09:00:02.0000000Z Error: createLogEntryConflict (409)")
+        sys.exit(0)
     if rest == "/actions/runs" and params.get("branch"):
         out({"workflow_runs": [{"id": 13, "name": "Release", "head_branch": params["branch"], "status": "queued",
                                 "created_at": "2026-11-05T09:00:00Z", "html_url": f"{WEB}/{repo}/actions/runs/13"}]})
@@ -317,7 +321,7 @@ if argv[:2] == ["pr", "view"]:
 if argv[:2] == ["pr", "diff"]:
     print("+print('hi')")
     sys.exit(0)
-if argv[:2] in (["pr", "merge"], ["pr", "ready"]):
+if argv[:2] in (["pr", "merge"], ["pr", "ready"], ["pr", "close"], ["pr", "comment"]):
     sys.exit(0)
 if argv[:2] == ["pr", "create"]:
     print(f"{WEB}/{argv[argv.index('--repo') + 1]}/pull/99")

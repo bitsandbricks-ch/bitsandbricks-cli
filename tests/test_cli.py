@@ -135,6 +135,27 @@ def test_version_files():
     assert V.with_changelog(None, "0.1.0", "x", ["- A (#1)"]) == "# Changelog\n\n## 0.1.0\n\n- A (#1)\n\n"
 
 
+def test_run_and_pr_actions(env, monkeypatch, tmp_path):
+    log = tmp_path / "calls.log"
+    for key in ("PATH", "BNB_DEFAULTS"):
+        monkeypatch.setenv(key, env[key])
+    monkeypatch.setenv("FAKE_GH_LOG", str(log))
+    from bitsandbricks import core, repos
+
+    core.DRY_RUN = False
+    lines = repos.failed_log("acme/plugin-b", 7)
+    assert lines[0] == "── sign (last 2 lines)" and "Error: createLogEntryConflict (409)" in lines
+    out = core.capture(repos.update_branch, "acme/web", 7)
+    out += core.capture(repos.close_pr, "acme/web", 9)
+    out += core.capture(repos.comment_pr, "acme/web", 7, "Looks good")
+    out += core.capture(repos.cancel_run, "acme/web", {"id": 9, "name": "CI", "head_branch": "main"})
+    calls = log.read_text()
+    assert "PUT /repos/acme/web/pulls/7/update-branch" in calls and "pr close 9 --repo acme/web" in calls
+    assert "pr comment 7 --repo acme/web --body Looks good" in calls
+    assert "POST /repos/acme/web/actions/runs/9/cancel" in calls
+    assert "closed acme/web#9" in out
+
+
 def test_doctor(env):
     out = bnb(env, "doctor")
     assert "== acme/plugin-tpl (the reference)\n   ok\n   reference of group plugins" in out

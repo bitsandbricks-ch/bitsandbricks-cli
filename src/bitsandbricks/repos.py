@@ -490,6 +490,60 @@ def rerun_failed(repo: str, run: dict) -> None:
     say(f"   re-running the failed jobs of {run.get('name')} on {run.get('head_branch')}\n   {run.get('html_url', '')}")
 
 
+ACTIVE = ("queued", "in_progress", "waiting", "requested", "pending")
+LOG_NOISE = re.compile(r"^\d{4}-\d\d-\d\dT[\d:.]+Z ")  # the time stamp on each log line
+
+
+def cancel_run(repo: str, run: dict) -> None:
+    if core.DRY_RUN:
+        say(f"   [dry-run] cancel {run.get('name')} on {run.get('head_branch')}")
+        return
+    api("POST", f"/repos/{repo}/actions/runs/{run['id']}/cancel")
+    say(f"   cancelling {run.get('name')} on {run.get('head_branch')}")
+
+
+def failed_log(repo: str, run_id: int, lines: int = 40) -> list[str]:
+    """The last lines of each failed job's log (time stamps dropped); where most failures explain themselves."""
+    jobs = (api("GET", f"/repos/{repo}/actions/runs/{run_id}/jobs?filter=latest&per_page=100") or {}).get("jobs") or []
+    out = []
+    for j in jobs:
+        if (j.get("conclusion") or "") not in FAILED:
+            continue
+        try:
+            text = core.download(f"/repos/{repo}/actions/jobs/{j['id']}/logs").decode(errors="replace")
+        except RuntimeError as err:
+            out += [f"── {j.get('name')}: no log ({err})", ""]
+            continue
+        tail = [LOG_NOISE.sub("", line) for line in text.splitlines() if line.strip()][-lines:]
+        out += [f"── {j.get('name')} (last {len(tail)} lines)", *tail, ""]
+    return out or ["no failed job with a log"]
+
+
+def update_branch(repo: str, number: int) -> None:
+    """Merge the base branch into the PR's branch (GitHub's Update branch button)."""
+    if core.DRY_RUN:
+        say(f"   [dry-run] update the branch of {repo}#{number}")
+        return
+    api("PUT", f"/repos/{repo}/pulls/{number}/update-branch", {})
+    say(f"   updating the branch of {repo}#{number} from its base")
+
+
+def close_pr(repo: str, number: int) -> None:
+    if core.DRY_RUN:
+        say(f"   [dry-run] close {repo}#{number}")
+        return
+    core.gh("pr", "close", str(number), "--repo", repo)
+    say(f"   closed {repo}#{number}")
+
+
+def comment_pr(repo: str, number: int, text: str) -> None:
+    if core.DRY_RUN:
+        say(f"   [dry-run] comment on {repo}#{number}: {text[:60]}")
+        return
+    url = core.gh("pr", "comment", str(number), "--repo", repo, "--body", text).strip()
+    say(f"   commented on {repo}#{number}  {url}")
+
+
 def rerun(repos: list[str], run_id: int | None, yes: bool) -> None:
     """bnb rerun: the failed jobs of each repo's newest failed run (or of --run ID)."""
     for repo in repos:
@@ -646,6 +700,11 @@ def release_text(info: dict) -> str:
             lines.append(f"  {a.get('name')}  {a.get('size', 0) / 1024:.0f} KB  {a.get('download_count', 0)} downloads")
         for g in info["missing"]:
             lines.append(f"  MISSING {g} (the group's release_assets)")
+        notes = [line.rstrip() for line in (rel.get("body") or "").strip().splitlines()]
+        if notes:
+            lines += ["", "notes", *[f"  {line}" for line in notes[:25]]]
+            if len(notes) > 25:
+                lines.append(f"  … {len(notes) - 25} more lines: o opens the release")
     else:
         lines.append("no release")
     lines += ["", "release runs" if info["runs"] else "no release runs in the last 30 runs"]

@@ -50,6 +50,18 @@ def test_tui_flow(env, monkeypatch):
             await pilot.pause(0.3)
             assert app.tab() == "prs"
             assert app.query_one("#prs-table").row_count == 3
+            prs = app.query_one("#prs-table")
+            prs.move_cursor(row=prs.get_row_index("acme/web#7"))
+            await pilot.pause(0.2)
+            assert "u update branch" in str(app.query_one("#prs-detail").render())
+            await pilot.press("u")
+            await pilot.pause(0.3)
+            await pilot.press("y")
+            await pilot.pause(0.5)
+            await pilot.press("c")
+            await pilot.pause(0.3)
+            await pilot.press(*"thanks", "enter")
+            await pilot.pause(0.5)
             await pilot.press("3")
             runs = app.query_one("#runs-table")
             await until(pilot, lambda: runs.row_count)
@@ -63,6 +75,9 @@ def test_tui_flow(env, monkeypatch):
             await pilot.pause(0.2)
             runs.move_cursor(row=runs.get_row_index("acme/plugin-b|7"))
             await until(pilot, lambda: "cosign" in str(app.query_one("#runs-detail").render()))
+            assert "l failed log" in str(app.query_one("#runs-detail").render())
+            await pilot.press("l")
+            await until(pilot, lambda: "createLogEntryConflict" in str(app.query_one("#runs-detail").render()))
             await pilot.press("x")
             await pilot.pause(0.3)
             await pilot.press("y")
@@ -74,6 +89,8 @@ def test_tui_flow(env, monkeypatch):
             releases.move_cursor(row=releases.get_row_index("acme/plugin-b"))
             await until(pilot, lambda: "cosign" in str(app.query_one("#releases-detail").render()))
             assert "MISSING *.zip" in str(app.query_one("#releases-detail").render())
+            await until(pilot, lambda: "→ R releases v0.4.0" in str(app.query_one("#releases-detail").render()))
+            assert "b bump version" in str(app.query_one("#releases-detail").render())
             await pilot.press("R")
             await until(pilot, lambda: "v0.4.0" in str(app.screen.query_one("Label").render()))
             await pilot.press("y")
@@ -106,6 +123,8 @@ def test_tui_flow(env, monkeypatch):
             assert any("[dry-run] re-run the failed jobs of Release on v0.3.0" in line for line in log), log
             assert any("https://example.org/one" in line for line in log), log
             assert any("[dry-run] push tag v0.4.0 on main" in line for line in log), log
+            assert any("[dry-run] update the branch of acme/web#7" in line for line in log), log
+            assert any("[dry-run] comment on acme/web#7: thanks" in line for line in log), log
             assert any("[dry-run] branch bump/v0.5.0" in line for line in log), log
 
     asyncio.run(run())
@@ -127,8 +146,12 @@ def test_tui_menu_footer_settings_new(env, monkeypatch, tmp_path):
             table = app.query_one("#repos-table")
             await until(pilot, lambda: table.row_count)
             assert "runs" not in app.loaded and "security" not in app.loaded  # loaded on demand only
-            assert app.check_action("diff", ()) is False and app.check_action("merge", ()) is True
+            table.move_cursor(row=table.get_row_index("acme/api"))
+            await pilot.pause(0.2)
+            assert app.check_action("diff", ()) is False and app.check_action("merge", ()) is False  # no PRs
             table.move_cursor(row=table.get_row_index("acme/web"))
+            await pilot.pause(0.2)
+            assert app.check_action("merge", ()) is True
             await pilot.press("enter")
             await pilot.pause(0.3)
             assert isinstance(app.screen, tui.Pick)
