@@ -32,11 +32,23 @@ Repos are named as `owner/name`, as a bare `name` when only one repo has it, or 
 | `bnb security` | Open Dependabot, secret scanning and code scanning alerts. |
 | `bnb doctor [names] [--fix]` | Settings, security, release immutability, rulesets and files against the defaults. `--fix` applies them. |
 | `bnb sync [names] [--only PATH]` | Opens a PR per repo whose shared files differ. |
+| `bnb new owner/name [--group G] [--public]` | Creates a repo the way its group wants it: from the reference repo when that is a GitHub template, the group's files committed, then its settings, security and rulesets applied. Private unless `--public`. |
 | `bnb open web#12` | Prints the link, and opens it (or copies it over SSH; `BNB_OPEN=browser\|copy\|print`). |
 | `bnb plugins` | Installed plugins. |
 | `bnb tui` | Everything above, full screen. |
 
 Security alerts need the `security_events` scope: `gh auth refresh -s security_events`.
+
+## TUI
+
+`bnb tui` has tabs for Repos, Pull requests, Runs, Security, Checks (doctor plus plugin checks) and Settings (defaults repo, orgs, groups, plugins, theme, config file), plus any tabs that plugins add.
+
+- **Enter** on a row opens a menu of what you can do with it: merge, mark ready, diff, approve, check or fix a repo, sync its files, open it.
+- **The footer** only shows the keys that work on the current tab.
+- **n** creates a new repo.
+- **ctrl+p** lists every command.
+- **Loading:** nothing reloads by itself. The repo and PR list loads at start, with one GraphQL query per 20 repos. Runs and Security load the first time you open their tab. **r** reloads the tab you are on.
+- **Rate limit:** the header shows how many API calls are left. Answers are cached for 60 seconds. If GitHub's rate limit is reached, the TUI says when it resets instead of failing.
 
 ## Configuration
 

@@ -9,9 +9,14 @@ Start it with `bnb tui` (needs Textual: the [tui] extra or `pipx inject bitsandb
   Checks         the repos against the defaults (doctor), plus plugin checks
   ...            tabs from plugins
 
+Nothing reloads on its own: the repo and PR list (one GraphQL query) loads at the
+start, Runs and Security (API calls per repo) the first time you open their tab,
+and r reloads the tab you are on. The header shows the API calls left.
+
 Keys: ← → or 1-9 switch tabs · ↑ ↓ move · Enter or o open · r refresh · m auto-merge
 · M merge now · A auto-merge all ready PRs · v filter PRs · y mark ready · d diff
-· a approve a waiting run · f fix drift and s sync files (Checks tab) · t theme
+· a approve a waiting run · f fix drift and s sync files (Checks tab) · n new repo
+· Enter: what you can do with the row · t theme
 · ctrl+p every command · q quit. Every change asks first; --dry-run only shows it.
 """
 
@@ -48,13 +53,20 @@ from textual.widgets import (
 )
 from textual.widgets.data_table import CellDoesNotExist, RowDoesNotExist
 
-from bitsandbricks import core, plugins
+from bitsandbricks import config, core, plugins
 from bitsandbricks import defaults as D
 from bitsandbricks import repos as R
 from bitsandbricks.config import Config
 
 BASE_TABS = [("repos", "Repos"), ("prs", "Pull requests"), ("runs", "Runs"), ("security", "Security"),
-             ("checks", "Checks")]
+             ("checks", "Checks"), ("settings", "Settings")]
+# Which tabs each key works on: the footer shows only the keys of the tab you are on.
+TAB_ACTIONS = {
+    "merge": {"repos", "prs"}, "merge_all": {"repos", "prs"}, "pr_filter": {"prs"}, "ready": {"prs"},
+    "diff": {"prs"}, "approve": {"runs"}, "fix": {"checks"}, "sync": {"checks"},
+}
+SETTINGS = [("defaults", "Defaults repo"), ("orgs", "Orgs"), ("groups", "Groups"), ("plugins", "Plugins"),
+            ("theme", "Theme"), ("file", "Config file")]
 
 # bitsandbricks: brick red and a warm sand on graphite.
 BRICK, SAND, SKY = "#e2674a", "#f2c46d", "#6cb6d9"
@@ -77,6 +89,7 @@ STATE_STYLE = {
     "failure": DANGER, "failing": DANGER, "error": DANGER, "conflicts": DANGER,
     "pending": WARNING, "running": WARNING, "waiting": WARNING, "in_progress": WARNING, "auto-merge": SKY,
 }
+CACHE = "60s"  # gh answers the same GET from its cache for this long
 URL = re.compile(r"https?://[^\s)\]>,'\"]+")
 
 
@@ -227,8 +240,9 @@ class BnbTui(App):
         Binding("y", "ready", "Ready"),
         Binding("d", "diff", "Diff"),
         Binding("a", "approve", "Approve"),
-        Binding("f", "fix", "Fix drift", show=False),
-        Binding("s", "sync", "Sync files", show=False),
+        Binding("f", "fix", "Fix drift"),
+        Binding("s", "sync", "Sync files"),
+        Binding("n", "new_repo", "New repo"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -252,6 +266,9 @@ class BnbTui(App):
         self.checks = [("doctor", "Defaults (doctor)", None)] + plugins.hook("tui_checks")
         self.plugin_keys = plugins.hook("tui_keys")
         self.themes = THEMES + plugins.hook("tui_themes")
+        self.loaded: dict[str, float] = {}  # tab -> when its data was loaded
+        self.force = False
+        self.rate = ""
 
     # ── helpers for plugins ───────────────────────────────────────────────
 
@@ -282,7 +299,7 @@ class BnbTui(App):
         yield Header()
         with TabbedContent(id="tabs"):
             for tab_id, title in self.tabs:
-                narrow = tab_id == "checks" or tab_id in self.plugin_tabs
+                narrow = tab_id in ("checks", "settings") or tab_id in self.plugin_tabs
                 with TabPane(title, id=tab_id), Horizontal(classes="split"):
                     yield DataTable(id=f"{tab_id}-table", cursor_type="row", zebra_stripes=True,
                                     classes="narrow" if narrow else "")
@@ -298,17 +315,20 @@ class BnbTui(App):
         self.query_one("#log", RichLog).can_focus = False
         heads = {"repos": R.status_head(), "prs": ["repo", "#", "title", "state", "checks"],
                  "runs": ["repo", "state", "workflow", "ref", "when"], "security": ["repo", "alerts", "worst", "kinds"],
-                 "checks": ["check"], **{t: ["view"] for t in self.plugin_tabs}}
+                 "checks": ["check"], "settings": ["setting"], **{t: ["view"] for t in self.plugin_tabs}}
         for tab_id, head in heads.items():
             self.query_one(f"#{tab_id}-table", DataTable).add_columns(*head)
         checks = self.query_one("#checks-table", DataTable)
+        settings = self.query_one("#settings-table", DataTable)
+        for key, label in SETTINGS:
+            settings.add_row(label, key=key)
         for key, label, _ in self.checks:
             checks.add_row(label, key=key)
         for tab_id, t in self.plugin_tabs.items():
             table = self.query_one(f"#{tab_id}-table", DataTable)
             for key, label in t.get("rows") or []:
                 table.add_row(label, key=key)
-        for i, (key, description, _) in enumerate(self.plugin_keys):
+        for i, (key, description, *_) in enumerate(self.plugin_keys):
             self.bind(key, f"plugin_key({i})", description=description)
         for err in plugins.errors:
             self.log_line(f"plugin broken: {err}")
@@ -316,7 +336,6 @@ class BnbTui(App):
                       "r refreshes, ctrl+p all commands, q quits")
         self.focus_table()
         self.load_github()
-        self.set_interval(120, self.action_refresh)
 
     def log_line(self, text: str) -> None:
         line = Text(time.strftime("%H:%M:%S "), style="dim")
@@ -365,6 +384,22 @@ class BnbTui(App):
         with contextlib.suppress(NoMatches):
             self.query_one("#log", RichLog).write(line)
 
+    def key_tabs(self, i: int) -> set[str]:
+        """Tabs a plugin key works on: its 4th item, or Repos and Pull requests."""
+        k = self.plugin_keys[i]
+        return set(k[3]) if len(k) > 3 and k[3] else {"repos", "prs"}
+
+    def check_action(self, action: str, parameters: tuple) -> bool | None:
+        """Hide the keys that do nothing on this tab, so the footer shows what you can do here."""
+        tab = self.tab()
+        if not tab or isinstance(self.screen, ModalScreen):
+            return True
+        if action in TAB_ACTIONS:
+            return tab in TAB_ACTIONS[action]
+        if action == "plugin_key" and parameters:
+            return tab in self.key_tabs(int(parameters[0]))
+        return True
+
     def action_plugin_key(self, i: int) -> None:
         try:
             self.plugin_keys[i][2](self)
@@ -405,6 +440,9 @@ class BnbTui(App):
             self.repos = R.pick_repos(self.cfg, [], self.group)[0]
             rows = R.status_rows(self.cfg, self.repos)
             info = R.nodes(self.repos)
+        except core.RateLimited as err:
+            self.call_from_thread(self.rate_limited, err)
+            return
         except RuntimeError as err:
             self.call_from_thread(self.log_line, f"GitHub: {err}")
             return
@@ -413,8 +451,8 @@ class BnbTui(App):
             for p in ((info.get(repo) or {}).get("pullRequests") or {}).get("nodes") or []:
                 prs[f"{repo}#{p['number']}"] = dict(p, repo=repo)
         self.call_from_thread(self.fill_github, rows, prs, info)
-        self.load_runs()
-        self.load_security()
+        self.call_from_thread(self.load_tab_data)
+        self.check_rate()
 
     def fill_github(self, rows: list[list[str]], prs: dict[str, dict], info: dict) -> None:
         with contextlib.suppress(NoMatches):
@@ -482,9 +520,13 @@ class BnbTui(App):
 
     @work(thread=True, exclusive=True, group="security")
     def load_security(self) -> None:
+        self.loaded["security"] = time.time()
         try:
             with ThreadPoolExecutor(core.WORKERS) as pool:
                 found = dict(zip(self.repos, pool.map(R.repo_alerts, self.repos)))
+        except core.RateLimited as err:
+            self.call_from_thread(self.rate_limited, err)
+            return
         except RuntimeError as err:
             self.call_from_thread(self.log_line, f"Security: {err}")
             return
@@ -537,17 +579,26 @@ class BnbTui(App):
 
     @work(thread=True, exclusive=True, group="runs")
     def load_runs(self) -> None:
+        self.loaded["runs"] = time.time()
+
         def latest(repo):
             try:
                 found = (core.api("GET", f"/repos/{repo}/actions/runs?per_page=1") or {}).get("workflow_runs") or []
+            except core.RateLimited:
+                raise
             except RuntimeError:
                 found = []
             return repo, found[0] if found else None
 
-        waiting = R.all_waiting(self.repos)
-        with ThreadPoolExecutor(core.WORKERS) as pool:
-            last = list(pool.map(latest, self.repos))
+        try:
+            waiting = R.all_waiting(self.repos)
+            with ThreadPoolExecutor(core.WORKERS) as pool:
+                last = list(pool.map(latest, self.repos))
+        except core.RateLimited as err:
+            self.call_from_thread(self.rate_limited, err)
+            return
         self.call_from_thread(self.fill_runs, waiting, last)
+        self.check_rate()
 
     def fill_runs(self, waiting, last) -> None:
         with contextlib.suppress(NoMatches):
@@ -577,7 +628,7 @@ class BnbTui(App):
         if len(waiting) != self.last_waiting and waiting:
             self.log_line(f"{len(waiting)} run(s) wait for your approval: Runs tab (3), key a")
         self.last_waiting = len(waiting)
-        self.sub_title = f"{self.base_title} · {len(waiting)} to approve (3, a)" if waiting else self.base_title
+        self.update_title()
         with contextlib.suppress(NoMatches):
             self.query_one("#tabs", TabbedContent).get_tab("runs").label = (
                 f"Runs ({len(waiting)} to approve)" if waiting else "Runs")
@@ -596,11 +647,14 @@ class BnbTui(App):
         self.update_detail()
 
     def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        self.refresh_bindings()
+        core.CACHE = CACHE
+        self.load_tab_data()
         self.focus_table()
         self.update_detail()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        self.action_open()
+        self.action_menu()
 
     def update_detail(self) -> None:
         tab, key = self.tab(), self.current_key()
@@ -665,6 +719,8 @@ class BnbTui(App):
                 text = self.plugin_tabs[tab]["text"](key)
             except Exception as err:
                 text = f"error: {err}"
+        elif tab == "settings":
+            text = self.settings_text(key)
         elif key == "doctor":
             text = core.capture(D.doctor_all, self.cfg, self.repos)
             text += "\nf applies the fixes (doctor --fix) · s opens PRs with the shared files (sync)\n"
@@ -684,11 +740,43 @@ class BnbTui(App):
     # ── actions ───────────────────────────────────────────────────────────
 
     def action_refresh(self) -> None:
+        """r: everything on the tab you are on, fresh (the Repos and PR list are one query)."""
         self.detail_cache.clear()
         R._nodes.clear()
+        self.loaded.pop(self.tab(), None)
+        core.CACHE = None  # r means fresh: no answers from gh's cache
+        self.force = True
         self.load_github()
         if self.tab() not in ("repos", "prs", "runs", "security"):
             self.update_detail()
+
+    def load_tab_data(self) -> None:
+        """Runs and security cost API calls per repo: they load the first time you open their tab, then on r."""
+        tab, force, self.force = self.tab(), self.force, False
+        if tab in ("runs", "security") and (force or tab not in self.loaded) and self.repos:
+            (self.load_runs if tab == "runs" else self.load_security)()
+
+    def rate_limited(self, err: core.RateLimited) -> None:
+        self.log_line(f"{err}. r tries again.")
+        self.show_rate({"core": {"remaining": 0, "limit": 0}})
+
+    @work(thread=True, exclusive=True, group="rate")
+    def check_rate(self) -> None:
+        self.call_from_thread(self.show_rate, core.rate_limit())
+
+    def show_rate(self, limits: dict) -> None:
+        rest = (limits.get("core") or {}).get("remaining")
+        gql = (limits.get("graphql") or {}).get("remaining")
+        self.rate = "" if rest is None else f"API {rest}" + (f" · GraphQL {gql}" if gql is not None else "") + " left"
+        self.update_title()
+
+    def update_title(self) -> None:
+        bits = [self.base_title]
+        if self.last_waiting:
+            bits.append(f"{self.last_waiting} to approve (3, a)")
+        if self.rate:
+            bits.append(self.rate)
+        self.sub_title = " · ".join(bits)
 
     def action_open(self) -> None:
         tab, key = self.tab(), self.current_key()
@@ -860,6 +948,196 @@ class BnbTui(App):
         self.confirm_then(question, approve, repo, run, envs)
 
 
+    # ── settings ──────────────────────────────────────────────────────────
+
+    def settings_text(self, key: str) -> str:
+        cfg = self.cfg
+        if key == "defaults":
+            src = cfg.source
+            lines = [f"Defaults: {src or 'none'}", ""]
+            if src and not src.local:
+                lines.append(f"{core.WEB}/{src.where}")
+            lines += ["", "Enter: use another defaults repo (owner/repo) or a local folder.",
+                      "Every repo is checked against its bitsandbricks.toml (Checks tab)."]
+            return "\n".join(lines)
+        if key == "orgs":
+            mine = config.user_config().get("orgs") or []
+            return "\n".join([f"Orgs: {', '.join(cfg.orgs) or 'none'}", "",
+                              f"from the defaults: {', '.join(config.load().raw.get('orgs') or []) or 'none'}",
+                              f"your own:          {', '.join(mine) or 'none'}", "",
+                              "Enter: set your own orgs (added to the defaults' orgs)."])
+        if key == "groups":
+            out = [f"{len(cfg.groups)} group(s), first match wins:", ""]
+            for g in cfg.groups:
+                count = sum(1 for r in self.repos if (x := R.group_of(cfg, r)) and x.name == g.name)
+                out.append(f"{g.name}  ({count} repos)")
+                out.append(f"  match     {g.match or 'the rest'}")
+                if g.reference:
+                    out.append(f"  from      {g.reference}  {core.WEB}/{g.reference}")
+                for label, value in (("settings", g.settings), ("security", g.security), ("require", g.require),
+                                     ("rulesets", g.rulesets), ("files", g.files)):
+                    if value:
+                        out.append(f"  {label:<9} {value}")
+                out.append("")
+            out.append("Groups live in bitsandbricks.toml in the defaults repo.")
+            return "\n".join(out)
+        if key == "plugins":
+            out = [f"{p.name}: {getattr(p, 'description', '')}" for p in plugins.load()] or ["No plugins."]
+            out += [f"broken: {e}" for e in plugins.errors]
+            out += ["", "Add one: pipx inject bitsandbricks-cli <package>", "Limit them: BNB_PLUGINS=a,b or none"]
+            return "\n".join(out)
+        if key == "theme":
+            return f"Theme: {self.theme}\n\nEnter or t: next theme ({', '.join(t.name for t in self.themes)})"
+        path = config.config_file()
+        text = path.read_text() if path.exists() else "(none yet: bnb init writes it)"
+        return f"{path}\n\n{text}"
+
+    def setting(self, key: str) -> None:
+        if key == "theme":
+            self.action_toggle_theme()
+        elif key == "defaults":
+            self.ask("Defaults repo (owner/repo) or local folder with bitsandbricks.toml", self.set_defaults)
+        elif key == "orgs":
+            mine = ", ".join(config.user_config().get("orgs") or [])
+            self.push_screen(Ask("Your own orgs or users, comma separated (empty: none)", value=mine), self.set_orgs)
+        else:
+            self.update_detail()
+
+    def save_config(self, **changes) -> None:
+        values = {**config.user_config(), **changes}
+        config.save_user_config(values)
+        config._loaded.clear()
+        try:
+            self.cfg = config.load()
+        except RuntimeError as err:
+            self.log_line(f"Settings: {err}")
+            return
+        self.base_title = ", ".join(self.cfg.orgs) or "no orgs"
+        self.log_line(f"saved {config.config_file()}")
+        self.action_refresh()
+
+    def set_defaults(self, value: str | None) -> None:
+        if value:
+            source = config.Source(value)
+            if source.read(config.DEFAULTS_FILE) is None:
+                self.log_line(f"No {config.DEFAULTS_FILE} in {value} (bnb init {value} starts one)")
+                return
+            self.save_config(defaults=value)
+
+    def set_orgs(self, value: str | None) -> None:
+        if value is not None:
+            self.save_config(orgs=[o.strip() for o in value.split(",") if o.strip()])
+
+    # ── Enter: what you can do with the selected row ──────────────────────
+
+    def menu_items(self) -> list[tuple[str, str, object]]:
+        tab, key = self.tab(), self.current_key()
+        if not key:
+            return []
+        items: list[tuple[str, str, object]] = []
+        if tab == "settings":
+            label = {"defaults": "Change the defaults repo", "orgs": "Change your orgs",
+                     "theme": "Next theme"}.get(key)
+            if label:
+                items.append(("setting", label, lambda: self.setting(key)))
+        if tab == "repos":
+            items += [("merge", "Auto-merge its ready PRs (m)", lambda: self.action_merge(False)),
+                      ("merge-now", "Merge its ready PRs now (M)", lambda: self.action_merge(True)),
+                      ("doctor", "Check it against the defaults", lambda: self.do_job(D.doctor_all, self.cfg, [key])),
+                      ("fix", "Apply the defaults to it (doctor --fix)", lambda: self.confirm_then(
+                          f"Apply the defaults' settings, security and rulesets to {key}?",
+                          D.doctor_all, self.cfg, [key], True)),
+                      ("sync", "Open a PR with its group's files (sync)", lambda: self.sync_repos([key])),
+                      ("security", "Its security alerts", lambda: self.goto("security", key)),
+                      ("actions", "Its Actions page", lambda: self.action_open_link(f"{core.WEB}/{key}/actions"))]
+        elif tab == "prs":
+            p = self.prs[key]
+            if not p.get("merged"):
+                items += [("merge", "Turn on auto-merge (m)", lambda: self.action_merge(False)),
+                          ("merge-now", "Merge now (M)", lambda: self.action_merge(True))]
+                if p["isDraft"]:
+                    items.append(("ready", "Mark ready for review (y)", self.action_ready))
+                items.append(("diff", "Show the diff (d)", self.action_diff))
+            items.append(("checks", "Its checks page", lambda: self.action_open_link(f"{p['url']}/checks")))
+        elif tab == "runs" and self.runs[key][2]:
+            items.append(("approve", "Approve (a)", self.action_approve))
+        elif tab == "checks" and key == "doctor":
+            items += [("fix", "Apply the defaults where repos drifted (f)", self.action_fix),
+                      ("sync", "Open PRs with the shared files (s)", self.action_sync),
+                      ("again", "Check again", self.recheck)]
+        for i, (k, description, *_) in enumerate(self.plugin_keys):
+            if tab in self.key_tabs(i):
+                items.append((f"plugin-{i}", f"{description} ({k})", lambda i=i: self.action_plugin_key(i)))
+        if tab not in ("settings",):
+            items += [("open", "Open in the browser (o)", self.action_open)]
+        return items
+
+    def action_menu(self) -> None:
+        items = self.menu_items()
+        if not items:
+            return
+        actions = {k: fn for k, _, fn in items}
+        title = self.current_key() or ""
+        if self.tab() == "prs":
+            p = self.prs[title]
+            title = f"{self.label(p['repo'])}#{p['number']} {p['title'][:60]}"
+
+        def chosen(choice: str | None) -> None:
+            if choice:
+                actions[choice]()
+        self.push_screen(Pick(title, [(k, label) for k, label, _ in items]), chosen)
+
+    def goto(self, tab: str, key: str) -> None:
+        self.action_tab(tab)
+        with contextlib.suppress(NoMatches):
+            self.restore(self.query_one(f"#{tab}-table", DataTable), key)
+
+    def recheck(self) -> None:
+        self.detail_cache.pop(f"{self.tab()}:{self.current_key()}", None)
+        self.update_detail()
+
+    def sync_repos(self, repos: list[str]) -> None:
+        def sync_all(repos) -> None:
+            core.for_each(repos, D.sync, D.sync_ctx(self.cfg, repos))
+        self.confirm_then(f"Open a PR in {', '.join(repos) if len(repos) < 4 else f'{len(repos)} repos'} where the "
+                          "shared files differ from the group's? (bnb sync)", sync_all, list(repos))
+
+    # ── new repo ──────────────────────────────────────────────────────────
+
+    def action_new_repo(self) -> None:
+        one = self.cfg.orgs[0] if len(self.cfg.orgs) == 1 else ""
+
+        def named(name: str | None) -> None:
+            if not name:
+                return
+            repo = name if "/" in name or not one else f"{one}/{name}"
+            if "/" not in repo:
+                self.log_line("Name the owner too: owner/name")
+                return
+            match = self.cfg.group_of(repo)
+            options = [("@match", f"by match: {match.name if match else 'no group'}")] + [
+                (g.name, g.name) for g in self.cfg.groups if not match or g.name != match.name]
+            self.push_screen(Pick(f"Group for {repo}", options), lambda g: grouped(repo, g, match))
+
+        def grouped(repo: str, group: str | None, match) -> None:
+            if not group:
+                return
+            group = "" if group == "@match" else group
+            name = group or (match.name if match else "")
+            self.push_screen(Pick(f"{repo} in group {name or '(none)'}: visibility",
+                                  [("private", "private"), ("public", "public")]),
+                             lambda vis: visible(repo, group or None, vis))
+
+        def visible(repo: str, group: str | None, vis: str | None) -> None:
+            if vis:
+                self.confirm_then(f"Create {repo} ({vis}) and set it up the way its group wants?\n"
+                                  "(from the reference repo if it is a template, the group's files, settings, "
+                                  "security and rulesets)", D.create_repo, self.cfg, repo, group, vis == "public")
+        self.ask("New repo: owner/name" + (f" (or just a name for {one})" if one else ""), named)
+
+
 def run(cfg: Config, dry_run: bool = False, group: str | None = None) -> None:
     core.DRY_RUN = dry_run
+    core.CACHE = CACHE
+    core.WORKERS = 4  # fewer calls at once: GitHub's secondary rate limit watches bursts
     BnbTui(cfg, dry_run=dry_run, group=group).run()

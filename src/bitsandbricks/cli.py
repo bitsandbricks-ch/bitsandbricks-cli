@@ -12,6 +12,7 @@ repo of your orgs. --org and --group narrow that down.
   bnb security                      Dependabot, secret and code scanning alerts
   bnb doctor [names] [--fix]        settings, security, rulesets and files against the defaults
   bnb sync [names]                  PRs that bring shared files in line
+  bnb new owner/name [--group G]    a new repo, set up the way its group wants
   bnb tui                           all of it, full screen
 """
 
@@ -81,6 +82,10 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict]:
     sp.add_argument("defaults", help="owner/repo or a folder with bitsandbricks.toml")
     sp.add_argument("--ref", help="branch or tag of the defaults repo")
     sp.add_argument("--org", action="append", metavar="ORG", help="orgs for a new bitsandbricks.toml")
+    sp = sub.add_parser("new", parents=[common], help="create a repo the way its group wants it")
+    sp.add_argument("repo", help="owner/name (name alone when bnb knows one org)")
+    sp.add_argument("--public", action="store_true", help="public (default: private)")
+    sp.add_argument("--description", default="")
     sub.add_parser("config", help="show where bnb looks and what it found")
     sub.add_parser("plugins", help="installed plugins")
     sp = sub.add_parser("tui", parents=[common], help="full screen (needs: pipx inject bitsandbricks-cli textual)")
@@ -181,6 +186,9 @@ def main(argv: list[str] | None = None) -> None:
             except ImportError as err:
                 sys.exit(f"The TUI needs Textual: pipx inject bitsandbricks-cli textual. ({err})")
             return tui.run(cfg, dry_run=core.DRY_RUN, group=args.group)
+        if args.cmd == "new":
+            repo = args.repo if "/" in args.repo or len(cfg.orgs) != 1 else f"{cfg.orgs[0]}/{args.repo}"
+            return defaults.create_repo(cfg, repo, args.group, args.public, args.description)
         if args.cmd in ("pr", "open"):
             repo, number = repos.resolve(cfg, args.target)
             if args.cmd == "open":

@@ -122,7 +122,7 @@ def info(repo):
     owner, name = repo.split("/")
     settings = REPOS[repo][0]
     return {"full_name": repo, "name": name, "owner": {"login": owner}, "archived": name == "old",
-            "default_branch": "main", "topics": TOPICS.get(name, []), "private": owner == "mike",
+            "default_branch": "main", "is_template": name == "plugin-tpl", "topics": TOPICS.get(name, []), "private": owner == "mike",
             "security_and_analysis": {"secret_scanning": {"status": "enabled" if repo != "acme/web" else "disabled"}},
             **settings}
 
@@ -237,6 +237,10 @@ if argv[0] == "api":
     fail(f"fake gh: no answer for GET {path}")
 
 
+if argv[:2] == ["repo", "view"]:
+    sys.exit(0 if argv[2] in REPOS else 1)
+if argv[:2] == ["repo", "create"]:
+    sys.exit(0)
 if argv[:2] == ["pr", "list"]:
     repo = argv[argv.index("--repo") + 1]
     out([p for p in PRS.get(repo, []) if p["state"] == "OPEN"])

@@ -403,6 +403,8 @@ def all_waiting(repos: list[str]) -> list[tuple[str, dict, list[dict]]]:
     def safe(repo):
         try:
             return waiting_runs(repo)
+        except core.RateLimited:
+            raise
         except RuntimeError:
             return []
 
@@ -439,6 +441,8 @@ def runs(repos: list[str], limit: int = 3, failed: bool = False) -> None:
         q = f"per_page={limit}" + ("&status=failure" if failed else "")
         try:
             return repo, (api("GET", f"/repos/{repo}/actions/runs?{q}") or {}).get("workflow_runs") or []
+        except core.RateLimited:
+            raise
         except RuntimeError as err:
             return repo, [{"error": str(err)}]
 
@@ -489,6 +493,8 @@ def repo_alerts(repo: str) -> tuple[list[dict], list[str]]:
     for kind, label in ALERT_KINDS:
         try:
             found = api("GET", f"/repos/{repo}/{kind}/alerts?state=open&per_page=100") or []
+        except core.RateLimited:
+            raise
         except RuntimeError as err:
             text = str(err)
             if kind == "code-scanning" and ("no analysis" in text.lower() or "404" in text):
