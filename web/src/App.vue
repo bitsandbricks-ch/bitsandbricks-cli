@@ -65,7 +65,7 @@ window.addEventListener('keydown', (e) => {
   <router-view v-else-if="!signedIn || route.meta.public" />
   <div v-else class="screen">
     <header class="top">
-      <span class="prompt accent">{{ state.me.user.name.toLowerCase().replace(/\s+/g, '') }}@bnb-operator</span><span class="dim">:~$</span>
+      <span class="prompt accent">{{ state.me.user.name.toLowerCase().replace(/\s+/g, '') }}@mortar</span><span class="dim">:~$</span>
       <span class="dim hide-sm">{{ who }}</span>
       <span class="spacer" />
       <span v-if="state.busy" class="warn">working…</span>

@@ -37,7 +37,7 @@ async function saveSettings() {
   } catch (e) { log(e.message, 'error') }
 }
 async function unlink(i) {
-  if (!(await ask(`Disconnect ${i.provider} (${i.login})? The operator revokes its token.`, { allowDry: false }))) return
+  if (!(await ask(`Disconnect ${i.provider} (${i.login})? Mortar revokes its token.`, { allowDry: false }))) return
   try { await del(`/me/identities/${i.id}`); await loadMe() } catch (e) { log(e.message, 'error') }
 }
 async function makeKey() {
@@ -151,7 +151,7 @@ onMounted(load)
       </div>
 
       <div v-if="state.me.user.is_admin && opstats" class="box">
-        <div class="accent">operator</div>
+        <div class="accent">mortar (admin)</div>
         <div class="dim">{{ opstats.users }} users · {{ opstats.sessions }} sessions · {{ opstats.keys }} keys · cache: {{ JSON.stringify(opstats.transports) }}</div>
         <table class="table" style="margin-top: 6px">
           <tr v-for="u in users" :key="u.id"><td>{{ u.name }}<span v-if="u.is_admin" class="warn"> admin</span></td>
@@ -161,7 +161,7 @@ onMounted(load)
 
       <div class="box">
         <div class="bad">delete my account</div>
-        <p class="dim">Revokes the operator's tokens at GitHub and GitLab and removes everything it keeps about you.</p>
+        <p class="dim">Revokes Mortar's tokens at GitHub and GitLab and removes everything it keeps about you.</p>
         <button class="danger" @click="deleteAccount">delete account</button>
       </div>
     </div>

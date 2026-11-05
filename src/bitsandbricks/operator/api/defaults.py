@@ -184,7 +184,7 @@ def put_file():
     problems = [] if delete else validate(path, text)
     if problems and not data.get("force"):
         return jsonify({"problems": problems}), 422
-    message = str(data.get("message") or f"{'Remove' if delete else 'Update'} {path} (bnb operator)")[:200]
+    message = str(data.get("message") or f"{'Remove' if delete else 'Update'} {path} (Mortar)")[:200]
     with as_user() as (_gh, gl):
         try:
             url = (write_gitlab(gl, repo, ref, path, text, delete, mode, message) if repo.startswith(GL.PREFIX)
@@ -219,7 +219,7 @@ def write_github(repo: str, ref: str | None, path: str, text: str, delete: bool,
     if mode == "commit":
         return f"{core.transport().web}/{repo}/blob/{base}/{path}"
     return core.transport().pr_create(repo, base, branch, message,
-                                      f"{message}\n\nOpened from the bnb operator's defaults editor by {g.user.name}.")
+                                      f"{message}\n\nOpened from Mortar's defaults editor by {g.user.name}.")
 
 
 def write_gitlab(gl, repo: str, ref: str | None, path: str, text: str, delete: bool, mode: str, message: str) -> str:
@@ -239,7 +239,7 @@ def write_gitlab(gl, repo: str, ref: str | None, path: str, text: str, delete: b
         return f"{info.get('web_url', '')}/-/blob/{base}/{path}"
     mr = gl.api("POST", f"{gl.project(repo)}/merge_requests", {
         "source_branch": branch, "target_branch": base, "title": message, "remove_source_branch": True,
-        "description": f"Opened from the bnb operator's defaults editor by {g.user.name}."}) or {}
+        "description": f"Opened from Mortar's defaults editor by {g.user.name}."}) or {}
     return mr.get("web_url", "")
 
 

@@ -17,7 +17,7 @@ repo of your orgs. --org and --group narrow that down.
   bnb sync [names]                  PRs that bring shared files in line
   bnb new owner/name [--group G]    a new repo, set up the way its group wants
   bnb tui                           all of it, full screen
-  bnb login https://operator        go through an operator (web app) with an API key: no gh needed
+  bnb login https://mortar          go through Mortar (the web app) with an API key: no gh needed
   bnb market [install NAME]         plugins from the signed plugin index
 """
 
@@ -99,11 +99,11 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict]:
     sp.add_argument("--public", action="store_true", help="public (default: private)")
     sp.add_argument("--description", default="")
     sub.add_parser("config", help="show where bnb looks and what it found")
-    sp = sub.add_parser("login", help="sign in to an operator (the web app) with an API key")
-    sp.add_argument("url", help="the operator, e.g. https://bnb.example.org")
+    sp = sub.add_parser("login", help="sign in to Mortar (the web app) with an API key")
+    sp.add_argument("url", help="Mortar's URL, e.g. https://mortar.example.org")
     sp.add_argument("--read", action="store_true", help="a read-only key")
     sp.add_argument("--key", help="use this API key instead of approving a code in the browser")
-    sub.add_parser("logout", help="forget the operator's API key")
+    sub.add_parser("logout", help="forget Mortar's API key")
     sub.add_parser("whoami", help="how bnb reaches GitHub, and as whom")
     sp = sub.add_parser("market", help="plugins in the plugin index: list, install, sign")
     sp.add_argument("action", nargs="?", default="list", choices=("list", "install", "keygen", "sign", "verify"))
@@ -207,7 +207,7 @@ def main(argv: list[str] | None = None) -> None:
                 print("No plugins installed (pipx inject bitsandbricks-cli <package>).")
             return None
         if not core.transport().logged_in():
-            sys.exit("Log in first: gh auth login (or bnb login <operator URL>)")
+            sys.exit("Log in first: gh auth login (or bnb login <Mortar URL>)")
         if args.cmd in handlers:
             return handlers[args.cmd](args)
         cfg = config.load(getattr(args, "org", None))

@@ -1,5 +1,5 @@
 <script setup>
-// Approve a device login: `bnb login https://operator` shows a code; this page turns it into an API key.
+// Approve a device login: `bnb login https://mortar` shows a code; this page turns it into an API key.
 import { onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { get, log, post } from '../api.js'

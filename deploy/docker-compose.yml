@@ -1,10 +1,10 @@
-# The operator with Postgres. Put it behind a TLS proxy (Caddy, Traefik, nginx) at BNB_OPERATOR_URL.
-#   cp operator.env.example operator.env   # fill in the OAuth apps and who may sign in
+# Mortar (bnb as a web app) with Postgres. Put it behind a TLS proxy (Caddy, Traefik, nginx) at BNB_OPERATOR_URL.
+#   cp mortar.env.example mortar.env   # fill in the OAuth apps and who may sign in
 #   docker compose up -d
 services:
-  operator:
+  mortar:
     build: ..
-    env_file: operator.env
+    env_file: mortar.env
     environment:
       DATABASE_URL: postgresql+psycopg://bnb:bnb@db/bnb
       BNB_OPERATOR_TRUSTED_PROXIES: "1"

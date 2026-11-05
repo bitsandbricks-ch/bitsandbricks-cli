@@ -1,7 +1,7 @@
 """The operator: bnb as a web app for many users, each signed in with GitHub and/or GitLab.
 
-    bnb-operator serve            run it (gunicorn in production: see the Dockerfile)
-    bnb-operator check            show what the settings allow and what is missing
+    mortar serve                  run it (gunicorn in production: see the Dockerfile)
+    mortar check                  show what the settings allow and what is missing
 
 Every setting comes from the environment (docs/operator.md). The web UI is a single page app in
 static/ (built from web/ with Vite); /api/v1 is the JSON API the UI, the CLI and the TUI share.
@@ -27,7 +27,7 @@ def create_app(op: S.Settings | None = None) -> Flask:
     op = op or S.load()
     problems = op.problems()
     if problems and not op.dev:
-        raise SystemExit("bnb operator won't start:\n  - " + "\n  - ".join(problems))
+        raise SystemExit("Mortar won't start:\n  - " + "\n  - ".join(problems))
     app = Flask(__name__, static_folder=None)
     app.config.update(OP=op, VAULT=security.Vault(op.secret_key), MAX_CONTENT_LENGTH=1024 * 1024,
                       PROBLEMS=problems, JSON_SORT_KEYS=False)
@@ -106,7 +106,7 @@ def _version() -> str:
 def main(argv: list[str] | None = None) -> None:
     import argparse
 
-    p = argparse.ArgumentParser(prog="bnb-operator", description=__doc__.split("\n\n")[0])
+    p = argparse.ArgumentParser(prog="mortar", description=__doc__.split("\n\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
     sp = sub.add_parser("serve", help="run the operator (development server; use gunicorn in production)")
     sp.add_argument("--host", default="127.0.0.1")

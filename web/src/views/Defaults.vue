@@ -103,7 +103,7 @@ function tab(e) { // a tab key inserts two spaces instead of leaving the editor
   requestAnimationFrame(() => { el.selectionStart = el.selectionEnd = s + 2 })
 }
 function saveKey(e) { if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); save() } }
-useKeys({ n: newFile, t: loadTemplates, i: importRulesets, v: check, e: () => editor.value?.focus() })
+useKeys({ n: newFile, o: loadTemplates, i: importRulesets, v: check, e: () => editor.value?.focus() })
 onMounted(load)
 </script>
 
@@ -118,7 +118,7 @@ onMounted(load)
         <span class="dim">{{ info.provider }}:</span><span class="accent">{{ info.repo }}</span><span v-if="info.ref" class="dim">@{{ info.ref }}</span>
         <span class="spacer" />
         <button @click="newFile"><span class="k">n</span> new file</button>
-        <button @click="loadTemplates"><span class="k">t</span> templates</button>
+        <button @click="loadTemplates"><span class="k">o</span> templates</button>
         <button v-if="info.provider === 'github'" @click="importRulesets"><span class="k">i</span> import rulesets</button>
       </div>
       <div class="split">

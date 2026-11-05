@@ -21,7 +21,7 @@ dev = ["pytest>=8", "ruff>=0.6", "textual>=1.0", "flask>=3.0", "sqlalchemy>=2.0"
 [project.scripts]
 bitsandbricks = "bitsandbricks.cli:main"
 bnb = "bitsandbricks.cli:main"
-bnb-operator = "bitsandbricks.operator.app:main"
+mortar = "bitsandbricks.operator.app:main"
 
 [tool.hatch.version]
 path = "src/bitsandbricks/__init__.py"

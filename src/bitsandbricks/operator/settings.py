@@ -1,4 +1,4 @@
-"""The operator's settings, all from the environment (see docs/operator.md)."""
+"""The operator's settings, all from the environment (see docs/mortar.md)."""
 
 from __future__ import annotations
 

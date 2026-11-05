@@ -1,6 +1,6 @@
-# The bnb operator: the web UI built with Node, then served by gunicorn from a slim Python image.
-#   docker build -t bnb-operator .
-#   docker run -p 8080:8080 -v bnb-data:/data --env-file operator.env bnb-operator
+# Mortar, bnb as a web app: the web UI built with Node, then served by gunicorn from a slim Python image.
+#   docker build -t mortar .
+#   docker run -p 8080:8080 -v bnb-data:/data --env-file mortar.env mortar
 FROM node:24-slim AS web
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./

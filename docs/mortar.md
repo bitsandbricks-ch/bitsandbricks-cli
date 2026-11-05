@@ -1,9 +1,9 @@
-# The bnb operator
+# Mortar
 
-The operator is bnb as a web app. People sign in with their own GitHub and GitLab accounts and get every
+Mortar is bnb as a web app: it holds the bricks together. People sign in with their own GitHub and GitLab accounts and get every
 CLI and TUI view in a terminal-style browser UI: repos, pull requests, runs, approvals, releases, packages,
 security alerts, doctor/fix/sync, stats, a defaults editor, a `bnb` console, plugins and a plugin marketplace.
-The same API serves `bnb` and `bnb tui` on a laptop: `bnb login https://operator` and they need neither gh
+The same API serves `bnb` and `bnb tui` on a laptop: `bnb login https://mortar` and they need neither gh
 nor a GitHub token.
 
 ```
@@ -13,6 +13,23 @@ scripts (key)        ─┘      │                  └─> GitLab REST/GraphQ
                              └─> database: users, logins (tokens encrypted), sessions, API keys, audit
 ```
 
+## Screenshots
+
+![login](screenshots/01-login.png)
+![repos](screenshots/02-repos.png)
+![pull requests](screenshots/03-pull-requests.png)
+![runs](screenshots/04-runs.png)
+![stats](screenshots/05-stats.png)
+![checks](screenshots/06-checks.png)
+![defaults editor](screenshots/07-defaults-editor.png)
+![console](screenshots/08-console.png)
+![plugins](screenshots/09-plugins.png)
+![market](screenshots/10-market.png)
+![settings](screenshots/11-settings.png)
+![audit](screenshots/12-audit.png)
+![theme amber](screenshots/13-theme-amber.png)
+![theme paper](screenshots/14-theme-paper.png)
+
 ## Run it
 
 ```sh
@@ -20,14 +37,14 @@ pip install -e ".[operator]"                 # flask, sqlalchemy, cryptography, 
 (cd web && npm ci && npm run build)          # the UI, into src/bitsandbricks/operator/static
 export GITHUB_CLIENT_ID=... GITHUB_CLIENT_SECRET=...
 export BNB_OPERATOR_ADMINS=github:you BNB_OPERATOR_DEV=1
-bnb-operator check                           # what the settings allow, and what is missing
-bnb-operator serve                           # http://localhost:8080 (development server)
+mortar check                           # what the settings allow, and what is missing
+mortar serve                           # http://localhost:8080 (development server)
 ```
 
-UI development: `cd web && npm run dev` serves the UI on :5173 and passes `/api` to the operator on :8080.
+UI development: `cd web && npm run dev` serves the UI on :5173 and passes `/api` to Mortar on :8080.
 
-In production use the image: `docker build -t bnb-operator .`, or `deploy/docker-compose.yml`
-(operator + Postgres; copy `deploy/operator.env.example` to `deploy/operator.env`). Put it behind a TLS
+In production use the image: `docker build -t mortar .`, or `deploy/docker-compose.yml`
+(Mortar + Postgres; copy `deploy/mortar.env.example` to `deploy/mortar.env`). Put it behind a TLS
 proxy and set `BNB_OPERATOR_TRUSTED_PROXIES=1` so it sees the real client address. The image runs
 gunicorn with one process and many threads, which keeps each user's API cache in one place.
 
@@ -62,7 +79,7 @@ GitLab: set `GITLAB_URL`. Someone signed in with one provider connects the other
 | `BNB_OPERATOR_TRUSTED_PROXIES` | how many proxies in front set `X-Forwarded-*` (0) |
 | `BNB_OPERATOR_DEV` | `1`: http allowed, plain cookie names (local development only) |
 
-The operator refuses to start when no login is configured, nobody may sign in, or the URL isn't https.
+Mortar refuses to start when no login is configured, nobody may sign in, or the URL isn't https.
 
 ## Security model
 
@@ -87,18 +104,18 @@ The operator refuses to start when no login is configured, nobody may sign in, o
   `v-html` anywhere in the UI, `X-Frame-Options: DENY`, `no-referrer`, HSTS, `Cache-Control: no-store` on the API.
 - **Throttling** on sign-in, device codes and key use.
 
-## The CLI and TUI through the operator
+## The CLI and TUI through Mortar
 
 ```sh
-bnb login https://bnb.example.com        # device login; --read for a read-only key, --key KEY to paste one
+bnb login https://mortar.example.com        # device login; --read for a read-only key, --key KEY to paste one
 bnb whoami
-bnb status                                # every command now goes through the operator
+bnb status                                # every command now goes through Mortar
 bnb tui
 bnb logout                                # forgets the key here (revoke it in Settings › API keys)
 ```
 
 The key is kept in `~/.config/bitsandbricks/operator.json` (0600). `BNB_OPERATOR` and `BNB_OPERATOR_KEY`
-do the same for CI. The defaults repo and orgs then come from your operator settings.
+do the same for CI. The defaults repo and orgs then come from your Mortar settings.
 
 ## Defaults
 
@@ -125,7 +142,7 @@ GitLab projects are named `gitlab:group/sub/project`. List them in Settings (`Gi
 
 ## Plugins and the marketplace
 
-Plugins are the same Python entry points the CLI loads. In the operator they can also add:
+Plugins are the same Python entry points the CLI loads. In Mortar they can also add:
 
 - `web_actions()`: buttons with parameters (`write: True` actions ask first, are audited, and honor dry run),
 - `web_commands`: commands the console allows,
@@ -137,7 +154,7 @@ Each user switches plugins on or off for themselves; admins can switch one off f
 The marketplace reads a plugin index (`plugins/index.json` by default) signed with Ed25519 (`bnb market
 keygen`, `bnb market sign`). Unsigned or wrongly signed indexes are shown but nothing installs from them.
 Installing from the web is off unless `BNB_OPERATOR_PLUGIN_INSTALL=1`, and only admins can do it; restart
-the operator after an install. The signing code is adapted from labdex (relicensed into bitsandbricks
+Mortar after an install. The signing code is adapted from labdex (relicensed into bitsandbricks
 under MIT by its author).
 
 ## API

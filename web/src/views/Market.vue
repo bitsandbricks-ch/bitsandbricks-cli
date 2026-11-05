@@ -13,7 +13,7 @@ async function load() {
   try { idx.value = await get('/market') } catch (e) { error.value = e.message; log(e.message, 'error') }
 }
 async function install(p) {
-  if (!(await ask(`Install ${p.name} ${p.version} on the operator?`, { allowDry: false, detail: `${p.source}\nIt runs inside the operator for every user. Restart the operator afterwards.` }))) return
+  if (!(await ask(`Install ${p.name} ${p.version} on Mortar?`, { allowDry: false, detail: `${p.source}\nIt runs inside Mortar for every user. Restart Mortar afterwards.` }))) return
   output.value = `installing ${p.name}...`
   try { output.value = (await post(`/market/${p.name}/install`)).text } catch (e) { output.value = `error: ${e.message}` }
   load()
@@ -29,7 +29,7 @@ onMounted(load)
         <span class="accent">{{ idx.name || 'plugin index' }}</span> <span class="dim">{{ idx.index }}</span><br>
         signature: <span :class="idx.status === 'verified' ? 'ok' : 'bad'">{{ idx.status }}</span> <span class="dim">{{ idx.detail }}</span>
         <div v-if="idx.description" class="dim">{{ idx.description }}</div>
-        <div v-if="!idx.can_install" class="dim">installing from here is for admins with BNB_OPERATOR_PLUGIN_INSTALL=1; otherwise <span class="accent">pip install</span> next to the operator, or <span class="accent">bnb market install NAME</span> on your machine.</div>
+        <div v-if="!idx.can_install" class="dim">installing from here is for admins with BNB_OPERATOR_PLUGIN_INSTALL=1; otherwise <span class="accent">pip install</span> next to Mortar, or <span class="accent">bnb market install NAME</span> on your machine.</div>
       </div>
       <div v-for="p in idx.plugins" :key="p.package" class="box">
         <div class="row">

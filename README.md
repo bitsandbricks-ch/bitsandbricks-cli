@@ -39,7 +39,7 @@ Repos are named as `owner/name`, as a bare `name` when only one repo has it, or 
 | `bnb stats [--days 30]` | Pull requests merged and opened, median time to merge, open and stale PRs, workflow runs with success rate and duration, releases. |
 | `bnb plugins` | Installed plugins. |
 | `bnb market [install NAME]` | Plugins in the signed plugin index; `install` adds one (only from a verified index). `keygen`, `sign` and `verify` are for whoever publishes an index. |
-| `bnb login https://operator` | Go through an [operator](docs/operator.md) with an API key: approve a code in the browser, and every command and the TUI then work without gh or a GitHub token here. `bnb logout` forgets the key, `bnb whoami` says how bnb reaches GitHub. |
+| `bnb login https://mortar` | Go through [Mortar](docs/mortar.md), the web app, with an API key: approve a code in the browser, and every command and the TUI then work without gh or a GitHub token here. `bnb logout` forgets the key, `bnb whoami` says how bnb reaches GitHub. |
 | `bnb tui` | Everything above, full screen. |
 
 Security alerts need the `security_events` scope and packages the `read:packages` scope: `gh auth refresh -s security_events,read:packages`.
@@ -111,18 +111,20 @@ Install one next to bnb with `pipx inject bitsandbricks-cli <package>`. `BNB_PLU
 
 hubra-cli is one: it adds Hubra plugin releases, signing checks and a Hubra tab.
 
-## Operator (web app)
+## Mortar (web app)
 
-`bnb-operator` runs bnb as a web app: people sign in with GitHub and GitLab (OAuth, their own tokens), and
+`mortar` runs bnb as a web app: people sign in with GitHub and GitLab (OAuth, their own tokens), and
 get every command and TUI view in a terminal-style browser UI, plus a defaults editor with templates,
-stats, a console, plugins and a signed plugin marketplace. `bnb login https://your-operator` points the CLI
+stats, a console, plugins and a signed plugin marketplace. `bnb login https://your-mortar` points the CLI
 and TUI at it with an API key, so a laptop needs neither gh nor a token.
 
 ```sh
-docker compose -f deploy/docker-compose.yml up -d   # after filling in deploy/operator.env
+docker compose -f deploy/docker-compose.yml up -d   # after filling in deploy/mortar.env
 ```
 
-Setup, settings and the security model: [docs/operator.md](docs/operator.md).
+![Mortar's pull requests view](docs/screenshots/03-pull-requests.png)
+
+Setup, settings, the security model and more screenshots: [docs/mortar.md](docs/mortar.md).
 
 ## Roadmap
 
@@ -134,7 +136,7 @@ Ideas and planned features live in [docs/BACKLOG.md](docs/BACKLOG.md).
 pip install -e ".[dev]"
 pytest          # runs every command against tests/fake_gh, a stand-in for gh
 ruff check .
-cd web && npm ci && npm run build   # the operator's UI (npm run dev for a live-reloading one)
+cd web && npm ci && npm run build   # Mortar's UI (npm run dev for a live-reloading one)
 ```
 
 ## License

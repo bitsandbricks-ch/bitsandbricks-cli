@@ -1,6 +1,6 @@
 # Backlog
 
-Ideas and features for bnb and the operator, roughly in the order they'd pay off. Pick one, open a PR,
+Ideas and features for bnb and Mortar (the web app), roughly in the order they'd pay off. Pick one, open a PR,
 move it to "Done" when it ships.
 
 ## Next
@@ -39,7 +39,7 @@ move it to "Done" when it ships.
 - Long-term history kept in the database so charts go back further than the APIs do.
 - CSV/JSON export and a shareable read-only dashboard link.
 
-## Operator
+## Mortar
 
 - Teams and shared workspaces: a team's defaults, repo lists and saved views, with roles.
 - Saved views and filters (e.g. "my PRs needing review across both providers").
@@ -76,5 +76,5 @@ move it to "Done" when it ships.
 
 ## Done
 
-- Operator web app with GitHub and GitLab OAuth, terminal UI, API keys, device login (this PR).
+- Mortar, the web app, with GitHub and GitLab OAuth, terminal UI, API keys, device login (this PR).
 - Plugin marketplace with a signed index; `bnb stats`; transport layer with caching.

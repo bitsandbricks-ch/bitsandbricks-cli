@@ -8,9 +8,11 @@ const next = computed(() => encodeURIComponent(String(route.query.next || '/')))
 const providers = computed(() => state.me?.providers || [])
 const origin = window.location.origin
 const BANNER = [
-  '┌┐ ┌┐┌┌┐   ┌─┐┌─┐┌─┐┬─┐┌─┐┌┬┐┌─┐┬─┐',
-  '├┴┐│││├┴┐  │ │├─┘├┤ ├┬┘├─┤ │ │ │├┬┘',
-  '└─┘┘└┘└─┘  └─┘┴  └─┘┴└─┴ ┴ ┴ └─┘┴└─',
+  '███    ███  ██████  ██████  ████████  █████  ██████',
+  '████  ████ ██    ██ ██   ██    ██    ██   ██ ██   ██',
+  '██ ████ ██ ██    ██ ██████     ██    ███████ ██████',
+  '██  ██  ██ ██    ██ ██   ██    ██    ██   ██ ██   ██',
+  '██      ██  ██████  ██   ██    ██    ██   ██ ██   ██',
 ].join('\n')
 </script>
 
@@ -20,7 +22,7 @@ const BANNER = [
       <pre class="banner" aria-hidden="true">{{ BANNER }}</pre>
       <p><span class="accent">$</span> bnb login<span class="cursor" /></p>
       <p class="dim">Your GitHub and GitLab repos, pull requests, runs, approvals, releases, security alerts and
-        defaults, from one terminal in the browser. You sign in with your own account; the operator only ever acts
+        defaults, from one terminal in the browser: Mortar holds your bricks together. You sign in with your own account; Mortar only ever acts
         with your token, so you see and change no more than you could yourself.</p>
       <p v-if="route.query.error" class="bad">error: {{ route.query.error }}</p>
       <div class="row" style="margin: 18px 0">
