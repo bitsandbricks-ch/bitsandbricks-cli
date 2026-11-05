@@ -28,6 +28,7 @@ Repos are named as `owner/name`, as a bare `name` when only one repo has it, or 
 | `bnb pr web#12 [--diff]` | One PR in detail: merge state, failing checks with links, files, description. |
 | `bnb merge [names] [--now] [--ready]` | Auto-merge open PRs (or merge now). Drafts and conflicts stay open. |
 | `bnb runs [--failed]` | Latest workflow runs. |
+| `bnb releases [--problems]` | Each repo's latest release, its assets, and its release runs. Flags assets the group's `release_assets` wants but the release lacks, and a failed last release run with the job and step that failed. |
 | `bnb approve [--yes]` | Runs waiting for you: environments you review, and outside contributors' runs. |
 | `bnb security` | Open Dependabot, secret scanning and code scanning alerts. |
 | `bnb doctor [names] [--fix]` | Settings, security, release immutability, rulesets and files against the defaults. `--fix` applies them. |
@@ -41,13 +42,13 @@ Security alerts need the `security_events` scope: `gh auth refresh -s security_e
 
 ## TUI
 
-`bnb tui` has tabs for Repos, Pull requests, Runs, Security, Checks (doctor plus plugin checks) and Settings (defaults repo, orgs, groups, plugins, theme, config file), plus any tabs that plugins add.
+`bnb tui` has tabs for Repos, Pull requests, Runs, Releases, Security, Checks (doctor plus plugin checks) and Settings (defaults repo, orgs, groups, plugins, theme, config file), plus any tabs that plugins add.
 
 - **Enter** on a row opens a menu of what you can do with it: merge, mark ready, diff, approve, check or fix a repo, sync its files, open it.
 - **The footer** only shows the keys that work on the current tab.
 - **n** creates a new repo.
 - **ctrl+p** lists every command.
-- **Loading:** nothing reloads by itself. The repo and PR list loads at start, with one GraphQL query per 20 repos. Runs and Security load the first time you open their tab. **r** reloads the tab you are on.
+- **Loading:** nothing reloads by itself. The repo and PR list loads at start, with one GraphQL query per 20 repos. Runs, Releases and Security load the first time you open their tab. **r** reloads the tab you are on.
 - **Rate limit:** the header shows how many API calls are left. Answers are cached for 60 seconds. If GitHub's rate limit is reached, the TUI says when it resets instead of failing.
 
 ## Configuration
@@ -82,6 +83,7 @@ settings = { delete_branch_on_merge = true, has_wiki = false }
 security = { secret_scanning = "enabled", secret_scanning_push_protection = "enabled" }
 immutable_releases = true
 vulnerability_reporting = true
+release_assets = ["*.zip"]                         # files every release must attach (bnb releases)
 rulesets = "rulesets/default"                      # ruleset JSON files (export them from GitHub)
 files = "files/default"                            # copied into each repo, path for path
 ```

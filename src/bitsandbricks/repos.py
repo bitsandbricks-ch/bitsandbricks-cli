@@ -3,6 +3,7 @@ status, prs, pr, merge, runs, approve, security, open."""
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import re
 import subprocess
@@ -459,6 +460,147 @@ def runs(repos: list[str], limit: int = 3, failed: bool = False) -> None:
             state = "waiting (approval)" if r.get("status") == "waiting" else (r.get("conclusion") or r.get("status"))
             say(f"   {state:<18} {r.get('name')} · {r.get('event')} · {r.get('head_branch')} · "
                 f"{ago(r.get('created_at'))}\n      {r['html_url']}")
+
+
+# ── releases ─────────────────────────────────────────────────────────────────
+
+RELEASE_WORDS = ("release", "publish")
+
+
+def is_release_run(run: dict) -> bool:
+    """A run of a release workflow: triggered by a release, or named or filed like one."""
+    text = f"{run.get('name') or ''} {run.get('path') or ''}".lower()
+    return run.get("event") == "release" or any(w in text for w in RELEASE_WORDS)
+
+
+def run_state(run: dict) -> str:
+    return run.get("conclusion") or run.get("status") or "?"
+
+
+def release_info(cfg: Config, repo: str) -> dict:
+    """The newest release, the assets the group wants but the release lacks, and recent release runs.
+    Two REST calls per repo."""
+    info = {"repo": repo, "release": None, "missing": [], "runs": [], "error": ""}
+    try:
+        rels = api("GET", f"/repos/{repo}/releases?per_page=1") or []
+        found = (api("GET", f"/repos/{repo}/actions/runs?per_page=30") or {}).get("workflow_runs") or []
+    except core.RateLimited:
+        raise
+    except RuntimeError as err:
+        info["error"] = str(err)
+        return info
+    rel = rels[0] if rels else None
+    info["release"] = rel
+    info["runs"] = [r for r in found if is_release_run(r)][:5]
+    group = group_of(cfg, repo)
+    if rel and group:
+        names = [a.get("name", "") for a in rel.get("assets") or []]
+        info["missing"] = [g for g in group.release_assets if not any(fnmatch.fnmatchcase(n, g) for n in names)]
+    return info
+
+
+def release_problems(info: dict) -> list[str]:
+    """What's wrong: missing assets, a failed last release run, an error reading the repo."""
+    out = []
+    if info["error"]:
+        out.append(f"error: {info['error']}")
+    if info["missing"]:
+        out.append("missing " + ", ".join(info["missing"]))
+    last = info["runs"][0] if info["runs"] else None
+    if last and last.get("conclusion") in ("failure", "timed_out", "startup_failure"):
+        out.append(f"{last.get('name')} {run_state(last)}")
+    return out
+
+
+def release_row(info: dict) -> list[str]:
+    rel = info["release"] or {}
+    tag = rel.get("tag_name") or "-"
+    if rel.get("draft"):
+        tag += " (draft)"
+    elif rel.get("prerelease"):
+        tag += " (pre)"
+    assets = rel.get("assets") or []
+    if not rel:
+        files = "-"
+    elif info["missing"]:
+        files = "missing " + ", ".join(info["missing"])
+    else:
+        files = ", ".join(a["name"] for a in assets[:2]) + (f" +{len(assets) - 2}" if len(assets) > 2 else "")
+        files = files or "none"
+    last = info["runs"][0] if info["runs"] else None
+    run = f"{run_state(last)} {ago(last.get('created_at'))}" if last else "-"
+    return [tag, ago(rel.get("published_at") or rel.get("created_at")) if rel else "-", files, run]
+
+
+def release_infos(cfg: Config, repos: list[str]) -> list[dict]:
+    """release_info for every repo that has a release or a release run."""
+    with ThreadPoolExecutor(core.WORKERS) as pool:
+        found = list(pool.map(lambda r: release_info(cfg, r), repos))
+    return [i for i in found if i["release"] or i["runs"] or i["error"]]
+
+
+def failed_jobs(repo: str, run_id: int) -> list[str]:
+    """The failed jobs of a run with their failed steps and links (one REST call)."""
+    jobs = (api("GET", f"/repos/{repo}/actions/runs/{run_id}/jobs?filter=latest") or {}).get("jobs") or []
+    out = []
+    for j in jobs:
+        if j.get("conclusion") not in ("failure", "timed_out", "cancelled"):
+            continue
+        steps = [s["name"] for s in j.get("steps") or [] if s.get("conclusion") == "failure"]
+        out.append(f"{j.get('name')}: {j.get('conclusion')}" + (f" at step \"{steps[0]}\"" if steps else ""))
+        out.append(f"  {j.get('html_url', '')}")
+    return out
+
+
+def release_text(info: dict) -> str:
+    """The detail of one repo's releases: the release, its assets, recent release runs."""
+    rel, lines = info["release"], [info["repo"], ""]
+    if info["error"]:
+        lines += [f"error: {info['error']}", ""]
+    if rel:
+        state = "draft" if rel.get("draft") else "prerelease" if rel.get("prerelease") else "published"
+        lines += [f"{rel.get('tag_name')} · {state} · {ago(rel.get('published_at') or rel.get('created_at'))}",
+                  rel.get("html_url", ""), ""]
+        assets = rel.get("assets") or []
+        lines.append(f"assets ({len(assets)})" if assets else "no assets")
+        for a in assets:
+            lines.append(f"  {a.get('name')}  {a.get('size', 0) / 1024:.0f} KB  {a.get('download_count', 0)} downloads")
+        for g in info["missing"]:
+            lines.append(f"  MISSING {g} (the group's release_assets)")
+    else:
+        lines.append("no release")
+    lines += ["", "release runs" if info["runs"] else "no release runs in the last 30 runs"]
+    for r in info["runs"]:
+        lines.append(f"  {run_state(r):<10} {r.get('name')} · {r.get('head_branch')} · {ago(r.get('created_at'))}")
+        lines.append(f"    {r.get('html_url', '')}")
+    return "\n".join(lines)
+
+
+def releases(cfg: Config, repos: list[str], problems: bool = False) -> None:
+    infos = release_infos(cfg, repos)
+    if problems:
+        infos = [i for i in infos if release_problems(i)]
+    if not infos:
+        say("no problems" if problems else "no releases")
+        return
+    table(["repo", "release", "when", "assets", "release run"], [[short(i["repo"]), *release_row(i)] for i in infos])
+    for i in infos:
+        bad = release_problems(i)
+        if not bad:
+            continue
+        say(f"\n== {i['repo']}: " + "; ".join(bad))
+        last = i["runs"][0] if i["runs"] else None
+        if last and last.get("conclusion") == "failure":
+            say(f"   {last.get('html_url', '')}")
+            try:
+                for line in failed_jobs(i["repo"], last["id"]):
+                    say(f"   {line}")
+            except core.RateLimited:
+                raise
+            except RuntimeError as err:
+                say(f"   jobs: {err}")
+        elif i["release"]:
+            say(f"   {i['release'].get('html_url', '')}")
 
 
 # ── security alerts ──────────────────────────────────────────────────────────
