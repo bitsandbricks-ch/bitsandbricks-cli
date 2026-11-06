@@ -51,7 +51,7 @@ async function saveSettings() {
   } catch (e) { log(e.message, 'error') }
 }
 async function unlink(i) {
-  if (!(await ask(`Disconnect ${i.provider} (${i.login})? Mortar deletes its token and revokes it where ${i.provider} lets it.`, { allowDry: false }))) return
+  if (!(await ask(`Disconnect ${i.provider} (${i.login})? Mason deletes its token and revokes it where ${i.provider} lets it.`, { allowDry: false }))) return
   try { const got = await del(`/me/identities/${i.id}`); await loadMe(); await tellRevoked(got) } catch (e) { log(e.message, 'error') }
 }
 async function makeKey() {
@@ -119,7 +119,7 @@ onMounted(load)
 
       <div v-if="s" class="box">
         <div class="accent">defaults and repos</div>
-        <p class="dim">The defaults repo holds mortar.toml, like <span class="accent">mtr init</span> sets up. Lists take names separated by commas.</p>
+        <p class="dim">The defaults repo holds mason.toml, like <span class="accent">mason init</span> sets up. Lists take names separated by commas.</p>
         <div class="form">
           <label>defaults repo</label><input v-model="s.defaults" placeholder="acme/defaults or gitlab:grp/defaults">
           <label>branch or tag</label><input v-model="s.ref" placeholder="(default branch)">
@@ -134,7 +134,7 @@ onMounted(load)
 
       <div class="box">
         <div class="accent">API keys</div>
-        <p class="dim">For the TUI and scripts: <span class="accent">mtr login {{ origin }}</span> makes one for you, or make one here and pass <span class="accent">--key</span>.</p>
+        <p class="dim">For the TUI and scripts: <span class="accent">mason login {{ origin }}</span> makes one for you, or make one here and pass <span class="accent">--key</span>.</p>
         <div v-if="fresh" class="box">
           <div class="warn">copy it now: it isn't shown again</div>
           <div class="row"><span class="secret">{{ fresh.key }}</span><button @click="copy(fresh.key)">copy</button><button @click="fresh = null">done</button></div>
@@ -177,7 +177,7 @@ onMounted(load)
       </div>
 
       <div v-if="state.me.user.is_admin && opstats" class="box">
-        <div class="accent">mortar (admin)</div>
+        <div class="accent">mason (admin)</div>
         <div class="dim">{{ opstats.users }} users · {{ opstats.sessions }} sessions · {{ opstats.keys }} keys · cache: {{ JSON.stringify(opstats.transports) }}</div>
         <table class="table" style="margin-top: 6px">
           <tr v-for="u in users" :key="u.id"><td>{{ u.name }}<span v-if="u.is_admin" class="warn"> admin</span></td>
@@ -187,7 +187,7 @@ onMounted(load)
 
       <div class="box">
         <div class="bad">delete my account</div>
-        <p class="dim">Revokes Mortar's tokens at GitHub and GitLab and removes everything it keeps about you.</p>
+        <p class="dim">Revokes Mason's tokens at GitHub and GitLab and removes everything it keeps about you.</p>
         <button class="danger" @click="deleteAccount">delete account</button>
       </div>
     </div>

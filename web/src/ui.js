@@ -18,11 +18,11 @@ export function tell(question, { detail = '', links = [] } = {}) {
   })
 }
 
-// What DELETE /me and /me/identities/:id answer about the tokens: links for those Mortar couldn't revoke.
+// What DELETE /me and /me/identities/:id answer about the tokens: links for those Mason couldn't revoke.
 export async function tellRevoked(got) {
   const manual = (got?.revoked || []).filter((r) => !r.revoked && r.manual)
   if (!manual.length) return
-  await tell('Mortar deleted its copy of your token, but could not revoke it at the provider. Revoke it there:', {
+  await tell('Mason deleted its copy of your token, but could not revoke it at the provider. Revoke it there:', {
     detail: 'The built-in GitHub sign-in has no client secret, and GitHub only lets an app revoke tokens with one.',
     links: manual.map((r) => ({ href: r.manual, label: `${r.provider} (${r.login}): ${shortLink(r.manual)}` })),
   })

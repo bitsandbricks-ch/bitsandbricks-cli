@@ -1,4 +1,4 @@
-"""Mortar's secret key: MTR_SECRET_KEY, or one made on first run in the data folder and kept there."""
+"""Mason's secret key: MASON_SECRET_KEY, or one made on first run in the data folder and kept there."""
 
 from __future__ import annotations
 
@@ -13,9 +13,9 @@ if sys.version_info < (3, 10):  # pragma: no cover
 
 
 def test_made_once_in_the_data_folder(monkeypatch, tmp_path):
-    from mortar.server import settings as S
+    from mason.server import settings as S
 
-    monkeypatch.delenv("MTR_SECRET_KEY", raising=False)
+    monkeypatch.delenv("MASON_SECRET_KEY", raising=False)
     data = tmp_path / "data"
     key = S.secret_key(data)
     path = data / "secret.key"
@@ -27,8 +27,8 @@ def test_made_once_in_the_data_folder(monkeypatch, tmp_path):
 
 
 def test_env_wins(monkeypatch, tmp_path):
-    from mortar.server import settings as S
+    from mason.server import settings as S
 
-    monkeypatch.setenv("MTR_SECRET_KEY", "from-the-env")
+    monkeypatch.setenv("MASON_SECRET_KEY", "from-the-env")
     assert S.secret_key(tmp_path) == "from-the-env"
     assert not (tmp_path / "secret.key").exists()

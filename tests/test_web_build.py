@@ -1,4 +1,4 @@
-"""The built web UI: `mtr serve` says how to build it when it's missing, and the build hook builds it."""
+"""The built web UI: `mason serve` says how to build it when it's missing, and the build hook builds it."""
 
 from __future__ import annotations
 
@@ -14,11 +14,11 @@ if sys.version_info < (3, 10):  # pragma: no cover
 
 @pytest.fixture()
 def served(monkeypatch, tmp_path):
-    """Run `mtr serve` and `mtr serve --check` with the UI in tmp_path/static, without starting a server."""
-    from mortar.server import app as A
+    """Run `mason serve` and `mason serve --check` with the UI in tmp_path/static, without starting a server."""
+    from mason.server import app as A
 
-    monkeypatch.delenv("MTR_URL", raising=False)
-    monkeypatch.setenv("MTR_DATA", str(tmp_path))
+    monkeypatch.delenv("MASON_URL", raising=False)
+    monkeypatch.setenv("MASON_DATA", str(tmp_path))
     static = tmp_path / "static"
     static.mkdir()
     monkeypatch.setattr(A, "STATIC", static)
@@ -32,7 +32,7 @@ def served(monkeypatch, tmp_path):
 
 
 def test_serve_says_how_to_build_a_missing_ui(served, capsys):
-    from mortar import cli
+    from mason import cli
 
     cli.main(["serve"])
     err = capsys.readouterr().err
@@ -44,7 +44,7 @@ def test_serve_says_how_to_build_a_missing_ui(served, capsys):
 
 
 def test_serve_is_quiet_when_the_ui_is_built(served, capsys):
-    from mortar import cli
+    from mason import cli
 
     (served / "index.html").write_text("<!doctype html>")
     cli.main(["serve"])
@@ -55,9 +55,9 @@ def test_serve_is_quiet_when_the_ui_is_built(served, capsys):
 
 
 def test_browser_gets_the_build_hint(monkeypatch, tmp_path):
-    from mortar.server import app as A
-    from mortar.server import settings as S
-    from mortar.server import webui
+    from mason.server import app as A
+    from mason.server import settings as S
+    from mason.server import webui
 
     monkeypatch.setattr(A, "STATIC", tmp_path)
     settings = S.Settings(url="http://localhost:8080", data=tmp_path, database=f"sqlite:///{tmp_path / 'op.db'}",

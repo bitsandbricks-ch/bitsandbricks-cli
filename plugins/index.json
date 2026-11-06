@@ -1,6 +1,6 @@
 {
   "name": "bitsandbricks plugins",
-  "description": "Plugins for bnb, the bnb TUI and Mortar (the web app). Sign with: bnb market sign plugins/index.json --key <private.pem>",
+  "description": "Plugins for bnb, the bnb TUI and Mason (the web app). Sign with: bnb market sign plugins/index.json --key <private.pem>",
   "generated": "2026-11-05",
   "plugins": [
     {

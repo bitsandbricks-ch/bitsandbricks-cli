@@ -1,5 +1,5 @@
 <script setup>
-// Checks: the repos against the defaults (mtr doctor), fixing drift, syncing files, plus plugin checks.
+// Checks: the repos against the defaults (mason doctor), fixing drift, syncing files, plus plugin checks.
 import { computed, onMounted, ref } from 'vue'
 import { get, log, post } from '../api.js'
 import { act } from '../load.js'
