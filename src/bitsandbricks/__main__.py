@@ -1,3 +1,3 @@
-from bitsandbricks.cli import main
+from mortar.cli import main
 
 main()

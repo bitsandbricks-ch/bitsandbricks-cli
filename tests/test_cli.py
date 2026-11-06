@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 def bnb(env, *args) -> str:
-    proc = subprocess.run([sys.executable, "-m", "bitsandbricks", *args], env=env, capture_output=True,
+    proc = subprocess.run([sys.executable, "-m", "mortar", *args], env=env, capture_output=True,
                           text=True, stdin=subprocess.DEVNULL, timeout=60, check=False)
     return proc.stdout + proc.stderr
 
@@ -122,7 +122,7 @@ def test_bump_and_release(env, tmp_path):
 
 
 def test_version_files():
-    from bitsandbricks import versions as V
+    from mortar import versions as V
     assert V.read_version('[project]\nname = "x"\nversion = "0.2.0"\n', "app/pyproject.toml") == "0.2.0"
     assert V.write_version('{\n  "name": "x",\n  "version": "1.2.3"\n}\n', "package.json", "1.3.0") == \
         '{\n  "name": "x",\n  "version": "1.3.0"\n}\n'
@@ -140,7 +140,7 @@ def test_run_and_pr_actions(env, monkeypatch, tmp_path):
     for key in ("PATH", "BNB_DEFAULTS"):
         monkeypatch.setenv(key, env[key])
     monkeypatch.setenv("FAKE_GH_LOG", str(log))
-    from bitsandbricks import core, repos
+    from mortar import core, repos
 
     core.DRY_RUN = False
     lines = repos.failed_log("acme/plugin-b", 7)
@@ -150,8 +150,8 @@ def test_run_and_pr_actions(env, monkeypatch, tmp_path):
     out += core.capture(repos.comment_pr, "acme/web", 7, "Looks good")
     out += core.capture(repos.cancel_run, "acme/web", {"id": 9, "name": "CI", "head_branch": "main"})
     calls = log.read_text()
-    assert "PUT /repos/acme/web/pulls/7/update-branch" in calls and "pr close 9 --repo acme/web" in calls
-    assert "pr comment 7 --repo acme/web --body Looks good" in calls
+    assert "PUT /repos/acme/web/pulls/7/update-branch" in calls and "PATCH /repos/acme/web/pulls/9 " in calls
+    assert "POST /repos/acme/web/issues/7/comments" in calls
     assert "POST /repos/acme/web/actions/runs/9/cancel" in calls
     assert "closed acme/web#9" in out
 
@@ -196,7 +196,7 @@ def test_local_defaults_and_init(env, tmp_path):
     folder = tmp_path / "defaults"
     e = {**env, "BNB_DEFAULTS": "", "XDG_CONFIG_HOME": str(tmp_path / "cfg")}
     out = bnb(e, "init", str(folder), "--org", "mike")
-    assert "wrote" in out and (folder / "bitsandbricks.toml").exists()
+    assert "wrote" in out and (folder / "mortar.toml").exists()
     out = bnb(e, "config")
     assert f"defaults     {folder}" in out and "orgs         mike" in out
     out = bnb(e, "doctor")
@@ -218,7 +218,7 @@ def test_plugins(env, tmp_path):
     pkg = tmp_path / "demo_plugin"
     pkg.mkdir()
     (pkg / "__init__.py").write_text('''
-from bitsandbricks.plugins import Plugin
+from mortar.plugins import Plugin
 
 class Demo(Plugin):
     name = "demo"
@@ -241,7 +241,7 @@ class Demo(Plugin):
     dist = tmp_path / "demo_plugin-0.1.dist-info"
     dist.mkdir()
     (dist / "METADATA").write_text("Metadata-Version: 2.1\nName: demo-plugin\nVersion: 0.1\n")
-    (dist / "entry_points.txt").write_text("[bitsandbricks.plugins]\ndemo = demo_plugin:Demo\n")
+    (dist / "entry_points.txt").write_text("[mortar.plugins]\ndemo = demo_plugin:Demo\n")
     e = {**env, "PYTHONPATH": str(tmp_path)}
     assert "demo             a test plugin" in bnb(e, "plugins")
     assert "hello from demo" in bnb(e, "hello")
@@ -251,27 +251,77 @@ class Demo(Plugin):
 
 
 def test_core_helpers():
-    from bitsandbricks.core import git_blob_sha, newest
+    from mortar.core import git_blob_sha, newest
 
     assert git_blob_sha("hello\n") == "ce013625030ba8dba906f756967f9e9ca394464a"  # git hash-object
     assert newest(["v1.2.0", "v1.10.0", "v1.9.9"]) == "v1.10.0"
 
 
 def test_readme_names_every_command():
-    from bitsandbricks.cli import ON_REPOS
+    from mortar.cli import ON_REPOS
 
     readme = (Path(__file__).parent.parent / "README.md").read_text()
-    for cmd in (*ON_REPOS, "pr", "open", "init", "config", "plugins", "tui", "new"):
+    for cmd in (*ON_REPOS, "pr", "open", "init", "config", "plugins", "tui", "new", "login", "logout", "whoami",
+                "market"):
         assert f"bnb {cmd}" in readme, cmd
 
 
 def test_new_repo(env):
     out = bnb(env, "new", "--dry-run", "acme/plugin-c")
     assert "== acme/plugin-c (group plugins)" in out
-    assert "[dry-run] gh repo create acme/plugin-c --private --template acme/plugin-tpl" in out
+    assert "[dry-run] create private acme/plugin-c from the template acme/plugin-tpl" in out
     assert "[dry-run] PATCH /repos/acme/plugin-c" in out and "[dry-run] POST /repos/acme/plugin-c/rulesets" in out
     out = bnb(env, "new", "--dry-run", "--public", "acme/site")
-    assert "--public --add-readme" in out
+    assert "[dry-run] create public acme/site with a README" in out
     assert "[dry-run] PUT /repos/acme/site/contents/SECURITY.md" in out
     assert "exists already" in bnb(env, "new", "acme/web")
     assert "No group 'nope'" in bnb(env, "new", "acme/x", "--group", "nope")
+
+
+def test_old_names_still_work(env):
+    """Formerly bitsandbricks: the old module, `python -m bitsandbricks` and plugin imports keep working."""
+    import bitsandbricks.core
+    import mortar.core
+    from bitsandbricks import plugins
+
+    assert bitsandbricks.core is mortar.core and plugins.GROUP == "mortar.plugins"
+    assert "bitsandbricks.plugins" in plugins.OLD_GROUPS
+    proc = subprocess.run([sys.executable, "-m", "bitsandbricks", "--version"], env=env, capture_output=True,
+                          text=True, check=False)
+    assert proc.stdout.startswith("mortar ")
+
+
+def test_repo_checks_from_defaults(env, tmp_path):
+    folder = tmp_path / "defaults"
+    folder.mkdir()
+    (folder / "mortar.toml").write_text('''orgs = ["mike"]
+[[group]]
+name = "default"
+security = { dependabot_alerts = "enabled" }
+topics = ["dotfiles"]
+labels = { bug = "d73a4a", docs = "#0075CA", security = { color = "b60205", description = "Security" } }
+actions = { allowed_actions = "selected", default_workflow_permissions = "read" }
+required_files = ["SECURITY.md", "CODEOWNERS|.github/CODEOWNERS"]
+branch = "trunk"
+visibility = "private"
+description = true
+skip = ["own_rulesets"]
+''')
+    e = {**env, "BNB_DEFAULTS": str(folder)}
+    out = bnb(e, "doctor", "dotfiles")
+    for line in ("dependabot_alerts is disabled, defaults has enabled", "topics lack dotfiles",
+                 "label bug is #ee0701, defaults has #d73a4a", "label security is missing",
+                 "actions allowed_actions is all, defaults has selected",
+                 "actions default_workflow_permissions is write, defaults has read",
+                 "CODEOWNERS or .github/CODEOWNERS is missing", "default branch is main, defaults has trunk",
+                 "it has no description"):
+        assert line in out, line
+    assert "label docs" not in out and "SECURITY.md is missing" not in out and "the repo is" not in out
+    assert "required_linear_history" not in out  # skipped: own_rulesets
+    out = bnb(e, "doctor", "--fix", "--dry-run", "dotfiles")
+    for call in ("PUT /repos/mike/dotfiles/vulnerability-alerts", "PUT /repos/mike/dotfiles/topics",
+                 "PATCH /repos/mike/dotfiles/labels/bug", "POST /repos/mike/dotfiles/labels",
+                 "PUT /repos/mike/dotfiles/actions/permissions",
+                 "PUT /repos/mike/dotfiles/actions/permissions/workflow"):
+        assert f"[dry-run] {call}" in out, call
+    assert "default branch is main" in out  # checked only: --fix leaves it

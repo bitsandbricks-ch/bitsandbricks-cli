@@ -1,13 +1,15 @@
-# bitsandbricks
+# Mortar
 
-`bitsandbricks` (short: `bnb`) is a terminal tool and TUI for looking after many GitHub repositories at once, across orgs and user accounts: status, pull requests, merges, workflow runs and approvals, security alerts, and drift checks against shared defaults.
+Mortar (`mortar`, short: `bnb`) is a terminal tool, TUI and web app for looking after many GitHub (and, in the web app, GitLab) repositories at once, across orgs and user accounts: status, pull requests, merges, workflow runs and approvals, security alerts, stats, and drift checks against shared defaults. It holds your bricks together.
 
-The defaults live in a repository you choose. Point `bnb` at any repo (or local folder) that holds a `bitsandbricks.toml`, and it checks your repos against it. Nothing is tied to one org: every user can keep their own defaults repo.
+Formerly bitsandbricks: the `bnb` and `bitsandbricks` commands, `import bitsandbricks`, plugins registered under `bitsandbricks.plugins`, `~/.config/bitsandbricks` and the `BNB_OPERATOR_*` settings all keep working.
+
+The defaults live in a repository you choose. Point `bnb` at any repo (or local folder) that holds a `mortar.toml`, and it checks your repos against it. Nothing is tied to one org: every user can keep their own defaults repo.
 
 ## Install
 
 ```sh
-pipx install "git+https://github.com/bitsandbricks-ch/bitsandbricks-cli#egg=bitsandbricks-cli[tui]"
+pipx install "mortar-cli[tui] @ git+https://github.com/bitsandbricks-ch/bitsandbricks-cli"
 gh auth login          # bnb talks to GitHub through the gh CLI and never sees a token
 bnb init your-org/your-defaults
 ```
@@ -20,7 +22,7 @@ Repos are named as `owner/name`, as a bare `name` when only one repo has it, or 
 
 | Command | What it does |
 |---|---|
-| `bnb init <owner/repo or folder>` | Use this defaults repo. A local folder without `bitsandbricks.toml` gets a starter file. |
+| `bnb init <owner/repo or folder>` | Use this defaults repo. A local folder without `mortar.toml` gets a starter file. |
 | `bnb config` | Where bnb looks: config file, defaults, orgs, groups, plugins. |
 | `bnb repos` | The repos bnb sees, with their group. |
 | `bnb status` | One line per repo: group, latest release, PRs ready/draft, CI. One GraphQL query per 20 repos. |
@@ -39,7 +41,11 @@ Repos are named as `owner/name`, as a bare `name` when only one repo has it, or 
 | `bnb sync [names] [--only PATH]` | Opens a PR per repo whose shared files differ. |
 | `bnb new owner/name [--group G] [--public]` | Creates a repo the way its group wants it: from the reference repo when that is a GitHub template, the group's files committed, then its settings, security and rulesets applied. Private unless `--public`. |
 | `bnb open web#12` | Prints the link, and opens it (or copies it over SSH; `BNB_OPEN=browser\|copy\|print`). |
+| `bnb stats [--days 30]` | Pull requests merged and opened, median time to merge, open and stale PRs, workflow runs with success rate and duration, releases. |
 | `bnb plugins` | Installed plugins. |
+| `bnb market [install NAME]` | Plugins in the signed plugin index; `install` adds one (only from a verified index). `keygen`, `sign` and `verify` are for whoever publishes an index. |
+| `mortar serve [--check]` | Run Mortar, the web app (`pipx inject mortar-cli 'mortar-cli[server]'`); `--check` shows what its settings allow. See [docs/mortar.md](docs/mortar.md). |
+| `bnb login https://mortar` | Go through [Mortar](docs/mortar.md), the web app, with an API key: approve a code in the browser, and every command and the TUI then work without gh or a GitHub token here. `bnb logout` forgets the key, `bnb whoami` says how bnb reaches GitHub. |
 | `bnb tui` | Everything above, full screen. |
 
 Security alerts need the `security_events` scope and packages the `read:packages` scope: `gh auth refresh -s security_events,read:packages`.
@@ -62,7 +68,7 @@ Security alerts need the `security_events` scope and packages the `read:packages
 
 ## Configuration
 
-Your own config is `~/.config/bitsandbricks/config.toml` (`bnb init` writes it):
+Your own config is `~/.config/mortar/config.toml` (or `~/.config/bitsandbricks/` from before the rename) (`bnb init` writes it):
 
 ```toml
 defaults = "your-org/your-defaults"   # a GitHub repo, or a local folder
@@ -72,7 +78,7 @@ orgs = ["another-org"]                # added to the orgs the defaults name
 
 `BNB_DEFAULTS`, `BNB_DEFAULTS_REF` and `BNB_ORGS` (comma separated) override it for one run.
 
-`bitsandbricks.toml` in the defaults repo is shared by everyone who points bnb at it:
+`mortar.toml` in the defaults repo is shared by everyone who points bnb at it (a defaults repo that still has the older `bitsandbricks.toml` keeps working):
 
 ```toml
 orgs = ["your-org", "your-user"]
@@ -89,9 +95,19 @@ require = { allow_auto_merge = true }              # what the reference itself m
 [[group]]
 name = "default"                                   # no match: takes the rest
 settings = { delete_branch_on_merge = true, has_wiki = false }
-security = { secret_scanning = "enabled", secret_scanning_push_protection = "enabled" }
+security = { secret_scanning = "enabled", secret_scanning_push_protection = "enabled",
+             dependabot_alerts = "enabled", dependabot_security_updates = "enabled" }
 immutable_releases = true
 vulnerability_reporting = true
+topics = ["your-org"]                              # topics every repo has
+labels = { bug = "d73a4a", docs = { color = "0075ca", description = "Documentation" } }
+actions = { allowed_actions = "selected", default_workflow_permissions = "read",
+            can_approve_pull_request_reviews = false }
+required_files = ["README.md", "LICENSE", "CODEOWNERS|.github/CODEOWNERS"]   # A|B: either one
+branch = "main"                                    # the default branch's name
+visibility = "private"                             # public, private or internal
+description = true                                 # every repo has a description
+skip = ["labels"]                                  # checks this group leaves out
 release_assets = ["*.zip"]                         # files every release must attach (bnb releases)
 version = "pyproject.toml"                         # the file with the version (bnb bump, bnb release)
 changelog = ["CHANGELOG.md"]                       # changelogs bnb bump adds the section to
@@ -103,27 +119,43 @@ The first group that matches a repo is its group. With `from`, the group takes e
 
 A ruleset from the defaults folder only has to be covered: a repo may set more than the file says (GitHub fills in its own defaults). A reference repo's rulesets must match exactly. Each repo's own `.github/rulesets/*.json` must also match what's live, and `doctor --fix` imports them.
 
+`doctor --fix` sets settings, security (Dependabot alerts and security updates too), topics (it adds the missing ones and keeps the rest), labels (it creates missing ones and fixes colors, and leaves other labels alone) and the Actions permissions. `branch`, `visibility`, `description` and `required_files` are only checked, because changing them can break things: a missing required file is a job for `bnb sync` or a PR.
+
+`skip` turns checks off for a group: `settings`, `security`, `vulnerability_reporting`, `immutable_releases`, `rulesets`, `own_rulesets` (the repo's `.github/rulesets`), `files`, `required_files`, `topics`, `labels`, `actions`, `branch`, `visibility`, `description` and `plugins` (the plugins' doctor checks).
+
 Unknown keys on a group stay there for plugins (`group.extra`).
 
 ## Plugins
 
-A plugin is a Python package with an entry point in the `bitsandbricks.plugins` group. It can add commands, `status` columns (with extra GraphQL fields), doctor checks and hints, TUI tabs and palette commands. See `src/bitsandbricks/plugins.py`.
+A plugin is a Python package with an entry point in the `mortar.plugins` group (`bitsandbricks.plugins` still works). It can add commands, `status` columns (with extra GraphQL fields), doctor checks and hints, TUI tabs and palette commands. See `src/mortar/plugins.py`.
 
 ```toml
-[project.entry-points."bitsandbricks.plugins"]
+[project.entry-points."mortar.plugins"]
 hubra = "hubra_cli.bnb:HubraPlugin"
 ```
 
-Install one next to bnb with `pipx inject bitsandbricks-cli <package>`. `BNB_PLUGINS=none` (or a comma separated list of names) limits which plugins load.
+Install one next to bnb with `pipx inject mortar-cli <package>`. `BNB_PLUGINS=none` (or a comma separated list of names) limits which plugins load.
 
 hubra-cli is one: it adds Hubra plugin releases, signing checks and a Hubra tab.
 
+## Mortar (web app)
+
+`mortar serve` runs bnb as a web app: people sign in with GitHub and GitLab (OAuth, their own tokens), and
+get every command and TUI view in a terminal-style browser UI, plus a defaults editor with templates,
+stats, a console, plugins and a signed plugin marketplace. `bnb login https://your-mortar` points the CLI
+and TUI at it with an API key, so a laptop needs neither gh nor a token.
+
+```sh
+docker compose -f deploy/docker-compose.yml up -d   # after filling in deploy/mortar.env
+```
+
+![Mortar's pull requests view](docs/screenshots/03-pull-requests.png)
+
+Setup, settings, the security model and more screenshots: [docs/mortar.md](docs/mortar.md).
+
 ## Roadmap
 
-- GitLab backend next to GitHub.
-- Kubernetes (k3s) and Docker views as plugins.
-- A plugin index to find and install plugins.
-- An AI agent that proposes fixes for security alerts and merge conflicts as PRs.
+Ideas and planned features live in [docs/BACKLOG.md](docs/BACKLOG.md).
 
 ## Development
 
@@ -131,6 +163,7 @@ hubra-cli is one: it adds Hubra plugin releases, signing checks and a Hubra tab.
 pip install -e ".[dev]"
 pytest          # runs every command against tests/fake_gh, a stand-in for gh
 ruff check .
+cd web && npm ci && npm run build   # Mortar's UI (npm run dev for a live-reloading one)
 ```
 
 ## License
