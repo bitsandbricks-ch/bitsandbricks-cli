@@ -274,6 +274,31 @@ def test_settings_defaults(monkeypatch, tmp_path):
         assert op.problems(), url
 
 
+def test_serve_port_sets_default_url(monkeypatch, tmp_path, capsys):
+    from mortar.server import app as A
+    from mortar.server import settings as S
+    monkeypatch.delenv("MTR_URL", raising=False)
+    monkeypatch.setenv("MTR_DATA", str(tmp_path))
+    assert S.load().url == "http://localhost:8080"
+    assert S.load(9000).url == "http://localhost:9000"
+    monkeypatch.setenv("MTR_URL", "https://mortar.example.org/")  # an explicit MTR_URL wins
+    assert S.load(9000).url == "https://mortar.example.org"
+    monkeypatch.delenv("MTR_URL")
+    ran = {}
+
+    class FakeApp:
+        def run(self, **kw):
+            ran.update(kw)
+
+    monkeypatch.setattr(A, "create_app", lambda op: ran.update(url=op.url) or FakeApp())
+    from mortar import cli
+    cli.main(["serve", "--port", "9000"])
+    assert (ran["url"], ran["port"], ran["host"]) == ("http://localhost:9000", 9000, "127.0.0.1")
+    with pytest.raises(SystemExit):
+        cli.main(["serve", "--check", "--port", "9001"])
+    assert "url          http://localhost:9001" in capsys.readouterr().out
+
+
 class FakeGitHub:
     """GitHub's device flow and /user, answering in order."""
 

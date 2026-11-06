@@ -14,7 +14,7 @@ GITHUB_SCOPES = "repo read:org workflow security_events read:packages"
 # ship: with it anyone can sign in with GitHub's device flow, no client secret needed. GITHUB_CLIENT_ID
 # overrides it, and with GITHUB_CLIENT_SECRET the usual redirect sign-in works too.
 GITHUB_CLIENT_ID = "Ov23liFJgLtIjB3ZtuOy"
-DEFAULT_URL = "http://localhost:8080"
+DEFAULT_PORT = 8080
 LOCAL_SUFFIXES = (".localhost", ".local", ".lan", ".home.arpa")
 GITLAB_SCOPES = "api"
 
@@ -140,7 +140,8 @@ def secret_key(data: Path) -> str:
     return key
 
 
-def load() -> Settings:
+def load(port: int | None = None) -> Settings:
+    """The settings; without MTR_URL, the URL is http://localhost on `port` (mtr serve --port)."""
     data = Path(_env("MTR_DATA", "data")).resolve()
     gl_web = _env("GITLAB_URL", "https://gitlab.com").rstrip("/")
     gh_web = _env("GITHUB_URL", "https://github.com").rstrip("/")
@@ -148,7 +149,7 @@ def load() -> Settings:
     gh_api = _env("GITHUB_API_URL") or ("https://api.github.com" if public else f"{gh_web}/api/v3")
     gh_id = _env("GITHUB_CLIENT_ID") or (GITHUB_CLIENT_ID if public else "")
     return Settings(
-        url=(_env("MTR_URL") or DEFAULT_URL).rstrip("/"),
+        url=(_env("MTR_URL") or f"http://localhost:{port or DEFAULT_PORT}").rstrip("/"),
         data=data,
         database=_env("DATABASE_URL") or f"sqlite:///{data / 'operator.db'}",
         secret_key=secret_key(data),
