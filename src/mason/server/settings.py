@@ -9,6 +9,8 @@ import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from mason.cache import MB, size_of
+
 GITHUB_SCOPES = "repo read:org workflow security_events read:packages"
 # Mason's own GitHub OAuth app. A client ID is public (it is in every authorize URL), so it is safe to
 # ship: with it anyone can sign in with GitHub's device flow, no client secret needed. GITHUB_CLIENT_ID
@@ -84,6 +86,8 @@ class Settings:
     idle_hours: int = 12
     session_days: int = 7
     cache: str = "60s"
+    cache_size: int = 256 * 1024 * 1024  # all users' cached answers together, in memory only
+    cache_user_size: int = 32 * 1024 * 1024  # one user's share
     plugin_index: str = ""
     plugin_index_keys: list = field(default_factory=list)
     plugin_install: bool = False
@@ -182,6 +186,8 @@ def load(port: int | None = None) -> Settings:
         idle_hours=int(_env("MASON_IDLE_HOURS", "12")),
         session_days=int(_env("MASON_SESSION_DAYS", "7")),
         cache=_env("MASON_CACHE", "60s"),
+        cache_size=size_of(_env("MASON_CACHE_SIZE"), 256 * MB),
+        cache_user_size=size_of(_env("MASON_CACHE_USER_SIZE"), 32 * MB),
         plugin_index=_env("MASON_PLUGIN_INDEX",
                           "https://raw.githubusercontent.com/bitsandbricks-ch/mason-cli/main/plugins/index.json"),
         plugin_index_keys=_list("MASON_PLUGIN_INDEX_KEYS"),

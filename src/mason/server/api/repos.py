@@ -649,7 +649,8 @@ def rate():
         out = {"github": core.rate_limit() if github_ok(gh) else {}}
         if gl is not None:
             out["gitlab"] = gl.last_rate
-        out["cache"] = {"github": getattr(gh, "stats", {}), "gitlab": getattr(gl, "stats", {}) if gl else {}}
+        info = lambda t: t.cache_info() if hasattr(t, "cache_info") else {}  # noqa: E731
+        out["cache"] = {"github": info(gh), "gitlab": info(gl) if gl else {}}
         return jsonify(out)
 
 
@@ -661,6 +662,6 @@ def cache_clear():
             if t is None:
                 continue
             t.caches.clear()
-            if hasattr(t, "forget"):
-                t.forget()
+            if hasattr(t, "store"):
+                t.store.clear()
     return jsonify({"ok": True, "user": g.user.id})

@@ -437,6 +437,29 @@ def test_redirect_sign_in_github_and_gitlab(op, monkeypatch):
     assert not me["user"]["is_admin"]
 
 
+def test_proxy_reads_through_the_users_cache_and_writes_make_it_stale(op, monkeypatch):
+    from test_cache import Fake
+
+    from mason.server import oauth
+    from mason.transport import HttpTransport
+    app, client = op
+    api = Fake()
+    try:
+        t = HttpTransport("ghtoken", api_url=api.url, graphql_url=api.url + "/graphql", cache="60s")
+        monkeypatch.setattr(oauth, "github", lambda user: t)
+        r = client.get("/api/v1/github/rest/repos/acme/web/labels")
+        assert r.status_code == 200 and r.headers.get("ETag")
+        etag = r.headers["ETag"]
+        r = client.get("/api/v1/github/rest/repos/acme/web/labels", headers={"If-None-Match": etag})
+        assert r.status_code == 304
+        assert len(api.hits("/repos/acme/web/labels")) == 1  # the second came from the cache
+        r = client.post("/api/v1/github/rest/repos/acme/web/labels", json={"name": "bug"}, headers=H)
+        assert r.status_code == 200
+        client.get("/api/v1/github/rest/repos/acme/web/labels")
+        got = api.hits("/repos/acme/web/labels")
+        assert len(got) == 3 and got[-1][0] == "GET" and got[-1][2].get("If-None-Match") == etag
+    finally:
+        api.server.shutdown()
 # ── revoking tokens when a login is disconnected or the account deleted ──────
 
 

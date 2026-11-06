@@ -342,5 +342,6 @@ def gitlab(user: User):
 
 def transport_stats() -> list[dict]:
     with _tlock:
-        return [{"provider": k[0], "user_id": k[1], **getattr(t, "stats", {}), "rate": getattr(t, "last_rate", {})}
+        return [{"provider": k[0], "user_id": k[1], **(t.cache_info() if hasattr(t, "cache_info") else {}),
+                 "rate": getattr(t, "last_rate", {})}
                 for k, t in _transports.items()]
