@@ -153,7 +153,7 @@ def test_tui_flow(env, monkeypatch):
             assert any("[dry-run] comment on acme/web#7: thanks" in line for line in log), log
             assert any("[dry-run] branch bump/v0.5.0" in line for line in log), log
             assert any("[dry-run] create the draft release v0.3.1 (v0.3.1)" in line for line in log), log
-            assert any("[dry-run] push the tag v0.3.1 on main of acme/plugin-b" in line for line in log), log
+            assert any("[dry-run] push the tag v0.4.0 on main of acme/plugin-b" in line for line in log), log
 
     asyncio.run(run())
 

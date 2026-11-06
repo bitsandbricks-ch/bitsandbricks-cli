@@ -1502,7 +1502,7 @@ class MasonTui(App):
     def suggest_release(self, repo: str, only_tag: bool = False) -> None:
         workflow = ""
         try:
-            tag = REL.suggest_from(REL.recent(repo))
+            tag = REL.suggest_tag(self.cfg, repo) if only_tag else REL.suggest_from(REL.recent(repo))
             if only_tag:
                 workflow = REL.publishing_workflow(repo)
         except core.RateLimited as err:
@@ -1527,7 +1527,8 @@ class MasonTui(App):
             then = (f"{workflow} creates the release from it." if workflow
                     else "No workflow of this repo creates a release from it (N makes a release instead).")
             self.detail_cache.pop(f"relpage:{repo}", None)
-            self.confirm_then(f"Push the tag {tag} on the default branch of {repo}?\n{then}", REL.push_tag, repo, tag)
+            self.confirm_then(f"Push the tag {tag} on the default branch of {repo}?\n{then}",
+                              REL.push_tag, repo, tag, "", self.cfg)
         self.push_screen(Ask(f"New tag on {repo} (only the tag is pushed)", value=suggested), tagged)
 
     def ask_release(self, repo: str, suggested: str) -> None:

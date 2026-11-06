@@ -5,8 +5,9 @@ import { answer, prompt } from '../ui.js'
 import { state } from '../api.js'
 
 const box = ref(null)
+const field = ref(null)
 const text = ref('')
-watch(() => prompt.open, (open) => { if (open) { text.value = ''; nextTick(() => box.value?.focus()) } })
+watch(() => prompt.open, (open) => { if (open) { text.value = ''; nextTick(() => (field.value || box.value)?.focus()) } })
 function key(e) {
   if (prompt.notice) { if (['Enter', 'Escape', 'y', 'n'].includes(e.key)) answer('ok'); return }
   if (e.target.tagName === 'INPUT') { if (e.key === 'Enter') answer(text.value || null); if (e.key === 'Escape') answer(null); return }
@@ -25,7 +26,7 @@ function key(e) {
         <a class="accent" :href="l.href" target="_blank" rel="noopener">{{ l.label }}</a>
       </div>
       <div v-if="prompt.input" style="margin-top: 10px">
-        <input v-model="text" :type="prompt.input.password ? 'password' : 'text'" :placeholder="prompt.input.placeholder"
+        <input ref="field" v-model="text" :type="prompt.input.password ? 'password' : 'text'" :placeholder="prompt.input.placeholder"
                style="width: 100%" autofocus>
       </div>
       <div class="row" style="margin-top: 12px">

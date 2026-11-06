@@ -418,3 +418,6 @@ def test_release_tag_only_pushes_the_tag(env, tmp_path):
     assert "[dry-run] push the tag v1.10.1 on main of acme/api; no workflow here creates a release" in out
     assert "has a tag v1.0.0 already" in mason(env, "release", "tag", "a", "v1.0.0", "--yes")
     assert "left as it is" in mason(env, "release", "tag", "b", "v0.4.0")
+    out = mason(env, "release", "tag", "b", "v0.5.0", "--yes")  # the version file decides the tag
+    assert "plugin.yaml says 0.4.0, so the tag would be v0.4.0, not v0.5.0: bump it first" in out
+    assert "push the tag v0.4.0 on main" in mason(env, "release", "tag", "b", "--dry-run")

@@ -135,10 +135,12 @@ def page(cfg: Config | None, repo: str, tag: str | None = None) -> dict:
         except RuntimeError as err:
             raise RuntimeError(f"no release {tag} in {repo}") from err
     rel_url = (rel or {}).get("html_url") or f"{WEB}/{repo}/releases"
+    vs = version_state(cfg, repo)
     return {"repo": repo, "provider": "github", "releases": [row(r) for r in rels],
             "selected": (rel or {}).get("tag_name") or "", "url": rel_url,
-            "text": detail_text(cfg, repo, rel, runs, rels), "suggest": suggest_from(rels),
-            "publishes": publishing_workflow(repo)}
+            "text": detail_text(cfg, repo, rel, runs, rels),
+            "suggest": (vs or {}).get("tag") or suggest_from(rels),
+            "publishes": publishing_workflow(repo), "version": vs}
 
 
 def view(cfg: Config, repo: str, tag: str | None = None) -> None:
@@ -191,11 +193,32 @@ def publishing_workflow(repo: str) -> str:
     return ""
 
 
-def push_tag(repo: str, tag: str, target: str = "") -> str:
+def version_state(cfg: Config | None, repo: str) -> dict | None:
+    """The repo's version file against its latest release (versions.state), or None without a version file."""
+    from mason import versions as V
+    if cfg is None or repo.startswith("gitlab:") or not V.source(cfg, repo):
+        return None
+    return V.state(cfg, repo)
+
+
+def suggest_tag(cfg: Config | None, repo: str) -> str:
+    """The tag a new tag should get: v<version> from the version file when the group names one, else the next
+    patch after the newest release."""
+    st = version_state(cfg, repo)
+    return st["tag"] if st and st.get("tag") else suggest_from(recent(repo))
+
+
+def push_tag(repo: str, tag: str, target: str = "", cfg: Config | None = None) -> str:
     """New tag: push `tag` on `target` (the default branch) and nothing else. A workflow that publishes on
-    tag pushes (hubra's) makes the release from it. Returns the tag's release page ('' in a dry run)."""
+    tag pushes (hubra's) makes the release from it. When the repo's group names a version file, the tag must
+    be v<that version>: the tag never changes the file, so bump first (b, `mason bump`).
+    Returns the tag's release page ('' in a dry run)."""
     from mason import versions as V
     tag = valid_tag(tag)
+    st = version_state(cfg, repo)
+    if st and st.get("version") and tag != st["tag"]:
+        raise RuntimeError(f"{st['file']} says {st['version']}, so the tag would be {st['tag']}, not {tag}: "
+                           f"bump it first (b, or mason bump {core.short(repo)}), then push the tag")
     target = (target or "").strip()
     if target and not re.match(r"^[A-Za-z0-9._/-]{1,250}$", target):
         raise RuntimeError(f"not a branch or commit: {target[:60]!r}")
