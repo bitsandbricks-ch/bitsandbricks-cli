@@ -14,7 +14,7 @@ gh auth login          # on its own, mtr talks to GitHub through the gh CLI and 
 mtr init your-org/your-defaults
 ```
 
-To update: `pipx install --force "mortar-cli[tui,server] @ git+https://github.com/bitsandbricks-ch/mortar-cli"`. A pipx install doesn't include the web UI's built files; run the web app from the Docker image or a clone (see [Mortar (web app)](#mortar-web-app)).
+To update: `pipx install --force "mortar-cli[tui,server] @ git+https://github.com/bitsandbricks-ch/mortar-cli"`. The install builds the web UI into the package, which needs Node.js (`npm`) on your PATH; without it, mtr installs fine but `mtr serve` has no UI and tells you how to build it. `mtr serve --check` shows whether the UI is built. The Docker image always has it (see [Mortar (web app)](#mortar-web-app)).
 
 The repository used to be `bitsandbricks-ch/bitsandbricks-cli` with a `bnb` command. Only the names `mtr`, `MTR_*`, `mortar.toml` and `~/.config/mortar` work now.
 
