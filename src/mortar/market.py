@@ -36,7 +36,7 @@ import sys
 import urllib.request
 from pathlib import Path
 
-DEFAULT_INDEX = "https://raw.githubusercontent.com/bitsandbricks-ch/bitsandbricks-cli/main/plugins/index.json"
+DEFAULT_INDEX = "https://raw.githubusercontent.com/bitsandbricks-ch/mortar-cli/main/plugins/index.json"
 KEYS_DIR = Path(__file__).parent / "keys"
 INDEX_FIELDS = ("name", "description", "generated", "plugins", "key_id", "public_key")
 SOURCE = re.compile(r"^(git\+https://[\w.-]+/[\w./-]+(@[\w./-]+)?(#egg=[\w-]+)?|[A-Za-z0-9_.-]+==[\w.+-]+)$")

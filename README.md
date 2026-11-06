@@ -7,7 +7,7 @@ The defaults live in a repository you choose. Point `mtr` at any repo (or local 
 ## Install
 
 ```sh
-pipx install "mortar-cli[tui] @ git+https://github.com/bitsandbricks-ch/bitsandbricks-cli"
+pipx install "mortar-cli[tui] @ git+https://github.com/bitsandbricks-ch/mortar-cli"
 gh auth login          # mtr talks to GitHub through the gh CLI and never sees a token
 mtr init your-org/your-defaults
 ```

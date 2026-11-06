@@ -126,7 +126,7 @@ def load() -> Settings:
         session_days=int(_env("MTR_SESSION_DAYS", "7")),
         cache=_env("MTR_CACHE", "60s"),
         plugin_index=_env("MTR_PLUGIN_INDEX",
-                          "https://raw.githubusercontent.com/bitsandbricks-ch/bitsandbricks-cli/main/plugins/index.json"),
+                          "https://raw.githubusercontent.com/bitsandbricks-ch/mortar-cli/main/plugins/index.json"),
         plugin_index_keys=_list("MTR_PLUGIN_INDEX_KEYS"),
         plugin_install=_env("MTR_PLUGIN_INSTALL") == "1",
         trusted_proxies=int(_env("MTR_TRUSTED_PROXIES", "0")),
