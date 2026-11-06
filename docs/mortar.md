@@ -60,8 +60,7 @@ Mortar needs the `server` extra and the built UI. A pipx install from git
 ```sh
 pip install -e ".[server]"                   # flask, sqlalchemy, cryptography, gunicorn
 (cd web && npm ci && npm run build)          # the UI, into src/mortar/server/static
-export GITHUB_CLIENT_ID=... GITHUB_CLIENT_SECRET=...
-export MTR_ADMINS=github:you MTR_DEV=1
+export MTR_ADMINS=github:you                 # optional: sign-in works without any settings
 mtr serve --check                            # what the settings allow, and what is missing
 mtr serve                                    # http://localhost:8080 (Flask's development server)
 mtr serve --host 0.0.0.0 --port 9000         # somewhere else
@@ -76,14 +75,23 @@ gunicorn with one process and many threads, which keeps each user's API cache in
 
 ## Signing in
 
-People sign in in the browser with GitHub or GitLab through an OAuth app you register (below): the
-authorization code flow with PKCE. There is no GitHub or GitLab device flow for the browser sign-in. The
-device-code flow Mortar has is its own, for `mtr login` (see [The CLI and TUI through
+GitHub sign-in works out of the box: Mortar ships the client ID of its own GitHub OAuth app
+(`Ov23liFJgLtIjB3ZtuOy`; a client ID is public) and signs in with GitHub's device flow, which needs no
+client secret. The login page shows a code and a link to <https://github.com/login/device>; once you have
+entered the code there, the page signs you in by itself. `GITHUB_CLIENT_ID` uses your own OAuth app
+instead (switch on "Enable Device Flow" in its settings).
+
+With a client secret as well (`GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`, or `GITLAB_CLIENT_ID` and
+`GITLAB_CLIENT_SECRET`) the sign-in is the usual redirect: the authorization code flow with PKCE, back to
+`{MTR_URL}/api/v1/auth/{github|gitlab}/callback`. GitLab always needs its own app. Mortar's own
+device-code flow for `mtr login` is separate (see [The CLI and TUI through
 Mortar](#the-cli-and-tui-through-mortar)). Someone signed in with one provider connects the other in
 Settings › Accounts, and both logins then belong to the same Mortar user.
 
-Who may sign in is up to you: `MTR_ALLOW_USERS`, `MTR_ALLOW_ORGS` and `MTR_ADMINS`, or anyone with
-`MTR_ALLOW_ANYONE=1`. Mortar doesn't start until one of them is set.
+Anyone with a GitHub or GitLab account may sign in, and each user sees only their own repos (through
+their own token), API keys, sessions, secrets and audit log. `MTR_ALLOW_USERS` and `MTR_ALLOW_ORGS`
+restrict who may sign in; `MTR_ADMINS` names the admins, and only it makes anyone an admin (taking a
+login off the list takes the admin rights away at the next request).
 
 ## OAuth apps
 
@@ -99,29 +107,30 @@ GitLab: set `GITLAB_URL`.
 
 | variable | meaning |
 | --- | --- |
-| `MTR_URL` | where people reach it; must be `https://` unless `MTR_DEV=1` |
+| `MTR_URL` | where people reach it (default `http://localhost:8080`); plain `http://` only for localhost, private addresses and `.local`, `.lan` or `.home.arpa` names, `https://` everywhere else |
 | `MTR_SECRET_KEY` | encrypts stored tokens and secrets; made once in the data folder when unset |
 | `MTR_DATA` | data folder (default `./data`, `/data` in the image) |
 | `DATABASE_URL` | SQLAlchemy URL; SQLite in the data folder by default, `postgresql+psycopg://…` with `[postgres]` |
-| `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_URL`, `GITHUB_API_URL`, `GITHUB_SCOPES` | the GitHub login (scopes default to the table above) |
+| `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_URL`, `GITHUB_API_URL`, `GITHUB_SCOPES` | the GitHub login: the client ID defaults to Mortar's own app (device flow) on github.com; with a secret, the redirect sign-in (scopes default to the table above) |
 | `GITLAB_CLIENT_ID`, `GITLAB_CLIENT_SECRET`, `GITLAB_URL`, `GITLAB_SCOPES` | the GitLab login |
-| `MTR_ALLOW_USERS` | who may sign in: `github:mike, gitlab:ann`, or a bare login for either |
-| `MTR_ALLOW_ORGS` | members of these GitHub orgs or GitLab groups may sign in |
-| `MTR_ADMINS` | admins (may sign in too): everyone's audit log, plugins for everyone, installs |
-| `MTR_ALLOW_ANYONE` | `1` lets any account sign in (on purpose only) |
+| `MTR_ALLOW_USERS` | optional: only these may sign in: `github:mike, gitlab:ann`, or a bare login for either |
+| `MTR_ALLOW_ORGS` | optional: only members of these GitHub orgs or GitLab groups may sign in |
+| `MTR_ADMINS` | the admins (may always sign in): everyone's audit log, plugins for everyone, installs |
 | `MTR_IDLE_HOURS`, `MTR_SESSION_DAYS` | session idle timeout (12) and lifetime (7) |
 | `MTR_CACHE` | how long GET answers are cached per user (`60s`); ETags make refreshes cheap |
 | `MTR_PLUGIN_INDEX`, `MTR_PLUGIN_INDEX_KEYS` | the plugin index (URL or file; default: `plugins/index.json` on this repo's main branch) and extra public keys (base64, comma separated) it may be signed with |
 | `MTR_PLUGIN_INSTALL` | `1` lets admins install plugins from the marketplace page |
 | `MTR_TRUSTED_PROXIES` | how many proxies in front set `X-Forwarded-*` (0) |
-| `MTR_DEV` | `1`: http allowed and `MTR_URL` defaults to `http://localhost:8080` (local development only); over http the session cookie loses its `__Host-` prefix |
 
-Mortar refuses to start when no login is configured, nobody may sign in, or the URL isn't https.
+Over http the session cookie loses its `__Host-` prefix. Mortar refuses to start when no login is
+configured (GitHub Enterprise without `GITHUB_CLIENT_ID`, say) or the URL is plain http on a public name.
 
 ## Security model
 
 - **Sign-in**: OAuth authorization code with PKCE (S256) and a `state` bound to the browser by a short-lived
-  cookie. Only allowed accounts get in; the decision is made at every sign-in, not once.
+  cookie, or GitHub's device flow, where GitHub's device code stays on the server and the browser holds
+  only an HttpOnly cookie for that one sign-in. With allow lists, only allowed accounts get in; the
+  decision is made at every sign-in, not once.
 - **The user's own token, always.** Every GitHub and GitLab call is made with the signed-in user's token, so
   nobody sees or changes more than their account may. The server never falls back to a token or gh login of
   its own. Tokens are encrypted at rest (Fernet), refreshed when they expire (GitLab), and revoked at the

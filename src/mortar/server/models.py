@@ -131,6 +131,23 @@ class OAuthState(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class DeviceSignIn(Base):
+    """A GitHub device-flow sign-in in progress: the browser holds a random cookie, the database its
+    SHA-256 and GitHub's device code (encrypted) until the user has entered the code at GitHub."""
+    __tablename__ = "device_sign_ins"
+    cookie_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(20), default="github")
+    device_enc: Mapped[str] = mapped_column(Text)
+    user_code: Mapped[str] = mapped_column(String(20))
+    verification_uri: Mapped[str] = mapped_column(String(300))
+    link_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    return_to: Mapped[str] = mapped_column(String(200), default="/")
+    interval: Mapped[int] = mapped_column(Integer, default=5)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    last_poll: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class Secret(Base):
     """A user's own secret for a plugin (e.g. a Hubra API token), encrypted."""
     __tablename__ = "secrets"

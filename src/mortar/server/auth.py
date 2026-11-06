@@ -111,8 +111,10 @@ def _from_session() -> bool:
     user = db.get(User, s.user_id)
     if user is None:
         return False
-    if now - s.seen_at > timedelta(minutes=1):
-        s.seen_at = now
+    from mortar.server.oauth import admin_of
+    admin = admin_of(user)  # MTR_ADMINS decides, also for sessions started before it changed
+    if now - s.seen_at > timedelta(minutes=1) or user.is_admin != admin:
+        s.seen_at, user.is_admin = now, admin
         db.commit()
     g.user, g.session, g.via, g.scope = user, s, "web", "admin" if user.is_admin else "write"
     return True

@@ -1,9 +1,10 @@
 <script setup>
 // Settings: logins, the defaults repo and which repos to manage, API keys, sessions, plugin secrets,
 // and (admins) users. Everything a CLI user keeps in files lives here per user.
-import { onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { del, get, loadMe, log, post, put, state } from '../api.js'
+import { deviceSignIn } from '../signin.js'
 import { ago, ask } from '../ui.js'
 
 const router = useRouter()
@@ -17,6 +18,19 @@ const newKey = ref({ name: 'laptop', scope: 'read', days: 90 })
 const fresh = ref(null) // the key just made: shown once
 const origin = window.location.origin
 const LISTS = ['orgs', 'repos', 'exclude', 'gitlab_groups', 'gitlab_repos']
+const linking = ref(null) // { user_code, verification_uri } while connecting a login with GitHub's device flow
+let stopLink = null
+
+function connectDevice(p) {
+  stopLink?.()
+  stopLink = deviceSignIn(p, { link: true }, {
+    code: (d) => { linking.value = d },
+    done: async () => { linking.value = null; await loadMe(); log(`connected ${p}`) },
+    fail: (msg) => { linking.value = null; log(msg, 'error') },
+  })
+}
+function cancelLink() { stopLink?.(); stopLink = null; linking.value = null }
+onBeforeUnmount(() => stopLink?.())
 
 const asText = (v) => (v || []).join(', ')
 async function load() {
@@ -86,9 +100,16 @@ onMounted(load)
         </div>
         <div class="row" style="margin-top: 6px">
           <template v-for="p in state.me.providers" :key="p">
-            <a v-if="!state.me.identities.some((i) => i.provider === p)" class="btn" :href="`/api/v1/auth/${p}/login?link=1`">connect {{ p }}</a>
+            <template v-if="!state.me.identities.some((i) => i.provider === p)">
+              <button v-if="state.me.sign_in?.[p] === 'device'" :disabled="!!linking" @click="connectDevice(p)">connect {{ p }}</button>
+              <a v-else class="btn" :href="`/api/v1/auth/${p}/login?link=1`">connect {{ p }}</a>
+            </template>
           </template>
         </div>
+        <p v-if="linking">Enter <span class="accent">{{ linking.user_code }}</span> at
+          <a class="accent" :href="linking.verification_uri" target="_blank" rel="noopener">{{ linking.verification_uri }}</a>
+          <span class="dim"> (waiting<span class="cursor" />)</span>
+          <button @click="cancelLink">cancel</button></p>
       </div>
 
       <div v-if="s" class="box">
