@@ -158,6 +158,8 @@ GitLab: set `GITLAB_URL`.
 | `MTR_PLUGIN_INDEX`, `MTR_PLUGIN_INDEX_KEYS` | the plugin index (URL or file; default: `plugins/index.json` on this repo's main branch) and extra public keys (base64, comma separated) it may be signed with |
 | `MTR_PLUGIN_INSTALL` | `1` lets admins install plugins from the marketplace page |
 | `MTR_TRUSTED_PROXIES` | how many proxies in front set `X-Forwarded-*` (0) |
+| `MTR_AUDIT_DAYS`, `MTR_AUDIT_ROWS`, `MTR_AUDIT_OUTPUT` | audit rows go after 90 days; each user keeps the newest 1000; command output is cut to 1000 characters |
+| `MTR_AUDIT_IPS` | what the audit log keeps of the caller's address: `hash` (default: an HMAC with the secret key, so "same address" shows without the address), `none`, or `full` |
 
 Over http the session cookie loses its `__Host-` prefix. Mortar refuses to start when no login is
 configured (GitHub Enterprise without `GITHUB_CLIENT_ID`, say) or the URL is plain http on a public name.
@@ -188,7 +190,12 @@ configured (GitHub Enterprise without `GITHUB_CLIENT_ID`, say) or the URL is pla
   the scope; the terminal gets a key. Codes expire after 10 minutes and polling is rate limited.
 - **The GitHub proxy** for signed-in CLIs passes on only the reads mtr makes and the writes mtr and its plugins
   make; deleting repos, changing access, keys, hooks and account settings are never passed on.
-- **Audit log**: sign-ins, keys, every change (with its output) and every dry run, with who, how and from where.
+- **Audit log**: sign-ins, keys, every change (with its output) and every dry run, with who and how. It stays
+  bounded: the caller's address is kept only as a keyed hash (`MTR_AUDIT_IPS`), output is cut to
+  `MTR_AUDIT_OUTPUT` characters, each user keeps at most `MTR_AUDIT_ROWS` rows, rows go after
+  `MTR_AUDIT_DAYS`, and deleting an account deletes its rows (one row without name or address records the
+  deletion). Expired sessions, sign-in states, device codes and keys revoked or expired over 30 days ago are
+  deleted every few minutes.
 - **Browser hardening**: a strict CSP (`self` only, no inline scripts or styles, no `data:` fonts), no
   `v-html` anywhere in the UI, `X-Frame-Options: DENY`, `no-referrer`, HSTS, `Cache-Control: no-store` on the API.
 - **Throttling** on sign-in, device codes and key use.

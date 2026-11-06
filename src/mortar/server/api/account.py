@@ -7,7 +7,7 @@ from datetime import timedelta
 
 from flask import Blueprint, abort, current_app, g, jsonify, make_response, redirect, request
 
-from mortar.server import auth, oauth, security
+from mortar.server import auth, oauth, retention, security
 from mortar.server.auth import audit, need
 from mortar.server.context import clean_settings, user_settings
 from mortar.server.models import (
@@ -247,8 +247,10 @@ def device_sign_in_poll(name: str):
 
 
 def audit_anon(action: str, detail: str, ok: bool) -> None:
-    db.add(Audit(user_id=None, via="web", ip=auth.client_ip(), action=action, detail=detail[:500], ok=ok))
+    db.add(Audit(user_id=None, via="web", ip=retention.audit_ip(auth.client_ip()), action=action,
+                 detail=detail[:500], ok=ok))
     db.commit()
+    retention.trim(None)
 
 
 @bp.post("/auth/logout")
@@ -333,8 +335,11 @@ def delete_me():
         abort(403, "delete your account in the browser")
     revoked = [oauth.revoke(i) for i in g.user.identities]
     oauth.forget_transports(g.user.id)
-    audit("account.delete", g.user.name, ok=all(r["revoked"] for r in revoked),
-          detail="\n".join(_revoke_note(r) for r in revoked))
+    retention.forget_user(g.user.id)  # the account's audit rows go with it
+    # one row without name, user or address says it happened, and whether Mortar could revoke the tokens
+    left = [r["provider"] for r in revoked if not r["revoked"]]
+    db.add(Audit(user_id=None, via="web", action="account.delete", ok=not left,
+                 detail=f"tokens not revoked by Mortar: {', '.join(left)}" if left else "tokens revoked"))
     db.delete(g.user)
     db.commit()
     resp = make_response(jsonify({"ok": True, "revoked": revoked}))

@@ -15,7 +15,7 @@ from flask import Flask, abort, g, jsonify, request, send_from_directory
 from werkzeug.exceptions import HTTPException
 
 from mortar import core, transport
-from mortar.server import auth, models, security, webui
+from mortar.server import auth, models, retention, security, webui
 from mortar.server import settings as S
 from mortar.server.context import NoTransport
 
@@ -41,6 +41,7 @@ def create_app(op: S.Settings | None = None) -> Flask:
 
     @app.before_request
     def _who():
+        retention.housekeeping()  # at most every few minutes
         auth.resolve()
         if request.path.startswith("/api/"):
             auth.check_csrf()

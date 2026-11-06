@@ -483,7 +483,7 @@ def test_device_flow_tokens_cant_be_revoked_and_say_so(op, monkeypatch):
         from mortar.server.models import Audit, Identity, db
         assert db.query(Identity).count() == 0  # Mortar's copy is gone either way
         row = db.query(Audit).filter_by(action="account.delete").one()
-        assert not row.ok and "settings/connections/applications/id" in row.detail
+        assert not row.ok and row.detail == "tokens not revoked by Mortar: github" and row.user_id is None
 
 
 def test_failed_revoke_gives_the_link(op, monkeypatch):
@@ -493,3 +493,67 @@ def test_failed_revoke_gives_the_link(op, monkeypatch):
     _, gl_id = _add_gitlab(app, monkeypatch)
     got = c.delete(f"/api/v1/me/identities/{gl_id}", headers=H).json["revoked"][0]
     assert got["revoked"] is False and got["manual"] == "https://gitlab.com/-/user_settings/applications"
+
+
+# ── the audit log stays bounded ──────────────────────────────────────────────
+
+
+def test_audit_hashes_ips_and_cuts_output(op, monkeypatch):
+    app, c = op
+    from mortar.server.models import Audit, db
+    op_settings = app.config["OP"]
+    monkeypatch.setattr(op_settings, "audit_output", 50)
+    c.post("/api/v1/doctor", json={"repos": ["b"], "fix": True, "dry_run": True}, headers=H,
+           environ_base={"REMOTE_ADDR": "203.0.113.7"})
+    with app.app_context():
+        row = db.query(Audit).order_by(Audit.id.desc()).first()
+        assert row.ip.startswith("ip:") and "203.0.113" not in row.ip and len(row.ip) == 19
+        assert len(row.detail) < 120 and row.detail.endswith("more characters not kept)")
+    # the same address hashes the same way, so users still see "same place as before"
+    c.put("/api/v1/settings", json={"orgs": ["acme"]}, headers=H, environ_base={"REMOTE_ADDR": "203.0.113.7"})
+    with app.app_context():
+        a, b = db.query(Audit).order_by(Audit.id.desc()).limit(2)
+        assert a.ip == b.ip
+    monkeypatch.setattr(op_settings, "audit_ips", "none")
+    c.put("/api/v1/settings", json={"orgs": ["acme"]}, headers=H)
+    with app.app_context():
+        assert db.query(Audit).order_by(Audit.id.desc()).first().ip == ""
+
+
+def test_audit_keeps_the_newest_rows_and_purges_old_ones(op, monkeypatch):
+    app, c = op
+    from datetime import timedelta
+
+    from mortar.server import retention
+    from mortar.server.models import ApiKey, Audit, Session, User, db, utcnow
+    monkeypatch.setattr(app.config["OP"], "audit_rows", 3)
+    for n in range(5):
+        c.put("/api/v1/settings", json={"orgs": [f"org{n}"]}, headers=H)
+    with app.app_context():
+        rows = db.query(Audit).filter(Audit.user_id.isnot(None)).order_by(Audit.id).all()
+        assert len(rows) == 3
+        uid = db.query(User).one().id
+        old = utcnow() - timedelta(days=400)
+        db.add(Audit(user_id=uid, action="ancient", at=old))
+        db.add(Session(id="s" * 64, user_id=uid, csrf="x", created_at=old, seen_at=old))
+        db.add(ApiKey(user_id=uid, name="gone", prefix="deadbeef", hash="h", revoked_at=old))
+        db.add(ApiKey(user_id=uid, name="live", prefix="cafecafe", hash="h"))
+        db.commit()
+        assert retention.housekeeping(force=True)
+        assert not db.query(Audit).filter_by(action="ancient").count()
+        assert db.get(Session, "s" * 64) is None
+        assert [k.name for k in db.query(ApiKey)] == ["live"]
+        assert db.query(Session).count() == 1  # the test's own session is fresh
+
+
+def test_deleting_the_account_deletes_its_audit_rows(op, monkeypatch):
+    app, c = op
+    from mortar.server import oauth
+    from mortar.server.models import Audit, db
+    monkeypatch.setattr(oauth, "_http", lambda *a, **kw: (204, {}))
+    c.put("/api/v1/settings", json={"orgs": ["acme"]}, headers=H)
+    assert c.delete("/api/v1/me", headers=H).status_code == 200
+    with app.app_context():
+        rows = db.query(Audit).all()
+        assert [(r.action, r.user_id, r.ip, r.ok) for r in rows] == [("account.delete", None, "", True)]
+        assert "Mike" not in rows[0].detail + rows[0].target

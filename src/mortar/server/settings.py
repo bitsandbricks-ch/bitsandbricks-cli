@@ -88,6 +88,10 @@ class Settings:
     plugin_index_keys: list = field(default_factory=list)
     plugin_install: bool = False
     trusted_proxies: int = 0
+    audit_days: int = 90
+    audit_rows: int = 1000
+    audit_output: int = 1000
+    audit_ips: str = "hash"
 
     @property
     def secure_cookies(self) -> bool:
@@ -110,6 +114,10 @@ class Settings:
         elif parts.scheme == "http" and not local_host(parts.hostname):
             out.append("MTR_URL must be https:// (plain http is only for localhost, private addresses and "
                        ".local, .lan or .home.arpa names)")
+        if self.audit_ips not in ("hash", "none", "full"):
+            out.append(f"MTR_AUDIT_IPS is hash, none or full (got {self.audit_ips!r})")
+        if min(self.audit_days, self.audit_rows) < 1 or self.audit_output < 0:
+            out.append("MTR_AUDIT_DAYS and MTR_AUDIT_ROWS must be at least 1, MTR_AUDIT_OUTPUT at least 0")
         return out
 
 
@@ -169,4 +177,8 @@ def load(port: int | None = None) -> Settings:
         plugin_index_keys=_list("MTR_PLUGIN_INDEX_KEYS"),
         plugin_install=_env("MTR_PLUGIN_INSTALL") == "1",
         trusted_proxies=int(_env("MTR_TRUSTED_PROXIES", "0")),
+        audit_days=int(_env("MTR_AUDIT_DAYS", "90")),
+        audit_rows=int(_env("MTR_AUDIT_ROWS", "1000")),
+        audit_output=int(_env("MTR_AUDIT_OUTPUT", "1000")),
+        audit_ips=_env("MTR_AUDIT_IPS", "hash").lower(),
     )
