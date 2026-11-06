@@ -80,6 +80,10 @@ def start_session(resp, user: User) -> Session:
                 user_agent=(request.headers.get("User-Agent") or "")[:300])
     db.add(s)
     user.last_login = utcnow()
+    db.flush()
+    keep = current_app.config["OP"].max_sessions  # the oldest sessions end first
+    for old in db.query(Session).filter_by(user_id=user.id).order_by(Session.seen_at.desc()).offset(keep):
+        db.delete(old)
     db.commit()
     set_session_cookie(resp, raw)
     return s

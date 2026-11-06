@@ -92,6 +92,14 @@ class Settings:
     audit_rows: int = 1000
     audit_output: int = 1000
     audit_ips: str = "hash"
+    rate_api: int = 600
+    rate_writes: int = 60
+    rate_anon: int = 120
+    signups_per_hour: int = 60
+    signups_per_ip: int = 5
+    max_users: int = 1000
+    max_keys: int = 50
+    max_sessions: int = 20
 
     @property
     def secure_cookies(self) -> bool:
@@ -118,6 +126,8 @@ class Settings:
             out.append(f"MTR_AUDIT_IPS is hash, none or full (got {self.audit_ips!r})")
         if min(self.audit_days, self.audit_rows) < 1 or self.audit_output < 0:
             out.append("MTR_AUDIT_DAYS and MTR_AUDIT_ROWS must be at least 1, MTR_AUDIT_OUTPUT at least 0")
+        if min(self.max_keys, self.max_sessions) < 1:
+            out.append("MTR_MAX_KEYS and MTR_MAX_SESSIONS must be at least 1")
         return out
 
 
@@ -181,4 +191,12 @@ def load(port: int | None = None) -> Settings:
         audit_rows=int(_env("MTR_AUDIT_ROWS", "1000")),
         audit_output=int(_env("MTR_AUDIT_OUTPUT", "1000")),
         audit_ips=_env("MTR_AUDIT_IPS", "hash").lower(),
+        rate_api=int(_env("MTR_RATE_API", "600")),
+        rate_writes=int(_env("MTR_RATE_WRITES", "60")),
+        rate_anon=int(_env("MTR_RATE_ANON", "120")),
+        signups_per_hour=int(_env("MTR_SIGNUPS_PER_HOUR", "60")),
+        signups_per_ip=int(_env("MTR_SIGNUPS_PER_IP", "5")),
+        max_users=int(_env("MTR_MAX_USERS", "1000")),
+        max_keys=int(_env("MTR_MAX_KEYS", "50")),
+        max_sessions=int(_env("MTR_MAX_SESSIONS", "20")),
     )

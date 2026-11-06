@@ -193,6 +193,9 @@ def sign_in(name: str, got: dict, link_user: User | None) -> User:
     else:
         if not allowed(name, me["login"], token, me["uid"]):
             raise PermissionError(f"{name} user {me['login']} may not use this operator")
+        if not is_admin(name, me["login"]):
+            from mortar.server import auth, limits
+            limits.new_account(auth.client_ip())
         user = User(name=me["name"] or me["login"], avatar_url=me["avatar_url"])
         db.add(user)
         db.flush()

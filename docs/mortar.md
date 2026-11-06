@@ -159,6 +159,9 @@ GitLab: set `GITLAB_URL`.
 | `MTR_PLUGIN_INSTALL` | `1` lets admins install plugins from the marketplace page |
 | `MTR_TRUSTED_PROXIES` | how many proxies in front set `X-Forwarded-*` (0) |
 | `MTR_AUDIT_DAYS`, `MTR_AUDIT_ROWS`, `MTR_AUDIT_OUTPUT` | audit rows go after 90 days; each user keeps the newest 1000; command output is cut to 1000 characters |
+| `MTR_RATE_API`, `MTR_RATE_WRITES`, `MTR_RATE_ANON` | API calls per minute: per user (600), changes per user (60), signed-out calls per address (120); 0 switches one off. Reads through the GitHub proxy for the CLI aren't counted (they spend only your own GitHub quota) |
+| `MTR_SIGNUPS_PER_HOUR`, `MTR_SIGNUPS_PER_IP`, `MTR_MAX_USERS` | new accounts per hour in all (60) and per address (5), and the most accounts this Mortar takes (1000; 0 = no cap); admins from `MTR_ADMINS` always get in |
+| `MTR_MAX_KEYS`, `MTR_MAX_SESSIONS` | working API keys (50) and browser sessions (20) per user |
 | `MTR_AUDIT_IPS` | what the audit log keeps of the caller's address: `hash` (default: an HMAC with the secret key, so "same address" shows without the address), `none`, or `full` |
 
 Over http the session cookie loses its `__Host-` prefix. Mortar refuses to start when no login is
@@ -198,7 +201,22 @@ configured (GitHub Enterprise without `GITHUB_CLIENT_ID`, say) or the URL is pla
   deleted every few minutes.
 - **Browser hardening**: a strict CSP (`self` only, no inline scripts or styles, no `data:` fonts), no
   `v-html` anywhere in the UI, `X-Frame-Options: DENY`, `no-referrer`, HSTS, `Cache-Control: no-store` on the API.
-- **Throttling** on sign-in, device codes and key use.
+- **Throttling and caps** so open sign-in can't fill the disk: sign-ins, device codes, code lookups and bad
+  keys are throttled per address; API calls per user (and per address when signed out); new accounts per
+  hour, per address and in all (`MTR_MAX_USERS`); and what each user stores is capped (below). Admins from
+  `MTR_ADMINS` always get an account. Counters live in memory, so they start over on restart, and each
+  server process counts on its own (the image runs one).
+
+  | Per user | Cap |
+  |---|---|
+  | API keys | `MTR_MAX_KEYS` (50) working keys; revoked or expired ones are deleted after 30 days or beyond twice that number |
+  | sessions | `MTR_MAX_SESSIONS` (20); the oldest ends when a new one starts |
+  | settings | 32 KB |
+  | secrets | one per name a plugin declares, 4000 characters each |
+  | audit log | `MTR_AUDIT_ROWS` (1000) rows of at most ~1.5 KB |
+
+  So one account takes at most about 2 MB, and the database at most about `MTR_MAX_USERS` × 2 MB (2 GB with
+  the defaults) plus one shared audit budget for failed sign-ins.
 
 ## The CLI and TUI through Mortar
 

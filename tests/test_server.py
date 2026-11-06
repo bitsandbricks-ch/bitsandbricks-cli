@@ -30,6 +30,8 @@ def op(env, monkeypatch, tmp_path):
         github=S.Provider("github", "id", "secret", "https://github.com", "https://api.github.com", "repo"),
         gitlab=S.Provider("gitlab", "", "", "https://gitlab.com", "https://gitlab.com/api/v4", "api"),
         allow_users={("github", "mike")}, admins={("github", "mike")}, plugin_index=str(tmp_path / "index.json"))
+    from mortar.server import limits
+    limits.reset()
     app = create_app(settings)
     vault = app.config["VAULT"]
     # every GitHub call goes to the fake gh, with the user's token in GH_TOKEN
@@ -557,3 +559,89 @@ def test_deleting_the_account_deletes_its_audit_rows(op, monkeypatch):
         rows = db.query(Audit).all()
         assert [(r.action, r.user_id, r.ip, r.ok) for r in rows] == [("account.delete", None, "", True)]
         assert "Mike" not in rows[0].detail + rows[0].target
+
+
+# ── rate limits and storage caps ─────────────────────────────────────────────
+
+
+def test_api_rate_limits(op, monkeypatch):
+    app, c = op
+    s = app.config["OP"]
+    monkeypatch.setattr(s, "rate_writes", 2)
+    assert [c.put("/api/v1/settings", json={"orgs": ["a"]}, headers=H).status_code for _ in range(3)] == [200, 200, 429]
+    r = c.put("/api/v1/settings", json={"orgs": ["a"]}, headers=H)
+    assert r.status_code == 429 and int(r.headers["Retry-After"]) >= 1 and "wait" in r.json["error"]
+    assert c.get("/api/v1/me").status_code == 200  # reads have their own, larger budget
+    monkeypatch.setattr(s, "rate_anon", 2)
+    anon = app.test_client()
+    assert [anon.get("/api/v1/me").status_code for _ in range(3)] == [200, 200, 429]
+    assert anon.get("/api/v1/health").status_code == 200  # health checks are never limited
+
+
+def _sign_in_as(app, login, uid):
+    from mortar.server import oauth
+    with app.test_request_context("/api/v1/auth/github/device/poll", environ_base={"REMOTE_ADDR": "198.51.100.1"}):
+        oauth.profile = lambda name, token: {"uid": uid, "login": login, "name": login, "avatar_url": ""}
+        return oauth.sign_in("github", {"access_token": f"t-{login}"}, None)
+
+
+def test_new_accounts_are_limited(op, monkeypatch):
+    app, _ = op
+    from mortar.server import oauth
+    monkeypatch.setattr(oauth, "profile", oauth.profile)  # restored after the test
+    s = app.config["OP"]
+    monkeypatch.setattr(s, "allow_users", set())  # open sign-in
+    monkeypatch.setattr(s, "max_users", 2)
+    assert _sign_in_as(app, "ann", "2").name == "ann"
+    with pytest.raises(PermissionError, match="as many accounts"):
+        _sign_in_as(app, "bob", "3")
+    assert _sign_in_as(app, "ann", "2").name == "ann"  # existing accounts still sign in
+    monkeypatch.setattr(s, "admins", {("github", "mike"), ("github", "root")})
+    assert _sign_in_as(app, "root", "4").name == "root"  # admins always get in
+    monkeypatch.setattr(s, "max_users", 0)
+    monkeypatch.setattr(s, "signups_per_ip", 1)
+    from mortar.server import limits
+    limits.reset()
+    assert _sign_in_as(app, "cid", "5").name == "cid"
+    with pytest.raises(PermissionError, match="from this address"):
+        _sign_in_as(app, "dan", "6")
+
+
+def test_key_and_session_caps(op, monkeypatch):
+    app, c = op
+    from mortar.server import auth
+    from mortar.server.models import ApiKey, Session, User, db
+    monkeypatch.setattr(app.config["OP"], "max_keys", 2)
+    made = [c.post("/api/v1/keys", json={"name": f"k{n}"}, headers=H) for n in range(3)]
+    assert [r.status_code for r in made] == [201, 201, 409] and "revoke one first" in made[2].json["error"]
+    for _ in range(6):  # revoked keys don't count, and only a few of them are kept
+        assert c.delete(f"/api/v1/keys/{made[0].json['id']}", headers=H).status_code == 200
+        made[0] = c.post("/api/v1/keys", json={"name": "again"}, headers=H)
+        assert made[0].status_code == 201
+    with app.app_context():
+        assert db.query(ApiKey).count() <= 4
+    assert c.post("/api/v1/keys", json={"days": True}, headers=H).status_code == 400
+    monkeypatch.setattr(app.config["OP"], "max_sessions", 2)
+    with app.test_request_context("/"):
+        user = db.query(User).one()
+        for _ in range(3):
+            auth.start_session(app.make_response("x"), user)
+        assert db.query(Session).filter_by(user_id=user.id).count() == 2
+
+
+def test_settings_size_and_device_lookups(op):
+    app, c = op
+    big = [f"org-{n:03d}-" + "x" * 180 for n in range(200)]
+    r = c.put("/api/v1/settings", json={"orgs": big, "repos": big}, headers=H)
+    assert r.status_code == 413 and "KB" in r.json["error"]
+    codes = [c.get("/api/v1/device/info?code=BCDF-GHJK").status_code for _ in range(11)]
+    assert codes[:10] == [404] * 10 and codes[10] == 429
+    assert c.post("/api/v1/device/approve", json={"user_code": "X", "days": 99999}, headers=H).status_code == 429
+
+
+def test_proxy_reads_dont_count(op, monkeypatch):
+    app, c = op
+    monkeypatch.setattr(app.config["OP"], "rate_api", 2)
+    codes = [c.get("/api/v1/github/rest/repos/acme/web").status_code for _ in range(4)]
+    assert 429 not in codes
+    assert [c.get("/api/v1/me").status_code for _ in range(3)] == [200, 200, 429]

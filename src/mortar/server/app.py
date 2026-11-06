@@ -15,7 +15,7 @@ from flask import Flask, abort, g, jsonify, request, send_from_directory
 from werkzeug.exceptions import HTTPException
 
 from mortar import core, transport
-from mortar.server import auth, models, retention, security, webui
+from mortar.server import auth, limits, models, retention, security, webui
 from mortar.server import settings as S
 from mortar.server.context import NoTransport
 
@@ -44,6 +44,13 @@ def create_app(op: S.Settings | None = None) -> Flask:
         retention.housekeeping()  # at most every few minutes
         auth.resolve()
         if request.path.startswith("/api/"):
+            if request.path != "/api/v1/health":
+                # the GitHub proxy for signed-in CLIs makes many reads per command, which spend only the
+                # user's own GitHub quota: it counts just its REST changes
+                proxy = request.path.startswith("/api/v1/github/")
+                limits.api_call(g.user.id if g.get("user") else None, auth.client_ip(),
+                                request.method not in auth.SAFE_METHODS and request.path != "/api/v1/github/graphql",
+                                count=not proxy)
             auth.check_csrf()
 
     @app.teardown_appcontext
@@ -65,6 +72,10 @@ def create_app(op: S.Settings | None = None) -> Flask:
         if request.path.startswith("/api/"):
             return auth.error_json(err)
         return err
+
+    @app.errorhandler(limits.Limited)
+    def _limited(err):
+        return jsonify({"error": str(err), "retry": err.retry}), 429, {"Retry-After": str(err.retry)}
 
     @app.errorhandler(core.RateLimited)
     def _rate(err):
