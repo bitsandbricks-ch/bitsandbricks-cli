@@ -10,17 +10,16 @@ static/ (built from web/ with Vite); /api/v1 is the JSON API the UI, the CLI and
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
 from flask import Flask, abort, g, jsonify, request, send_from_directory
 from werkzeug.exceptions import HTTPException
 
 from mortar import core, transport
-from mortar.server import auth, models, security
+from mortar.server import auth, models, security, webui
 from mortar.server import settings as S
 from mortar.server.context import NoTransport
 
-STATIC = Path(__file__).parent / "static"
+STATIC = webui.STATIC
 
 
 def create_app(op: S.Settings | None = None) -> Flask:
@@ -88,8 +87,8 @@ def create_app(op: S.Settings | None = None) -> Flask:
     def _spa(path: str = ""):
         if path and (STATIC / path).is_file() and ".." not in path:
             return send_from_directory(STATIC, path)
-        if not (STATIC / "index.html").is_file():
-            return ("The web UI isn't built: cd web && npm ci && npm run build", 503,
+        if not webui.built(STATIC):
+            return (webui.BUILD_HINT, 503,
                     {"Content-Type": "text/plain; charset=utf-8"})
         resp = send_from_directory(STATIC, "index.html")
         resp.headers["Cache-Control"] = "no-cache"
@@ -129,10 +128,13 @@ def main(argv: list[str] | None = None) -> None:
                else f"users {sorted(op.allow_users) or '-'}, orgs {sorted(op.allow_orgs) or '-'}")
         print(f"sign-in      {who}; admins {sorted(op.admins) or '-'}")
         print(f"plugins      index {op.plugin_index}, install from the web {'on' if op.plugin_install else 'off'}")
+        print(f"web ui       {'built' if webui.built(STATIC) else 'NOT BUILT: cd web && npm ci && npm run build'}")
         for problem in op.problems():
             print(f"PROBLEM      {problem}")
         sys.exit(1 if op.problems() else 0)
     app = create_app(op)
+    if not webui.built(STATIC):
+        print("\n" + webui.BUILD_HINT + "\n", file=sys.stderr)
     app.run(host=args.host, port=args.port, threaded=True)
 
 

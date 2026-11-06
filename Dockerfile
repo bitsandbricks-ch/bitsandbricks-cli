@@ -12,7 +12,7 @@ FROM python:3.13-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 MTR_DATA=/data
 RUN useradd --system --uid 10001 --home-dir /data mtr && mkdir /data && chown mtr /data
 WORKDIR /app
-COPY pyproject.toml README.md LICENSE ./
+COPY pyproject.toml hatch_build.py README.md LICENSE ./
 COPY src/ src/
 COPY --from=web /src/mortar/server/static/ src/mortar/server/static/
 RUN pip install --no-cache-dir ".[server,postgres,market]"

@@ -45,3 +45,24 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: npm ci --no-audit --no-fund
       - run: npm run build
+
+  package:
+    # The wheel and sdist a pipx install builds must carry the web UI (hatch_build.py builds it).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: pip install build
+      - run: python -m build
+      - name: The wheel and sdist have the built UI
+        run: |
+          unzip -l dist/*.whl | grep 'mortar/server/static/index.html'
+          tar -tzf dist/*.tar.gz | grep 'src/mortar/server/static/index.html'

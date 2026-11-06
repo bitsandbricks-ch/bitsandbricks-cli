@@ -53,9 +53,12 @@ one-key shortcut (`1` to `9` for the first ones, `I` issues, `W` workflows, `D` 
 
 ## Run it
 
-Mortar needs the `server` extra and the built UI. A pipx install from git
-(`pipx install "mortar-cli[tui,server] @ git+https://github.com/bitsandbricks-ch/mortar-cli"`) has
-`mtr serve`, but not the UI's built files, so run it from the Docker image or a clone:
+Mortar needs the `server` extra and the built UI. Installing the package (a wheel or sdist build, as
+`pipx install "mortar-cli[tui,server] @ git+https://github.com/bitsandbricks-ch/mortar-cli"` does)
+builds the UI from `web/` into it with `npm ci && npm run build`, so have Node.js (`npm`) on your PATH.
+Without npm the install still works, but `mtr serve` prints how to build the UI and the browser gets
+only that message. `mtr serve --check` shows whether the UI is built. `MTR_SKIP_WEB_BUILD=1`
+skips the build. An editable install (`pip install -e`) never builds it, so from a clone:
 
 ```sh
 pip install -e ".[server]"                   # flask, sqlalchemy, cryptography, gunicorn
