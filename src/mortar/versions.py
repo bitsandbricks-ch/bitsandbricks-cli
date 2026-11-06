@@ -1,6 +1,6 @@
 """Versions: bump a repo's version in a PR, and release it by pushing the tag v<version>.
 
-A group of bitsandbricks.toml names where its repos keep their version:
+A group of mortar.toml names where its repos keep their version:
 
     [[group]]
     name = "plugins"

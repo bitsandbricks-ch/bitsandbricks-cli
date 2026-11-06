@@ -4,7 +4,7 @@ Mortar (`mortar`, short: `bnb`) is a terminal tool, TUI and web app for looking 
 
 Formerly bitsandbricks: the `bnb` and `bitsandbricks` commands, `import bitsandbricks`, plugins registered under `bitsandbricks.plugins`, `~/.config/bitsandbricks` and the `BNB_OPERATOR_*` settings all keep working.
 
-The defaults live in a repository you choose. Point `bnb` at any repo (or local folder) that holds a `bitsandbricks.toml`, and it checks your repos against it. Nothing is tied to one org: every user can keep their own defaults repo.
+The defaults live in a repository you choose. Point `bnb` at any repo (or local folder) that holds a `mortar.toml`, and it checks your repos against it. Nothing is tied to one org: every user can keep their own defaults repo.
 
 ## Install
 
@@ -22,7 +22,7 @@ Repos are named as `owner/name`, as a bare `name` when only one repo has it, or 
 
 | Command | What it does |
 |---|---|
-| `bnb init <owner/repo or folder>` | Use this defaults repo. A local folder without `bitsandbricks.toml` gets a starter file. |
+| `bnb init <owner/repo or folder>` | Use this defaults repo. A local folder without `mortar.toml` gets a starter file. |
 | `bnb config` | Where bnb looks: config file, defaults, orgs, groups, plugins. |
 | `bnb repos` | The repos bnb sees, with their group. |
 | `bnb status` | One line per repo: group, latest release, PRs ready/draft, CI. One GraphQL query per 20 repos. |
@@ -78,7 +78,7 @@ orgs = ["another-org"]                # added to the orgs the defaults name
 
 `BNB_DEFAULTS`, `BNB_DEFAULTS_REF` and `BNB_ORGS` (comma separated) override it for one run.
 
-`bitsandbricks.toml` in the defaults repo is shared by everyone who points bnb at it:
+`mortar.toml` in the defaults repo is shared by everyone who points bnb at it (a defaults repo that still has the older `bitsandbricks.toml` keeps working):
 
 ```toml
 orgs = ["your-org", "your-user"]

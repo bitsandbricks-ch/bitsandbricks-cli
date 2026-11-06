@@ -123,7 +123,7 @@ do the same for CI. The defaults repo and orgs then come from your Mortar settin
 
 ## Defaults
 
-The defaults repo is the same `bitsandbricks.toml` the CLI reads (see the README). The defaults editor shows
+The defaults repo is the same `mortar.toml` the CLI reads (see the README). The defaults editor shows
 its files, validates them as you type, offers templates (groups, rulesets, shared files), copies a live
 repo's rulesets into the defaults, and saves through a pull request (or merge request) by default, so changes
 to the defaults are reviewed like code. The defaults repo itself can live on GitHub or GitLab.

@@ -182,7 +182,8 @@ def test_proxy_allowlist():
 def test_defaults_editor(op):
     _, c = op
     d = c.get("/api/v1/defaults").json
-    assert d["repo"] == "acme/defaults" and "bitsandbricks.toml" in d["files"] and d["problems"] == []
+    assert d["repo"] == "acme/defaults" and "bitsandbricks.toml" in d["files"] and d["path"] == "bitsandbricks.toml"
+    assert d["problems"] == []
     bad = c.post("/api/v1/defaults/validate", json={"path": "bitsandbricks.toml",
                                                     "text": '[[group]]\nname="a"\nmatch={nope=1}\n'}, headers=H).json
     assert "match doesn't know nope" in bad["problems"][0]

@@ -1,7 +1,7 @@
 """GitLab: the bnb commands for GitLab projects, with the user's own GitLab token.
 
 Projects are named `gitlab:group/subgroup/project` next to GitHub's `owner/name`, so both live in
-one list. Groups in bitsandbricks.toml match them too (`match = { provider = "gitlab", ... }` limits
+one list. Groups in mortar.toml match them too (`match = { provider = "gitlab", ... }` limits
 a group to GitLab); a group's `gitlab` table says what its GitLab projects should have:
 
     [group.gitlab]

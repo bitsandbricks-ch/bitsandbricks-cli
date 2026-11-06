@@ -1,6 +1,6 @@
 """Keep repos on their defaults: `bnb doctor` (check, --fix) and `bnb sync` (files via PRs).
 
-What a repo should have comes from its group in bitsandbricks.toml (see config.py):
+What a repo should have comes from its group in mortar.toml (see config.py):
 a live reference repo (`from`), explicit settings, a rulesets folder, files. On top
 of that each repo's own `.github/rulesets/*.json` must match what's live.
 """

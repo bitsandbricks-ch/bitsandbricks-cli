@@ -106,9 +106,9 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict]:
     sp.add_argument("--actions", action="store_true")
     sp.add_argument("--releases", action="store_true")
     sp = sub.add_parser("init", help="point bnb at a defaults repo (owner/repo or a local folder)")
-    sp.add_argument("defaults", help="owner/repo or a folder with bitsandbricks.toml")
+    sp.add_argument("defaults", help="owner/repo or a folder with mortar.toml")
     sp.add_argument("--ref", help="branch or tag of the defaults repo")
-    sp.add_argument("--org", action="append", metavar="ORG", help="orgs for a new bitsandbricks.toml")
+    sp.add_argument("--org", action="append", metavar="ORG", help="orgs for a new mortar.toml")
     sp = sub.add_parser("new", parents=[common], help="create a repo the way its group wants it")
     sp.add_argument("repo", help="owner/name (name alone when bnb knows one org)")
     sp.add_argument("--public", action="store_true", help="public (default: private)")
@@ -169,7 +169,7 @@ def init(args) -> None:
     if args.ref:
         values["ref"] = args.ref
     source = config.Source(args.defaults, args.ref)
-    if source.read(config.DEFAULTS_FILE) is None:
+    if config.read_defaults(source)[1] is None:
         owners = args.org or ([] if source.local else [args.defaults.split("/")[0]])
         orgs = ", ".join(f'"{o}"' for o in owners)
         starter = config.STARTER.format(orgs=orgs)

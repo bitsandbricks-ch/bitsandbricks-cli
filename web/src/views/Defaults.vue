@@ -8,8 +8,9 @@ import { useKeys } from '../keys.js'
 import { ask } from '../ui.js'
 import TextPane from '../components/TextPane.vue'
 
-const TOML = 'bitsandbricks.toml'
 const info = ref(null)
+// mortar.toml, or bitsandbricks.toml in a defaults repo from before the rename
+const TOML = computed(() => info.value?.path || 'mortar.toml')
 const missing = ref('')
 const path = ref('')
 const text = ref('')
@@ -26,7 +27,7 @@ async function load() {
   missing.value = ''
   try {
     info.value = await get('/defaults')
-    if (!path.value) open(TOML, info.value.toml || '', info.value.problems)
+    if (!path.value) open(TOML.value, info.value.toml || '', info.value.problems)
   } catch (e) {
     if (e instanceof ApiError && e.status === 409) missing.value = e.message
     else log(e.message, 'error')
@@ -75,7 +76,7 @@ async function loadTemplates() {
 }
 function useTemplate(t) {
   if (t.kind === 'group') {
-    if (path.value !== TOML) { log(`open ${TOML} first, then add the group`, 'warn'); return }
+    if (path.value !== TOML.value) { log(`open ${TOML.value} first, then add the group`, 'warn'); return }
     text.value = `${text.value.replace(/\s*$/, '')}\n${t.text}`
   } else {
     open(t.path, t.text.replace(/^\n/, ''))
@@ -110,7 +111,7 @@ onMounted(load)
 <template>
   <div class="view">
     <div v-if="missing" class="pad">
-      <div class="box"><span class="warn">{{ missing }}</span><br><br>The defaults repo holds <span class="accent">bitsandbricks.toml</span>
+      <div class="box"><span class="warn">{{ missing }}</span><br><br>The defaults repo holds <span class="accent">mortar.toml</span>
         (groups, settings, rulesets, files) the same way the CLI reads it. Pick one in <RouterLink to="/settings">settings</RouterLink>.</div>
     </div>
     <template v-else-if="info">

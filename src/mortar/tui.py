@@ -1415,7 +1415,7 @@ class BnbTui(App):
             self.log_line("b bumps and R releases the selected repo: Repos (1) or Releases (4)")
             return None
         if not V.source(self.cfg, key):
-            self.log_line(f"{key}: its group names no version file (version = \"...\" in bitsandbricks.toml)")
+            self.log_line(f"{key}: its group names no version file (version = \"...\" in mortar.toml)")
             return None
         return key
 
@@ -1466,7 +1466,7 @@ class BnbTui(App):
             if src and not src.local:
                 lines.append(f"{core.WEB}/{src.where}")
             lines += ["", "Enter: use another defaults repo (owner/repo) or a local folder.",
-                      "Every repo is checked against its bitsandbricks.toml (Checks tab)."]
+                      "Every repo is checked against its mortar.toml (Checks tab)."]
             return "\n".join(lines)
         if key == "orgs":
             mine = config.user_config().get("orgs") or []
@@ -1488,7 +1488,7 @@ class BnbTui(App):
                     if value:
                         out.append(f"  {label:<9} {value}")
                 out.append("")
-            out.append("Groups live in bitsandbricks.toml in the defaults repo.")
+            out.append("Groups live in mortar.toml in the defaults repo.")
             return "\n".join(out)
         if key == "plugins":
             out = [f"{p.name}: {getattr(p, 'description', '')}" for p in plugins.load()] or ["No plugins."]
@@ -1498,14 +1498,14 @@ class BnbTui(App):
         if key == "theme":
             return f"Theme: {self.theme}\n\nEnter or t: next theme ({', '.join(t.name for t in self.themes)})"
         path = config.config_file()
-        text = path.read_text() if path.exists() else "(none yet: bnb init writes it)"
+        text = path.read_text() if path.exists() else "(none yet: mortar init writes it)"
         return f"{path}\n\n{text}"
 
     def setting(self, key: str) -> None:
         if key == "theme":
             self.action_toggle_theme()
         elif key == "defaults":
-            self.ask("Defaults repo (owner/repo) or local folder with bitsandbricks.toml", self.set_defaults)
+            self.ask("Defaults repo (owner/repo) or local folder with mortar.toml", self.set_defaults)
         elif key == "orgs":
             mine = ", ".join(config.user_config().get("orgs") or [])
             self.push_screen(Ask("Your own orgs or users, comma separated (empty: none)", value=mine), self.set_orgs)
@@ -1528,8 +1528,8 @@ class BnbTui(App):
     def set_defaults(self, value: str | None) -> None:
         if value:
             source = config.Source(value)
-            if source.read(config.DEFAULTS_FILE) is None:
-                self.log_line(f"No {config.DEFAULTS_FILE} in {value} (bnb init {value} starts one)")
+            if config.read_defaults(source)[1] is None:
+                self.log_line(f"No {config.DEFAULTS_FILE} in {value} (mortar init {value} starts one)")
                 return
             self.save_config(defaults=value)
 

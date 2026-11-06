@@ -196,7 +196,7 @@ def test_local_defaults_and_init(env, tmp_path):
     folder = tmp_path / "defaults"
     e = {**env, "BNB_DEFAULTS": "", "XDG_CONFIG_HOME": str(tmp_path / "cfg")}
     out = bnb(e, "init", str(folder), "--org", "mike")
-    assert "wrote" in out and (folder / "bitsandbricks.toml").exists()
+    assert "wrote" in out and (folder / "mortar.toml").exists()
     out = bnb(e, "config")
     assert f"defaults     {folder}" in out and "orgs         mike" in out
     out = bnb(e, "doctor")

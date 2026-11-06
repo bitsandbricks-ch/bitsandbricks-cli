@@ -114,7 +114,7 @@ FILES = [
 
 
 def catalog() -> list[dict]:
-    out = [dict(t, kind="group", path="bitsandbricks.toml") for t in GROUPS]
+    out = [dict(t, kind="group", path="mortar.toml") for t in GROUPS]
     out += [dict(t, kind="ruleset") for t in RULESETS]
     out += [dict(t, kind="file", help=t.get("help", "")) for t in FILES]
     return out

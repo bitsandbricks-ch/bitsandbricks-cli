@@ -51,7 +51,7 @@ def validate(path: str, text: str) -> list[str]:
     problems: list[str] = []
     if len(text) > 200_000:
         return ["the file is bigger than 200 KB"]
-    if path == config.DEFAULTS_FILE:
+    if path in config.DEFAULTS_FILES:
         try:
             raw = config.parse_defaults(text)
         except RuntimeError as err:
@@ -136,11 +136,13 @@ def overview():
     with as_user() as (_gh, gl):
         try:
             files = read_tree(gl, repo, ref)
-            text, _ = read_file(gl, repo, config.DEFAULTS_FILE, ref)
+            # an older defaults repo keeps bitsandbricks.toml; edit that one until it's renamed
+            name = next((n for n in config.DEFAULTS_FILES if n in files), config.DEFAULTS_FILE)
+            text, _ = read_file(gl, repo, name, ref)
         except RuntimeError as err:
             abort(502, f"{repo}: {err}")
     return jsonify({"repo": repo, "ref": ref, "provider": "gitlab" if repo.startswith(GL.PREFIX) else "github",
-                    "files": files, "toml": text, "problems": validate(config.DEFAULTS_FILE, text) if text else
+                    "files": files, "path": name, "toml": text, "problems": validate(name, text) if text else
                     [f"{repo} has no {config.DEFAULTS_FILE} yet: start one from a template"]})
 
 

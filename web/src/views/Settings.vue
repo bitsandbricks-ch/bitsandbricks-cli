@@ -93,7 +93,7 @@ onMounted(load)
 
       <div v-if="s" class="box">
         <div class="accent">defaults and repos</div>
-        <p class="dim">The defaults repo holds bitsandbricks.toml, like <span class="accent">bnb init</span> sets up. Lists take names separated by commas.</p>
+        <p class="dim">The defaults repo holds mortar.toml, like <span class="accent">bnb init</span> sets up. Lists take names separated by commas.</p>
         <div class="form">
           <label>defaults repo</label><input v-model="s.defaults" placeholder="acme/defaults or gitlab:grp/defaults">
           <label>branch or tag</label><input v-model="s.ref" placeholder="(default branch)">

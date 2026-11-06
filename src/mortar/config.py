@@ -10,7 +10,7 @@ Two files:
 
   BNB_DEFAULTS and BNB_ORGS (comma separated) override it for one run.
 
-* `bitsandbricks.toml` in the defaults repo, shared by everyone who points bnb at it:
+* `mortar.toml` (or the older `bitsandbricks.toml`) in the defaults repo, shared by everyone who points bnb at it:
 
       orgs = ["your-org"]
       repos = ["someone/one-more-repo"]
@@ -57,7 +57,18 @@ if sys.version_info >= (3, 11):
 else:  # pragma: no cover
     import tomli as tomllib
 
-DEFAULTS_FILE = "bitsandbricks.toml"
+DEFAULTS_FILE = "mortar.toml"
+# Read in this order: defaults repos made before the rename keep their bitsandbricks.toml.
+DEFAULTS_FILES = (DEFAULTS_FILE, "bitsandbricks.toml")
+
+
+def read_defaults(source: Source) -> tuple[str, str | None]:
+    """The defaults file's name and text in `source` (mortar.toml, else bitsandbricks.toml)."""
+    for name in DEFAULTS_FILES:
+        text = source.read(name)
+        if text is not None:
+            return name, text
+    return DEFAULTS_FILE, None
 REPO_NAME = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 GITLAB_NAME = re.compile(r"^gitlab:[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$")
 # The GitLab client of this context (the operator sets it): defaults repos named gitlab:group/project.
@@ -290,7 +301,7 @@ _loaded = core.Scoped("config")
 
 
 def load(orgs: list[str] | None = None, mine: dict | None = None, env: bool = True) -> Config:
-    """Your config plus the defaults repo's bitsandbricks.toml. `orgs` (from --org) narrows the orgs.
+    """Your config plus the defaults repo's mortar.toml. `orgs` (from --org) narrows the orgs.
     The operator passes each user's settings as `mine` (env=False: no BNB_* variables, no local folders)."""
     if mine is None and OVERRIDE.get() is not None:
         mine, env = OVERRIDE.get(), False
@@ -310,10 +321,10 @@ def load(orgs: list[str] | None = None, mine: dict | None = None, env: bool = Tr
     source = None
     if where:
         source = Source(where, ref, allow_local=not server)
-        text = source.read(DEFAULTS_FILE)
+        name, text = read_defaults(source)
         if text is None:
-            raise RuntimeError(f"No {DEFAULTS_FILE} in {source}. Start one with: bnb init {where}")
-        raw = parse_defaults(text, f"{source}/{DEFAULTS_FILE}")
+            raise RuntimeError(f"No {DEFAULTS_FILE} in {source}. Start one with: mortar init {where}")
+        raw = parse_defaults(text, f"{source}/{name}")
     env_orgs = [o.strip() for o in (getenv("BNB_ORGS") or "").split(",") if o.strip()]
     all_orgs = env_orgs or _unique(_list(raw.get("orgs")) + _list(mine.get("orgs")))
     cfg = Config(
@@ -346,7 +357,7 @@ def _unique(items: list[str]) -> list[str]:
 
 
 STARTER = """\
-# Mortar defaults (bitsandbricks.toml): what the repos of these orgs should look like.
+# Mortar defaults (mortar.toml): what the repos of these orgs should look like.
 # Check: bnb doctor    Fix settings and rulesets: bnb doctor --fix    Files: bnb sync
 orgs = [{orgs}]
 
