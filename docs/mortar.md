@@ -145,7 +145,7 @@ GitLab: set `GITLAB_URL`.
 | variable | meaning |
 | --- | --- |
 | `MTR_URL` | where people reach it (default `http://localhost:8080`, or the port from `mtr serve --port`); it must match the OAuth apps' callback URLs, port included; plain `http://` only for localhost, private addresses and `.local`, `.lan` or `.home.arpa` names, `https://` everywhere else |
-| `MTR_SECRET_KEY` | encrypts stored tokens and secrets; made once in the data folder when unset |
+| `MTR_SECRET_KEY` | encrypts stored tokens and secrets; when unset, Mortar makes a random one on first run in `MTR_DATA/secret.key` (mode 0600) and keeps it. Never commit it; `data/` is gitignored. Changing it makes stored tokens unreadable, so users sign in again |
 | `MTR_DATA` | data folder (default `./data`, `/data` in the image) |
 | `DATABASE_URL` | SQLAlchemy URL; SQLite in the data folder by default, `postgresql+psycopg://…` with `[postgres]` |
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_URL`, `GITHUB_API_URL`, `GITHUB_SCOPES` | the GitHub login: the client ID defaults to Mortar's own app (device flow) on github.com; with a secret, the redirect sign-in (scopes default to the table above) |
