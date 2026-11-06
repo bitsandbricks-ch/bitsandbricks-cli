@@ -1,13 +1,13 @@
 name: Image
 
-# Builds the Mason web server image (Dockerfile) and pushes it to GHCR:
-#   main       -> ghcr.io/<owner>/<repo>:main, :sha-<short>
-#   v1.2.3 tag -> :1.2.3, :1.2, :latest, :sha-<short>
-# Pull requests that touch the image only build it (nothing is pushed).
+# Builds the Mason web server image (Dockerfile) and pushes it to GHCR, only for a version tag:
+#   v1.2.3 tag      -> ghcr.io/<owner>/<repo>:1.2.3, :1.2, :latest, :sha-<short>
+#   v1.2.3-rc1 tag  -> :1.2.3-rc1, :sha-<short> (never latest)
+# Flux deploys the version releases, so there is no manual run and no image from main.
+# Pull requests that touch the image only build and smoke test it (nothing is pushed).
 # Only actions/checkout is used (pinned); the rest is the docker CLI on the runner.
 on:
   push:
-    branches: [main]
     tags: ["v*.*.*"]
   pull_request:
     paths:
@@ -16,7 +16,6 @@ on:
       - pyproject.toml
       - web/package*.json
       - .github/workflows/image.yml
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -57,9 +56,6 @@ jobs:
             # v1.2.3-rc1 and the like: their own tag only, never latest
             tags+=("$image:${REF_NAME#v}")
             version="${REF_NAME#v}"
-          elif [[ "$REF_NAME" == main ]]; then
-            tags+=("$image:main")
-            version="main-$short"
           else
             version="pr-$short"
           fi

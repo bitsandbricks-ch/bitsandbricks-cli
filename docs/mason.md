@@ -79,13 +79,15 @@ UI development: `cd web && npm run dev` serves the UI on :5173 and passes `/api`
 
 ## Run it with Docker
 
-CI (`.github/workflows/image.yml`) publishes the image to GitHub Container Registry:
+CI (`.github/workflows/image.yml`) publishes the image to GitHub Container Registry only when a version tag
+is pushed (`mason release` pushes it). There is no manual run and no image from `main`; Flux deploys the
+version releases. Pull requests that touch the image build and smoke test it without pushing.
 
 | tag | from |
 | --- | --- |
-| `ghcr.io/bitsandbricks-ch/mason-cli:main` | every push to `main` |
-| `:1.2.3`, `:1.2`, `:latest` | a `v1.2.3` tag |
-| `:sha-<commit>` | every build |
+| `ghcr.io/bitsandbricks-ch/mason-cli:1.2.3`, `:1.2`, `:latest` | a `v1.2.3` tag |
+| `:1.2.3-rc1` | a `v1.2.3-rc1` tag (never `latest`) |
+| `:sha-<commit>` | every published build |
 
 `deploy/docker-compose.yml` runs it with Postgres, taking its settings from `deploy/.env`:
 
@@ -94,7 +96,7 @@ cd deploy
 cp .env.example .env        # MASON_URL, the OAuth apps, MASON_ADMINS, POSTGRES_PASSWORD (and MASON_TAG)
 docker compose run --rm mason mason serve --check   # what the settings allow, and what is missing
 docker compose up -d        # Mason on 127.0.0.1:8080, data in the `data` and `db` volumes
-docker compose pull && docker compose up -d        # update to the newest image of MASON_TAG
+docker compose pull && docker compose up -d        # update to the newest release of MASON_TAG
 ```
 
 Put a TLS proxy (Caddy, Traefik, nginx) in front that serves `MASON_URL` and forwards to `127.0.0.1:8080`;
