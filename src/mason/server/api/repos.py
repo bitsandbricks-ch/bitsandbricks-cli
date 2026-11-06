@@ -16,6 +16,7 @@ from mason import packages as P
 from mason import releases as REL
 from mason import repos as R
 from mason import workflows as W
+from mason.config import orgs_of
 from mason.server import gitlab as GL
 from mason.server.api.account import body
 from mason.server.auth import audit, can_write, need
@@ -66,12 +67,14 @@ def all_repos(cfg, gh, gl, names: list[str] | None = None, group: str | None = N
     if want_gh and github_ok(gh) and cfg.orgs + cfg.repos:
         gh_repos = [r for r, i in R.listing(cfg).items() if not i.get("missing")]
         if group:
-            gh_repos = [r for r in gh_repos if (gr := R.group_of(cfg, r)) and gr.name == group]
+            known = R.listing(cfg)
+            gh_repos = [r for r in gh_repos if cfg.in_group(r, group, (known.get(r) or {}).get("topics"))]
     gl_repos: list[str] = []
     if want_gl and gl is not None:
-        gl_repos = [r for r, i in gitlab_projects(gl, cfg).items() if not i.get("missing")]
-        if group:
-            gl_repos = [r for r in gl_repos if (gr := cfg.group_of(r)) and gr.name == group]
+        projects = gitlab_projects(gl, cfg)
+        gl_repos = [r for r, i in projects.items() if not i.get("missing")]
+        if group:  # with the topics, as the list shows them: a group that matches on topics keeps its projects
+            gl_repos = [r for r in gl_repos if cfg.in_group(r, group, projects[r].get("topics"))]
     return gh_repos, gl_repos, pick
 
 
@@ -117,7 +120,9 @@ def repos_list():
                         "alias": grp.alias(r) if grp else r.rsplit("/", 1)[-1],
                         "topics": projects.get(r, {}).get("topics") or []})
         groups = list(dict.fromkeys([x.name for x in cfg.groups] + [x["group"] for x in out if x["group"]]))
-        return jsonify({"repos": out, "groups": groups, "orgs": cfg.orgs,
+        # every repo is in an org (GitHub) or GitLab group, also the ones no group of the defaults matches
+        owners = sorted(dict.fromkeys(o for x in out for o in orgs_of(x["repo"])), key=str.lower)
+        return jsonify({"repos": out, "groups": groups, "owners": owners, "orgs": cfg.orgs,
                         "defaults": str(cfg.source) if cfg.source else ""})
 
 

@@ -21,6 +21,10 @@ def test_repos_across_orgs_and_groups(env):
     assert "6 repos" in out
     assert "acme/web" not in mason(env, "repos", "--group", "plugins")
     assert "1 repos" in mason(env, "repos", "--org", "mike")
+    out = mason(env, "repos", "--group", "mike/")  # an org works as a group
+    assert "mike/dotfiles" in out and "acme/" not in out and "1 repos" in out
+    assert "5 repos" in mason(env, "repos", "--group", "ACME/")
+    assert "Orgs: acme/, mike/" in mason(env, "repos", "--group", "nope/")
 
 
 def test_names(env):

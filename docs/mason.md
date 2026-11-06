@@ -324,6 +324,11 @@ approvals_before_merge = 1
 
 GitLab projects are named `gitlab:group/sub/project`. List them in Settings (`GitLab groups`, `GitLab projects`).
 
+A group's `match = { org = ... }` takes GitHub orgs (in any case, like GitHub) and GitLab groups with
+their subgroups (`org = "grp"` or `org = "grp/sub"`). The group menu above the lists offers the groups
+of your defaults and, below them, every org and GitLab group your repos are in, so a repo that no group
+matches can still be picked out. The API takes the same filter as `?group=acme/` or `?group=gitlab:grp/`.
+
 Each org (or GitLab group) can also keep its own defaults in a repo named `.mason` (see the README):
 its groups apply to that org's repos ahead of your catch-all group, and your own groups with a `match`
 still win. Mason reads it with the signed-in user's own token, so a user who can't read an org's

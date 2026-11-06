@@ -34,8 +34,10 @@ Two files:
       changelog = ["CHANGELOG.md"]          # changelogs `mason bump` adds the new section to
       files = "files/default"               # folder copied into each repo, path for path
 
-  The first group that matches a repo is its group. Keys mason doesn't know stay on
-  the group for plugins (`group.extra`).
+  `match.org` takes GitHub orgs (any case) and GitLab groups, subgroups included (`org = "grp/sub"`).
+  The first group that matches a repo is its group. Where a group can be named to narrow a list
+  (`--group`, the web app's group menu), `acme/` names the org acme instead, and `gitlab:grp/` a
+  GitLab group. Keys mason doesn't know stay on the group for plugins (`group.extra`).
 
 * `mason.toml` in a repo named `.mason` in an org (GitHub) or group (GitLab): that org's
   defaults for its own repos, like the `.github` repo. Only its `[[group]]` tables count, and
@@ -220,10 +222,9 @@ class Group:
         if m.get("provider") and m["provider"] != provider:
             return False
         repo = repo[len("gitlab:"):] if provider == "gitlab" else repo
-        owner, _, name = repo.partition("/")
-        name = name.rsplit("/", 1)[-1]  # GitLab: group/subgroup/project
+        name = repo.rsplit("/", 1)[-1]  # GitLab: group/subgroup/project
         orgs = _list(m.get("org"))
-        if orgs and owner not in orgs:
+        if orgs and not any(in_org(repo, o) for o in orgs):
             return False
         if m.get("prefix") and not name.startswith(m["prefix"]):
             return False
@@ -242,6 +243,25 @@ class Group:
         name = repo.rsplit("/", 1)[-1] if repo.startswith("gitlab:") else repo.split("/", 1)[-1]
         prefix = self.match.get("prefix") or ""
         return name[len(prefix):] if prefix and name.startswith(prefix) and len(name) > len(prefix) else name
+
+
+def in_org(repo: str, org: str) -> bool:
+    """Is `repo` (owner/name, or a GitLab group/subgroup/project without `gitlab:`) under `org`?
+    GitHub owners ignore case, like GitHub does; a GitLab group takes its subgroups' projects too."""
+    org = org.strip("/").lower()
+    return bool(org) and repo.lower().startswith(org + "/")
+
+
+def org_filter(name: str | None) -> str | None:
+    """A group filter that names an org instead of a group: `acme/` (GitHub) or `gitlab:grp/sub/`.
+    Returns the repo prefix without the slash, or None for a plain group name."""
+    return name[:-1] if name and name.endswith("/") and len(name) > 1 else None
+
+
+def orgs_of(repo: str) -> list[str]:
+    """The org filters a repo falls under: `acme/` for acme/x, `gitlab:a/` and `gitlab:a/b/` for gitlab:a/b/x."""
+    parts = repo.split("/")[:-1]
+    return [f"{'/'.join(parts[:i])}/" for i in range(1, len(parts) + 1)]
 
 
 def _list(value) -> list[str]:
@@ -277,6 +297,17 @@ class Config:
                 if got:
                     return got
         return mine
+
+    def in_group(self, repo: str, name: str, topics: list[str] | None = None) -> bool:
+        """Does a group filter take `repo`? `name` is a group's name, or an org: `acme/` for every
+        repo of the GitHub org acme, `gitlab:grp/` for every project under the GitLab group grp."""
+        org = org_filter(name)
+        if org is not None:
+            if org.startswith("gitlab:") != repo.startswith("gitlab:"):
+                return False
+            return in_org(repo.removeprefix("gitlab:"), org.removeprefix("gitlab:"))
+        group = self.group_of(repo, topics)
+        return bool(group) and group.name == name
 
     def find_group(self, name: str, repo: str | None = None) -> Group | None:
         """A group by name: yours, or (`org:name`) one of `repo`'s org's .mason."""

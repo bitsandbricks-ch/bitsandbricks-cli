@@ -115,6 +115,8 @@ def test_lists(op):
     _, c = op
     repos = c.get("/api/v1/repos").json
     assert "acme/plugin-a" in [r["repo"] for r in repos["repos"]] and repos["groups"] == ["plugins", "default"]
+    assert repos["owners"] == ["acme/", "mike/"]
+    assert [r["repo"] for r in c.get("/api/v1/repos?group=mike/").json["repos"]] == ["mike/dotfiles"]
     st = c.get("/api/v1/status").json
     api = next(r for r in st["rows"] if r["repo"] == "acme/api")
     assert st["head"][:4] == ["group", "released", "PRs ready/draft", "CI"] and api["cells"][1] == "v1.10.0"
