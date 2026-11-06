@@ -9,3 +9,5 @@ dist
 build
 data
 *.env
+**/*.env
+**/.env

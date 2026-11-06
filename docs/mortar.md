@@ -47,10 +47,34 @@ mtr serve                           # http://localhost:8080 (development server)
 
 UI development: `cd web && npm run dev` serves the UI on :5173 and passes `/api` to Mortar on :8080.
 
-In production use the image: `docker build -t mortar .`, or `deploy/docker-compose.yml`
-(Mortar + Postgres; copy `deploy/mortar.env.example` to `deploy/mortar.env`). Put it behind a TLS
-proxy and set `MTR_TRUSTED_PROXIES=1` so it sees the real client address. The image runs
-gunicorn with one process and many threads, which keeps each user's API cache in one place.
+## Run it with Docker
+
+CI (`.github/workflows/image.yml`) publishes the image to GitHub Container Registry:
+
+| tag | from |
+| --- | --- |
+| `ghcr.io/bitsandbricks-ch/mortar-cli:main` | every push to `main` |
+| `:1.2.3`, `:1.2`, `:latest` | a `v1.2.3` tag |
+| `:sha-<commit>` | every build |
+
+`deploy/docker-compose.yml` runs it with Postgres, taking its settings from `deploy/.env`:
+
+```sh
+cd deploy
+cp .env.example .env        # MTR_URL, the OAuth apps, MTR_ADMINS, POSTGRES_PASSWORD (and MTR_TAG)
+docker compose run --rm mortar mtr serve --check   # what the settings allow, and what is missing
+docker compose up -d        # Mortar on 127.0.0.1:8080, data in the `data` and `db` volumes
+docker compose pull && docker compose up -d        # update to the newest image of MTR_TAG
+```
+
+Put a TLS proxy (Caddy, Traefik, nginx) in front that serves `MTR_URL` and forwards to `127.0.0.1:8080`;
+compose sets `MTR_TRUSTED_PROXIES=1` so Mortar sees the real client address, and forces `MTR_DEV` off, so
+`MTR_URL` must be https. Without `MTR_ALLOW_*` only the admins in `MTR_ADMINS` can sign in. The image is
+private until you make the package public in its GitHub settings (or `docker login ghcr.io` first).
+To build from the checkout instead of pulling: `docker compose up -d --build`, or `docker build -t mortar .`.
+
+The image runs gunicorn with one process and many threads, which keeps each user's API cache in one place.
+It runs as an unprivileged user (uid 10001) and keeps its data (SQLite by default, the secret key) in `/data`.
 
 ## OAuth apps
 

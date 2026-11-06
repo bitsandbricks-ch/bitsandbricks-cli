@@ -63,6 +63,7 @@ move it to "Done" when it ships.
 - Per-user rate limit budget and a queue for big jobs, with progress in the UI.
 - Redis-backed cache and sessions to run several operator processes.
 - Helm chart and a k8s manifest next to the docker-compose example.
+- arm64 image (native arm runner or QEMU) next to the amd64 one, and an image vulnerability scan in CI.
 
 ## Plugins
 

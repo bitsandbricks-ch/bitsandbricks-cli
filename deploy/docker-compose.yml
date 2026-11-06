@@ -1,20 +1,35 @@
-# Mortar (mtr as a web app) with Postgres. Put it behind a TLS proxy (Caddy, Traefik, nginx) at MTR_URL.
-#   cp mortar.env.example mortar.env   # fill in the OAuth apps and who may sign in
+# Mortar (mtr as a web app) with Postgres, from the image CI publishes to GHCR.
+# Put it behind a TLS proxy (Caddy, Traefik, nginx) that serves MTR_URL and forwards to 127.0.0.1:8080.
+#   cd deploy
+#   cp .env.example .env      # fill in MTR_URL, the OAuth apps, MTR_ADMINS and POSTGRES_PASSWORD
 #   docker compose up -d
+#   docker compose run --rm mortar mtr serve --check   # what the settings allow, and what is missing
+# Build from this checkout instead of pulling: docker compose up -d --build
 services:
   mortar:
+    image: ghcr.io/bitsandbricks-ch/mortar-cli:${MTR_TAG:-latest}
     build: ..
-    env_file: mortar.env
+    env_file: .env
     environment:
-      DATABASE_URL: postgresql+psycopg://mtr:mtr@db/mtr
-      MTR_TRUSTED_PROXIES: "1"
+      DATABASE_URL: postgresql+psycopg://mtr:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db/mtr
+      MTR_TRUSTED_PROXIES: ${MTR_TRUSTED_PROXIES:-1}
+      MTR_DEV: ""   # never development mode here: https and secure cookies only
     ports: ["127.0.0.1:8080:8080"]
     volumes: [data:/data]
-    depends_on: [db]
+    depends_on:
+      db: { condition: service_healthy }
     restart: unless-stopped
   db:
     image: postgres:17-alpine
-    environment: { POSTGRES_USER: mtr, POSTGRES_PASSWORD: mtr, POSTGRES_DB: mtr }
+    environment:
+      POSTGRES_USER: mtr
+      POSTGRES_DB: mtr
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
     volumes: [db:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "mtr", "-d", "mtr"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
     restart: unless-stopped
 volumes: { data: {}, db: {} }

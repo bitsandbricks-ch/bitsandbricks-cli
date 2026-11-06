@@ -150,7 +150,7 @@ stats, a console, plugins and a signed plugin marketplace. `mtr login https://yo
 and TUI at it with an API key, so a laptop needs neither gh nor a token.
 
 ```sh
-docker compose -f deploy/docker-compose.yml up -d   # after filling in deploy/mortar.env
+docker compose -f deploy/docker-compose.yml up -d   # after filling in deploy/.env (see docs/mortar.md)
 ```
 
 ![Mortar's pull requests view](docs/screenshots/03-pull-requests.png)
