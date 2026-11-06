@@ -12,6 +12,8 @@ repo of your orgs. --org and --group narrow that down.
   mason packages [--problems]         container images: newest tags, release images, image builds
   mason bump name [patch|minor|1.4.0] a PR with the next version and its changelog section
   mason release [names] [--yes]       tag v<version> where it is newer than the latest release
+  mason release new name v1.4.0       create a release by hand (--title, --notes, --draft, --prerelease)
+  mason release view name [tag]       one release in full, with the repo's recent releases
   mason pr web#12 [--diff]            one PR in detail
   mason merge [names] [--now]         auto-merge open PRs (drafts and conflicts stay)
   mason approve                       runs waiting for you (environments, outside contributors)
@@ -110,6 +112,12 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict]:
     sp.add_argument("repos", nargs="*", help=f"{names}; none: list what each repo would release")
     sp.add_argument("--yes", action="store_true", help="push the tags without asking")
     sp.add_argument("--list", action="store_true", help="only list versions against the latest releases")
+    sp.add_argument("--title", default="", help="new: the release title (default: the tag)")
+    sp.add_argument("--notes", default="", help="new: the release notes, Markdown (- reads them from stdin)")
+    sp.add_argument("--draft", action="store_true", help="new: save it as a draft")
+    sp.add_argument("--prerelease", action="store_true", help="new: mark it as a pre-release")
+    sp.add_argument("--target", default="", help="new: branch or commit for a new tag (default: the default branch)")
+    sp.add_argument("--generate-notes", action="store_true", help="new: GitHub writes the notes from merged PRs")
     sp = sub.add_parser("pr", parents=[common], help="one PR in detail")
     sp.add_argument("target", help="name#12 or a PR URL")
     sp.add_argument("--diff", action="store_true")
@@ -277,6 +285,8 @@ def main(argv: list[str] | None = None) -> None:
                 level = args.repos.pop()
             names, _ = repos.pick_repos(cfg, args.repos, args.group)
             return versions.bump_all(cfg, names, level, args.auto_merge)
+        if args.cmd == "release" and args.repos[:1] in (["new"], ["view"]):
+            return release_new_or_view(cfg, args)
         if args.cmd == "release":
             names, _ = repos.pick_repos(cfg, args.repos, args.group)
             if args.list or not args.repos:
@@ -288,6 +298,32 @@ def main(argv: list[str] | None = None) -> None:
         return run(cfg, args, names, pick)
     except RuntimeError as err:
         sys.exit(str(err))
+
+
+def release_new_or_view(cfg, args) -> None:
+    """mason release new name TAG [...] and mason release view name [TAG]."""
+    from mason import releases
+    action, rest = args.repos[0], args.repos[1:]
+    if not rest:
+        sys.exit(f"Name the repo: mason release {action} name" + (" v1.4.0" if action == "new" else " [tag]"))
+    repo, _ = repos.resolve(cfg, rest[0])
+    tag = rest[1] if len(rest) > 1 else ""
+    if action == "view":
+        return releases.view(cfg, repo, tag or None)
+    if not tag:
+        sys.exit("Name the tag: mason release new name v1.4.0")
+    notes = sys.stdin.read() if args.notes == "-" else args.notes
+    if not args.yes and not core.dry_run():
+        what = "draft" if args.draft else "pre-release" if args.prerelease else "release"
+        try:
+            answer = input(f"Create the {what} {tag} of {repo}? [y/N] ")
+        except EOFError:
+            answer = ""
+        if answer.strip().lower() not in ("y", "yes"):
+            print("left as it is")
+            return None
+    releases.create(repo, tag, args.title, notes, args.draft, args.prerelease, args.target, args.generate_notes)
+    return None
 
 
 def issue(cfg, args) -> None:

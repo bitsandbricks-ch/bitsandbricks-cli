@@ -9,10 +9,11 @@ from __future__ import annotations
 import re
 from contextlib import contextmanager
 
-from flask import abort, g
+from flask import abort, g, request
 
 from mason import config, core
 from mason.server import oauth
+from mason.transport import FRESH, Caches
 
 REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 GITLAB_REPO = re.compile(r"^gitlab:[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$")
@@ -28,7 +29,7 @@ class NoTransport:
 
     def __init__(self, why: str = "connect GitHub first (Settings › Accounts)"):
         self.why = why
-        self.caches: dict = {}
+        self.caches: Caches = Caches()
 
     def __getattr__(self, name):
         def refuse(*_a, **_kw):
@@ -82,10 +83,18 @@ def as_user(dry: bool | None = None):
     except RuntimeError as err:
         abort(409, str(err))
     gtoken = config.GITLAB.set(gl)
+    fresh = request.args.get("fresh") == "1"
+    ftoken = FRESH.set(fresh)
+    if fresh:  # r in the web app: read again, past every cache (ETags still spare the rate limit)
+        for t in (gh, gl):
+            if t is not None:
+                for name in ("nodes", "gl_nodes"):
+                    t.caches.pop(name, None)
     try:
         with core.using(gh, dry):
             yield gh, gl
     finally:
+        FRESH.reset(ftoken)
         config.GITLAB.reset(gtoken)
 
 

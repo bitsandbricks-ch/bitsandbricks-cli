@@ -58,6 +58,7 @@ from textual.widgets.data_table import CellDoesNotExist, RowDoesNotExist
 from mason import config, core, plugins
 from mason import defaults as D
 from mason import packages as P
+from mason import releases as REL
 from mason import repos as R
 from mason import versions as V
 from mason.config import Config
@@ -69,7 +70,7 @@ BASE_TABS = [("repos", "Repos"), ("prs", "Pull requests"), ("runs", "Runs"), ("r
 TAB_ACTIONS = {
     "merge": {"repos", "prs"}, "merge_all": {"repos", "prs"}, "pr_filter": {"prs"}, "ready": {"prs"},
     "diff": {"prs"}, "approve": {"runs"}, "rerun": {"runs"}, "fix": {"checks"}, "sync": {"checks"},
-    "bump": {"repos", "releases"}, "release": {"repos", "releases"},
+    "bump": {"repos", "releases"}, "release": {"repos", "releases"}, "new_release": {"repos", "releases"},
     "update_branch": {"prs"}, "comment": {"prs"}, "close_pr": {"prs"},
     "logs": {"runs"}, "cancel_run": {"runs"}, "new_repo": {"repos"},
 }
@@ -248,6 +249,8 @@ class RowPage(ModalScreen[None]):
         self.query_one("#page-log", RichLog).can_focus = False
         self.fill_items()
         self.app.update_detail()  # shows itself here too (MasonTui.show)
+        if self.tab == "releases":
+            self.app.load_release_page(self.key)  # every recent release and the whole notes
         self.query_one("#page-actions", OptionList).focus()
 
     def fill_items(self) -> None:
@@ -341,6 +344,7 @@ class MasonTui(App):
         Binding("C", "close_pr", "Close PR"),
         Binding("b", "bump", "Bump version"),
         Binding("R", "release", "Release"),
+        Binding("N", "new_release", "New release"),
         Binding("f", "fix", "Fix drift"),
         Binding("s", "sync", "Sync files"),
         Binding("n", "new_repo", "New repo"),
@@ -592,7 +596,8 @@ class MasonTui(App):
     def show(self, tab_id: str, text: str) -> None:
         for screen in self.screen_stack:
             if isinstance(screen, RowPage) and screen.tab == tab_id and screen.key == self.current_key(tab_id):
-                screen.set_detail(linkify(text))
+                page = self.detail_cache.get(f"relpage:{screen.key}") if tab_id == "releases" else None
+                screen.set_detail(linkify(page or text))
         with contextlib.suppress(NoMatches):
             body = linkify(text)
             if tab_id not in ("settings", "checks") and tab_id not in self.plugin_tabs:
@@ -1108,6 +1113,9 @@ class MasonTui(App):
         core.CACHE = None  # r means fresh: no answers from gh's cache
         self.force = True
         self.load_github()
+        for screen in self.screen_stack:
+            if isinstance(screen, RowPage) and screen.tab == "releases":
+                self.load_release_page(screen.key)
         if self.tab() not in ("repos", "prs", "runs", "releases", "packages", "security"):
             self.update_detail()
 
@@ -1456,6 +1464,80 @@ class MasonTui(App):
                           f"latest release {st['released'] or 'none'}. The repo's release workflow takes it from "
                           "there.", V.release, self.cfg, repo)
 
+    @work(thread=True, group="relpage")
+    def load_release_page(self, repo: str) -> None:
+        """The release page of a repo (its recent releases, the newest in full), for its RowPage."""
+        try:
+            text = REL.page(self.cfg, repo)["text"]
+        except core.RateLimited as err:
+            self.call_from_thread(self.rate_limited, err)
+            return
+        except RuntimeError as err:
+            text = f"{repo}\n\nerror: {err}"
+        head = "\n".join(self.version_lines(repo))
+        self.detail_cache[f"relpage:{repo}"] = (head + "\n\n" if head else "") + text
+        self.call_from_thread(self.update_detail)
+
+    def action_new_release(self) -> None:
+        """N: create a release by hand. Asks the tag (the next patch is suggested), title, notes and kind."""
+        key = self.current_key()
+        if self.tab() not in ("repos", "releases") or not key:
+            self.log_line("N creates a release for the selected repo: Repos (1) or Releases (4)")
+            return
+        self.log_line(f"{key}: reading its releases …")
+        self.suggest_release(key)
+
+    @work(thread=True, group="action")
+    def suggest_release(self, repo: str) -> None:
+        try:
+            tag = REL.suggest_from(REL.recent(repo))
+        except core.RateLimited as err:
+            self.call_from_thread(self.rate_limited, err)
+            return
+        except RuntimeError:
+            tag = "v0.1.0"
+        self.call_from_thread(self.ask_release, repo, tag)
+
+    def ask_release(self, repo: str, suggested: str) -> None:
+        got: dict = {}
+
+        def tagged(tag: str | None) -> None:
+            if not tag or not tag.strip():
+                return
+            try:
+                got["tag"] = REL.valid_tag(tag)
+            except RuntimeError as err:
+                self.log_line(str(err))
+                return
+            self.push_screen(Ask(f"Title of {got['tag']} (Enter keeps the tag)", value=got["tag"]), titled)
+
+        def titled(title: str | None) -> None:
+            if title is None:
+                return
+            got["title"] = title.strip() or got["tag"]
+            self.push_screen(Ask("Notes (one line; empty: GitHub writes them from the merged PRs)"), noted)
+
+        def noted(notes: str | None) -> None:
+            if notes is None:
+                return
+            got["notes"] = notes.strip()
+            self.push_screen(Pick(f"{repo} {got['tag']}: publish it how?", [
+                ("published", "published: a release everyone sees"),
+                ("prerelease", "pre-release: published, marked not ready for production"),
+                ("draft", "draft: only people with push access see it, publish it later")]), kinded)
+
+        def kinded(kind: str | None) -> None:
+            if not kind:
+                return
+            draft, pre = kind == "draft", kind == "prerelease"
+            notes = got["notes"]
+            self.detail_cache.pop(f"relpage:{repo}", None)
+            self.confirm_then(f"Create the {kind} release {got['tag']} of {repo}?\nTitle: {got['title']}\n"
+                              + (f"Notes: {notes}" if notes else "Notes: written by GitHub from the merged PRs")
+                              + "\nA new tag is made on the default branch.",
+                              REL.create, repo, got["tag"], got["title"], notes, draft, pre, "", not notes)
+        self.push_screen(Ask(f"New release of {repo}: tag", value=suggested), tagged)
+
     # ── settings ──────────────────────────────────────────────────────────
 
     def settings_text(self, key: str) -> str:
@@ -1583,6 +1665,8 @@ class MasonTui(App):
         if tab in ("repos", "releases") and V.source(self.cfg, key):
             items += [("bump", "Bump its version: PR with version + changelog (b)", self.action_bump),
                       ("release", "Release: tag v<version> when it is new (R)", self.action_release)]
+        if tab in ("repos", "releases"):
+            items.append(("new-release", "Create a release: tag, title, notes, draft (N)", self.action_new_release))
         if tab == "releases":
             runs = self.releases[key]["runs"]
             if runs:

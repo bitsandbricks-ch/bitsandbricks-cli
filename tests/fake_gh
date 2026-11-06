@@ -201,6 +201,10 @@ if argv[0] == "api":
     path = next(a for a in argv[1:] if a.startswith("/"))
     route, _, query = path.partition("?")
     params = dict(q.split("=", 1) for q in query.split("&") if "=" in q)
+    if method == "POST" and re.match(r"/repos/[\w.-]+/[\w.-]+/releases$", route):
+        body = json.loads(stdin or "{}")
+        out({"id": 98, "tag_name": body.get("tag_name"), "name": body.get("name"), "draft": body.get("draft"),
+             "html_url": f"{WEB}/{route.split('/')[2]}/{route.split('/')[3]}/releases/tag/{body.get('tag_name')}"})
     if method != "GET":
         out({"id": 99, "number": 99, "html_url": f"{WEB}/x/pull/99"})
     if route == "/user":
@@ -287,14 +291,22 @@ if argv[0] == "api":
         out({"object": {"sha": "tagsha"}}) if (repo, tag) == ("acme/plugin-a", "v1.0.0") else fail(
             "gh: Not Found (HTTP 404)")
     if rest.startswith("/releases/tags/"):
-        out({"tag_name": rest.rsplit("/", 1)[1], "published_at": "2026-11-05T09:00:00Z"})
+        tag = rest.rsplit("/", 1)[1]
+        known = {"acme/plugin-a": "v1.0.0", "acme/plugin-b": "v0.3.0", "acme/api": "v1.10.0"}
+        out({"tag_name": tag, "published_at": "2026-11-05T09:00:00Z",
+             "html_url": f"{WEB}/{repo}/releases/tag/{tag}"}) if known.get(repo) == tag else fail("gh: Not Found (HTTP 404)")
     if rest == "/releases":
         assets = {"acme/plugin-a": [{"name": "plugin-a-1.0.0.zip", "size": 20480, "download_count": 3}],
                   "acme/plugin-b": [{"name": "notes.txt", "size": 1024, "download_count": 0}]}
         tags = {"acme/plugin-a": "v1.0.0", "acme/plugin-b": "v0.3.0", "acme/api": "v1.10.0"}
-        out([{"tag_name": tags[repo], "draft": False, "prerelease": False, "published_at": "2026-11-05T09:00:00Z",
-              "html_url": f"{WEB}/{repo}/releases/tag/{tags[repo]}", "assets": assets.get(repo, [])}]
-            if repo in tags else [])
+        rels = [{"tag_name": tags[repo], "name": f"Release {tags[repo]}", "draft": False, "prerelease": False,
+                 "published_at": "2026-11-05T09:00:00Z", "author": {"login": "mike"}, "body": "- Faster startup",
+                 "html_url": f"{WEB}/{repo}/releases/tag/{tags[repo]}", "assets": assets.get(repo, [])}] if repo in tags else []
+        if repo == "acme/api" and params.get("per_page") != "1":
+            rels.append({"tag_name": "v1.2.0", "name": "v1.2.0", "draft": False, "prerelease": True,
+                         "published_at": "2026-10-01T09:00:00Z", "html_url": f"{WEB}/{repo}/releases/tag/v1.2.0",
+                         "assets": []})
+        out(rels)
     if re.match(r"/actions/runs/\d+/jobs$", rest):
         out({"jobs": [{"name": "build", "conclusion": "success", "steps": []},
                       {"id": 8, "name": "sign", "conclusion": "failure", "html_url": f"{WEB}/{repo}/actions/runs/7/job/8",

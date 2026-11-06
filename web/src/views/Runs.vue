@@ -1,7 +1,6 @@
 <script setup>
 // Workflow runs and pipelines: the newest per repo, or only the failed ones.
 import { computed, ref } from 'vue'
-import { get } from '../api.js'
 import { useLoad } from '../load.js'
 import { useKeys } from '../keys.js'
 import { loadGroups, scope } from '../scope.js'
@@ -11,7 +10,7 @@ import Scope from '../components/Scope.vue'
 
 const failed = ref(false)
 const limit = ref(3)
-const { data, loading, load } = useLoad((q) => get(`/runs${q}${q ? '&' : '?'}limit=${limit.value}${failed.value ? '&failed=1' : ''}`))
+const { data, loading, load } = useLoad((q) => `/runs${q}${q ? '&' : '?'}limit=${limit.value}${failed.value ? '&failed=1' : ''}`)
 loadGroups()
 const sel = ref(null)
 const rows = computed(() => (data.value?.runs || []).map((r) => ({ ...r, key: `${r.repo}|${r.id ?? r.error}`, when: ago(r.created) })))

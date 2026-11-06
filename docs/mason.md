@@ -42,6 +42,15 @@ stats, defaults, console, plugins, market, settings and audit, plus tabs that pl
 one-key shortcut (`1` to `9` for the first ones, `I` issues, `W` workflows, `D` defaults, `:` console,
 `P` plugins, `K` market, `S` settings, `L` audit).
 
+- **Enter opens a page.** On repos it opens the repo's own page: its whole detail on the right and what
+  you can do with it on the left (check, fix, sync, merge, create a release, its releases), with the output
+  below. On releases it opens the repo's releases: every recent release on the left, the picked one in full
+  (notes, assets, the runs of its tag) on the right. `Esc` goes back.
+- **Releases** creates releases: **n** opens a form with the tag (the next patch is suggested on a repo's
+  release page), title, notes, target branch, draft, pre-release, and notes GitHub writes from the merged
+  PRs. GitLab projects get the same form without draft and pre-release, which GitLab doesn't have.
+- **Caching:** a tab you go back to shows its last answer at once and asks again after a minute; `r` and
+  every change ask again right away.
 - **Issues** lists issues across GitHub repos and GitLab projects, filtered by state, label, mine and age.
   It closes, reopens and comments on them, and **n** opens a new issue in any repo.
 - **Workflows** shows what `mason workflows` finds; **p** opens a PR that pins the selected repo's actions
@@ -154,7 +163,7 @@ GitLab: set `GITLAB_URL`.
 | `MASON_ALLOW_ORGS` | optional: only members of these GitHub orgs or GitLab groups may sign in |
 | `MASON_ADMINS` | the admins (may always sign in): everyone's audit log, plugins for everyone, installs |
 | `MASON_IDLE_HOURS`, `MASON_SESSION_DAYS` | session idle timeout (12) and lifetime (7) |
-| `MASON_CACHE` | how long GET answers are cached per user (`60s`); ETags make refreshes cheap |
+| `MASON_CACHE` | how long GET answers are cached per user (`60s`; the repo list ten times as long); ETags make refreshes cheap, `r` in the UI skips the cache |
 | `MASON_PLUGIN_INDEX`, `MASON_PLUGIN_INDEX_KEYS` | the plugin index (URL or file; default: `plugins/index.json` on this repo's main branch) and extra public keys (base64, comma separated) it may be signed with |
 | `MASON_PLUGIN_INSTALL` | `1` lets admins install plugins from the marketplace page |
 | `MASON_TRUSTED_PROXIES` | how many proxies in front set `X-Forwarded-*` (0) |
@@ -246,7 +255,7 @@ Mason after an install. The signing code is adapted from labdex (relicensed into
 Everything the UI does is JSON under `/api/v1` and works with an API key (`Authorization: Bearer mason_…`):
 
 `/me`, `/config`, `/repos`, `/repo`, `/status`, `/prs`, `/pr`, `/merge`, `/ready`, `/issues`, `/issue`,
-`/runs`, `/approvals`, `/approve`, `/releases`, `/releases/jobs`, `/packages`, `/security`, `/doctor`, `/sync`,
+`/runs`, `/approvals`, `/approve`, `/releases` (GET lists, POST creates), `/release?repo=&tag=`, `/releases/jobs`, `/packages`, `/security`, `/doctor`, `/sync`,
 `/workflows`, `/workflows/pin`, `/new`, `/metrics?days=`, `/console`, `/defaults…`, `/plugins…`, `/market…`,
 `/settings`, `/keys`, `/sessions`, `/secrets`, `/audit`, `/rate`, `/cache/clear`, and for admins
 `/admin/users` and `/admin/stats`. `/api/v1/health` needs no sign-in. Changes take `"dry_run": true`.

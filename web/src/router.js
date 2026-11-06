@@ -34,6 +34,8 @@ export const router = createRouter({
     { path: '/login', name: 'login', component: v('Login'), meta: { public: true } },
     { path: '/device', name: 'device', component: v('Device') },
     ...TABS.map((t) => ({ path: t.path, name: t.name, component: v(VIEWS[t.name]) })),
+    { path: '/repo', name: 'repo', component: v('RepoPage'), meta: { tab: 'repos' } },
+    { path: '/release', name: 'release', component: v('ReleasePage'), meta: { tab: 'releases' } },
     { path: '/plugins/:plugin/:tab', name: 'plugin-tab', component: v('PluginTab') },
     { path: '/:rest(.*)*', redirect: '/' },
   ],

@@ -139,7 +139,8 @@ def nodes(repos: list[str], fresh: bool = False) -> dict[str, dict]:
     """The GraphQL node of each repo (REPO_FIELDS plus what plugins ask for)."""
     if fresh:
         _nodes.clear()
-    todo = [r for r in repos if r not in _nodes]
+    cache = _nodes._d()  # one dict for the whole call, even if the cache expires meanwhile
+    todo = [r for r in repos if r not in cache]
     extra = "\n".join(p.graphql_fields for p in plugins.load() if p.graphql_fields)
     batches = [todo[i:i + BATCH] for i in range(0, len(todo), BATCH)]
 
@@ -164,8 +165,13 @@ def nodes(repos: list[str], fresh: bool = False) -> dict[str, dict]:
         return {repo: data.get(f"r{i}") for i, repo in enumerate(batch)}
 
     for got in core.pmap(one, batches):
-        _nodes.update(got)
-    return {r: _nodes.get(r) for r in repos}
+        cache.update(got)
+    return {r: cache.get(r) for r in repos}
+
+
+def forget(repo: str) -> None:
+    """After a change to a repo: its status, PRs and releases are read again next time."""
+    _nodes.pop(repo, None)
 
 
 def checks_word(rollup: dict | None) -> str:

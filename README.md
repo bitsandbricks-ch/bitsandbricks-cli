@@ -36,6 +36,7 @@ Repos are named as `owner/name`, as a bare `name` when only one repo has it, or 
 | `mason releases [--problems]` | Each repo's latest release, its assets, and its release runs. Flags assets the group's `release_assets` wants but the release lacks, and a failed last release run with the job and step that failed. |
 | `mason packages [--problems]` | Container images on GHCR of your orgs: newest tags, whether the repo's latest release has an image with its tag, and a failed last image build (a run named or filed like image, docker or container) with the job and step that failed. |
 | `mason bump name [patch\|minor\|major\|1.4.0] [--auto-merge]` | Opens a PR on `bump/v<new>` that sets the version in the group's `version` file (plugin.yaml, pyproject.toml, package.json, VERSION, ...) and adds the section to each `changelog`: Keep a Changelog `[Unreleased]` entries become `## [1.4.0] - date`, otherwise a `## 1.4.0` section lists the PRs merged since the last release. Default: patch. |
+| `mason release new name v1.4.0 [--title T] [--notes TEXT\|-] [--draft] [--prerelease] [--target REF] [--generate-notes] [--yes]` | Creates a release by hand, after asking (GitHub creates the tag on the default branch or `--target` when it is new). `--generate-notes` lets GitHub write the notes from the merged PRs. `mason release view name [tag]` shows one release in full: notes, assets, the runs of its tag, and the repo's other recent releases. |
 | `mason release [names] [--yes] [--list]` | Pushes the tag `v<version>` on the default branch of each named repo whose version is newer than its latest release (and whose first changelog has the section), after asking. The repo's own workflow builds and publishes. When the tag is there already it shows its release run. No names (or `--list`): a table of version against latest release. |
 | `mason approve [--yes]` | Runs waiting for you: environments you review, and outside contributors' runs. A run that waits for someone else says why you can't approve it, for example "Prevent self-review" when you started it and are its only reviewer. |
 | `mason security` | Open Dependabot, secret scanning and code scanning alerts. |
@@ -63,13 +64,13 @@ Security alerts need the `security_events` scope and packages the `read:packages
 - **Pull requests:** **u** updates the branch from its base, **c** comments, **C** closes without merging, besides merge, ready and diff.
 - **Runs:** the right side lists the selected run's jobs with the step that failed. **a** approves, **x** re-runs the failed jobs, **l** shows the end of each failed job's log, **C** cancels a running run.
 - **Repos** show the version file against the latest release, CI on the default branch, alerts and missing release assets. **Releases** show the version, the release notes and what failed in the last release run.
-- **Repos and Releases:** **b** bumps the selected repo's version (pick patch, minor or major; opens the PR), **R** pushes its release tag once the bump is merged.
-- **Enter** on a row opens it as a full page: what you can do with it on the left (Enter or the key in brackets runs it), its whole detail on the right, and what the actions printed at the bottom. **Esc** goes back to the list. On Checks and Settings, Enter opens a short menu instead.
+- **Repos and Releases:** **b** bumps the selected repo's version (pick patch, minor or major; opens the PR), **R** pushes its release tag once the bump is merged, **N** creates a release by hand (tag, title, one line of notes or GitHub's own, published, pre-release or draft).
+- **Enter** on a row opens it as a full page: what you can do with it on the left (Enter or the key in brackets runs it), its whole detail on the right, and what the actions printed at the bottom. On Releases the page lists the repo's recent releases with the newest one's whole notes. **Esc** goes back to the list. On Checks and Settings, Enter opens a short menu instead.
 - **The footer** only shows the keys that work on the current tab.
 - **n** creates a new repo.
 - **ctrl+p** lists every command.
 - **Loading:** nothing reloads by itself. The repo and PR list loads at start, with one GraphQL query per 20 repos. Runs, Releases, Packages and Security load the first time you open their tab. **r** reloads the tab you are on.
-- **Rate limit:** the header shows how many API calls are left. Answers are cached for 60 seconds. If GitHub's rate limit is reached, the TUI says when it resets instead of failing.
+- **Rate limit:** the header shows how many API calls are left. Answers are cached for 60 seconds; **r** reads past the cache. If GitHub's rate limit is reached, the TUI says when it resets instead of failing.
 
 ## Configuration
 

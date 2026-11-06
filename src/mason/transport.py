@@ -20,6 +20,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections import OrderedDict
 from datetime import datetime
 from pathlib import Path
 
@@ -97,6 +98,81 @@ def forget_operator_login() -> bool:
         return False
 
 
+class Caches(dict):
+    """Named caches of a transport (the repo list, GraphQL nodes, who am I) that expire.
+
+    Each name lives `ttl` seconds from when it was filled (LONG names ten times as long: the repo list
+    changes rarely and costs a page per org); ttl 0 keeps them until cleared, which suits the CLI's
+    one-shot process. The web app keeps a transport per user for hours, so without this its status page
+    showed the first answer until someone pressed reload.
+    """
+
+    LONG = frozenset({"listing", "gl_listing", "me"})
+
+    def __init__(self, ttl: int = 0):
+        super().__init__()
+        self.ttl = ttl
+        self.born: dict[str, float] = {}
+
+    def _expire(self, name) -> None:
+        if not self.ttl or name not in self.born:
+            return
+        limit = self.ttl * (10 if name in self.LONG else 1)
+        if time.monotonic() - self.born[name] > limit:
+            dict.pop(self, name, None)
+            self.born.pop(name, None)
+
+    def __getitem__(self, name):
+        self._expire(name)
+        return dict.__getitem__(self, name)
+
+    def __contains__(self, name) -> bool:
+        self._expire(name)
+        return dict.__contains__(self, name)
+
+    def get(self, name, default=None):
+        self._expire(name)
+        return dict.get(self, name, default)
+
+    def setdefault(self, name, default=None):
+        self._expire(name)
+        if not dict.__contains__(self, name):
+            self.born[name] = time.monotonic()
+        return dict.setdefault(self, name, default)
+
+    def __setitem__(self, name, value) -> None:
+        self.born[name] = time.monotonic()
+        dict.__setitem__(self, name, value)
+
+    def pop(self, name, *default):
+        self.born.pop(name, None)
+        return dict.pop(self, name, *default)
+
+    def clear(self) -> None:
+        self.born.clear()
+        dict.clear(self)
+
+
+# Set for one request (the web app's reload, ?fresh=1): GETs skip the time-based cache but still send
+# their ETag, so an unchanged answer costs no rate limit.
+FRESH: contextvars.ContextVar[bool] = contextvars.ContextVar("mason_fresh", default=False)
+
+
+class Lru(OrderedDict):
+    """A dict that drops its oldest entries past `size` (instead of forgetting everything at once)."""
+
+    def __init__(self, size: int = 5000):
+        super().__init__()
+        self.size = size
+
+    def __setitem__(self, k, v) -> None:
+        if k in self:
+            self.move_to_end(k)
+        super().__setitem__(k, v)
+        while len(self) > self.size:
+            self.popitem(last=False)
+
+
 def ttl_seconds(cache: str | None) -> int:
     if not cache:
         return 0
@@ -128,7 +204,7 @@ class GhTransport:
 
     def __init__(self, token: str | None = None):
         self.token = token
-        self.caches: dict = {}
+        self.caches: Caches = Caches()
 
     def _env(self):
         if not self.token:
@@ -299,9 +375,9 @@ class HttpTransport:
         self.cache_ttl = ttl_seconds(cache)
         self.timeout = timeout
         self.user_agent = user_agent
-        self.caches: dict = {}
-        self._get_cache: dict[str, tuple[float, object]] = {}
-        self._etags: dict[str, tuple[str, object]] = {}  # url: (ETag, answer); a 304 costs no rate limit
+        self.caches: Caches = Caches(self.cache_ttl)
+        self._get_cache: Lru = Lru()  # url or query: (expires, answer)
+        self._etags: Lru = Lru()  # url: (ETag, answer); a 304 costs no rate limit
         self.last_rate: dict = {}
         self.stats = {"requests": 0, "cache_hits": 0, "not_modified": 0}
 
@@ -364,7 +440,7 @@ class HttpTransport:
 
     def api(self, method: str, path: str, body: dict | None = None):
         url = self._url(path)
-        if method == "GET" and self.cache_ttl:
+        if method == "GET" and self.cache_ttl and not FRESH.get():
             hit = self._get_cache.get(url)
             if hit and hit[0] > time.monotonic():
                 self.stats["cache_hits"] += 1
@@ -379,14 +455,10 @@ class HttpTransport:
             value = json.loads(data) if data.strip() else None
             etag = {k.lower(): v for k, v in headers.items()}.get("etag")
             if method == "GET" and etag:
-                if len(self._etags) > 5000:
-                    self._etags.clear()
                 self._etags[url] = (etag, value)
         if method != "GET":  # a write makes cached answers about this repo stale
             self.forget(path)
         if method == "GET" and self.cache_ttl:
-            if len(self._get_cache) > 5000:
-                self._get_cache.clear()
             self._get_cache[url] = (time.monotonic() + self.cache_ttl, value)
         return value
 
@@ -396,17 +468,22 @@ class HttpTransport:
         prefix = self._url("/".join(parts[:4])) if path.startswith("/repos/") and len(parts) >= 4 else ""
         if not prefix:
             self._get_cache.clear()
+            for name in ("nodes", "gl_nodes"):  # GraphQL answers per repo: status, PRs, releases
+                self.caches.pop(name, None)
             return
         for k in [k for k in self._get_cache if k.startswith(prefix) or not k.startswith("http")]:
             self._get_cache.pop(k, None)
+        nodes = dict.get(self.caches, "nodes")
+        if nodes:
+            nodes.pop(f"{parts[2]}/{parts[3]}", None)
 
     def graphql(self, query: str, variables: dict) -> dict:
         body = json.dumps({"query": query, "variables": variables}).encode()
         key = body.decode()
         mutation = query.lstrip().startswith("mutation")
         if mutation:
-            self._get_cache.clear()
-        if self.cache_ttl and not mutation:
+            self.forget()
+        if self.cache_ttl and not mutation and not FRESH.get():
             hit = self._get_cache.get(key)
             if hit and hit[0] > time.monotonic():
                 self.stats["cache_hits"] += 1
