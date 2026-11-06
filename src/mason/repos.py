@@ -339,13 +339,56 @@ def merge_one(repo: str, p: dict, ctx: dict, named: bool) -> None:
     if core.dry_run():
         say(f"   [dry-run] {how} {label}{link}")
         return
-    failed = core.transport().pr_merge(repo, p["number"], ctx.get("method") or "squash", auto=not ctx.get("now"))
+    method = ctx.get("method") or "squash"
+    if ctx.get("now"):
+        failed = core.transport().pr_merge(repo, p["number"], method, auto=False)
+        say(f"   {label}: not merged: {failed}{link}" if failed else f"   {label}: merged{link}")
+        return
+    merged, failed = auto_merge(repo, p["number"], method)
     if failed:
         say(f"   {label}: not merged: {failed}{link}")
-    elif ctx.get("now"):
-        say(f"   {label}: merged{link}")
+    elif merged:
+        say(f"   {label}: merged right away (checks green, nothing left to wait for){link}")
     else:
         say(f"   {label}: auto-merge on (merges when checks are green){link}\n      checks: {p['url']}/checks")
+
+
+# GitHub refuses auto-merge when there is nothing for it to wait for.
+NOTHING_TO_WAIT_FOR = re.compile(r"clean status", re.I)
+NO_REQUIRED_CHECKS = re.compile(r"unstable status|protected branch rules not configured", re.I)
+NOT_ALLOWED = re.compile(r"auto.?merge is not allowed|not allowed for this repository", re.I)
+
+
+def allow_auto_merge(repo: str) -> bool:
+    """Turn on the repo's "Allow auto-merge" setting when it is off. True when it changed it."""
+    info = api("GET", f"/repos/{repo}") or {}
+    if info.get("allow_auto_merge") is False:
+        api("PATCH", f"/repos/{repo}", {"allow_auto_merge": True})
+        say("   turned on auto-merge for the repo")
+        return True
+    return False
+
+
+def auto_merge(repo: str, number: int, method: str = "squash") -> tuple[bool, str]:
+    """Turn on auto-merge for one PR: (merged right away, why not or '').
+
+    GitHub only auto-merges when the base branch makes it wait (required checks or reviews).
+    A PR that is already mergeable ("clean status") is merged now, as `gh pr merge --auto` does.
+    """
+    t = core.transport()
+    failed = t.pr_merge(repo, number, method, auto=True)
+    if failed and NOT_ALLOWED.search(failed) and allow_auto_merge(repo):
+        failed = t.pr_merge(repo, number, method, auto=True)
+    if not failed:
+        return False, ""
+    if NOTHING_TO_WAIT_FOR.search(failed):
+        failed = t.pr_merge(repo, number, method, auto=False)
+        return not failed, failed
+    if NO_REQUIRED_CHECKS.search(failed):
+        return False, ("GitHub can only auto-merge when the base branch requires checks, and this one requires "
+                       "none. Add a ruleset (or branch protection) that requires the CI checks, or merge now "
+                       "once they pass")
+    return False, failed
 
 
 def merge(repo: str, ctx: dict) -> None:
@@ -358,10 +401,7 @@ def merge(repo: str, ctx: dict) -> None:
         say("   no open PRs")
         return
     if any(p.get("state", "OPEN") == "OPEN" and not p["isDraft"] for p in items) and not ctx.get("now"):
-        info = api("GET", f"/repos/{repo}") or {}
-        if info.get("allow_auto_merge") is False:
-            api("PATCH", f"/repos/{repo}", {"allow_auto_merge": True})
-            say("   turned on auto-merge for the repo")
+        allow_auto_merge(repo)
     for p in items:
         merge_one(repo, p, ctx, named=bool(numbers))
 

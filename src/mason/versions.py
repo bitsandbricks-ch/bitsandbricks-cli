@@ -249,8 +249,10 @@ def bump(cfg: Config, repo: str, level: str, auto: bool = False) -> None:
     url = open_pr(repo, base, branch, files, f"Release {new}", f"Release {new}", body)
     say(f"   opened {url}")
     if auto:
-        why = core.transport().pr_merge(repo, int(url.rsplit("/", 1)[-1]), "squash", auto=True)
-        say("   auto-merge on" if not why else f"   auto-merge not set: {why.strip()[:200]}")
+        R.allow_auto_merge(repo)
+        merged, why = R.auto_merge(repo, int(url.rsplit("/", 1)[-1]), "squash")
+        say(f"   auto-merge not set: {why.strip()[:200]}" if why else "   merged right away" if merged
+            else "   auto-merge on")
 
 
 def release(cfg: Config, repo: str, yes: bool = True) -> None:
