@@ -176,6 +176,7 @@ docker compose -f deploy/docker-compose.yml up -d    # Mortar and Postgres, on 1
 From a clone, for development:
 
 ```sh
+docker compose -f deploy/docker-compose.yml up -d   # after filling in deploy/.env (see docs/mortar.md)
 pip install -e ".[server]" && (cd web && npm ci && npm run build)
 export MTR_ADMINS=github:you                         # optional: GitHub sign-in works as is
 mtr serve --check && mtr serve                       # http://localhost:8080

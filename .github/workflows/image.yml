@@ -1,0 +1,110 @@
+name: Image
+
+# Builds the Mortar web server image (Dockerfile) and pushes it to GHCR:
+#   main       -> ghcr.io/<owner>/<repo>:main, :sha-<short>
+#   v1.2.3 tag -> :1.2.3, :1.2, :latest, :sha-<short>
+# Pull requests that touch the image only build it (nothing is pushed).
+# Only actions/checkout is used (pinned); the rest is the docker CLI on the runner.
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+  pull_request:
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - pyproject.toml
+      - web/package*.json
+      - .github/workflows/image.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    env:
+      PUSH: ${{ github.event_name != 'pull_request' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Tags
+        id: tags
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          image="ghcr.io/${REPO,,}"
+          short="${GITHUB_SHA::7}"
+          tags=("$image:sha-$short")
+          if [[ "$REF_TYPE" == tag && "$REF_NAME" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            v="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
+            tags+=("$image:$v" "$image:${BASH_REMATCH[1]}.${BASH_REMATCH[2]}" "$image:latest")
+            version="$v"
+          elif [[ "$REF_TYPE" == tag ]]; then
+            # v1.2.3-rc1 and the like: their own tag only, never latest
+            tags+=("$image:${REF_NAME#v}")
+            version="${REF_NAME#v}"
+          elif [[ "$REF_NAME" == main ]]; then
+            tags+=("$image:main")
+            version="main-$short"
+          else
+            version="pr-$short"
+          fi
+          {
+            echo "image=$image"
+            echo "version=$version"
+            echo "args=$(printf -- '--tag %s ' "${tags[@]}")"
+          } >> "$GITHUB_OUTPUT"
+          printf '%s\n' "${tags[@]}"
+
+      - name: Log in to GHCR
+        if: env.PUSH == 'true'
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: echo "$TOKEN" | docker login ghcr.io --username "$ACTOR" --password-stdin
+
+      - name: Build${{ env.PUSH == 'true' && ' and push' || '' }}
+        env:
+          IMAGE: ${{ steps.tags.outputs.image }}
+          VERSION: ${{ steps.tags.outputs.version }}
+          TAG_ARGS: ${{ steps.tags.outputs.args }}
+          SOURCE: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          docker buildx create --use --driver docker-container --name mortar
+          cache=(--cache-from "type=registry,ref=$IMAGE:buildcache")
+          output=(--load)
+          if [[ "$PUSH" == true ]]; then
+            cache+=(--cache-to "type=registry,ref=$IMAGE:buildcache,mode=max")
+            output=(--push)
+          fi
+          # shellcheck disable=SC2086  # TAG_ARGS is a list of --tag flags
+          docker buildx build . $TAG_ARGS "${cache[@]}" "${output[@]}" \
+            --provenance=false \
+            --label "org.opencontainers.image.source=$SOURCE" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.version=$VERSION" \
+            --label "org.opencontainers.image.licenses=MIT" \
+            --label "org.opencontainers.image.description=Mortar, the mtr web app for GitHub and GitLab"
+
+      - name: Smoke test
+        if: env.PUSH != 'true'
+        env:
+          IMAGE: ${{ steps.tags.outputs.image }}
+        run: |
+          img="$(docker images --format '{{.Repository}}:{{.Tag}}' "$IMAGE" | head -1)"
+          docker run --rm -e MTR_DEV=1 -e GITHUB_CLIENT_ID=x -e GITHUB_CLIENT_SECRET=x \
+            -e MTR_ADMINS=github:ci "$img" mtr serve --check
