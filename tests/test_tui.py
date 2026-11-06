@@ -121,6 +121,12 @@ def test_tui_flow(env, monkeypatch):
             await pilot.pause(0.3)
             await pilot.press("y")
             await pilot.pause(1)
+            await pilot.press("T")
+            await until(pilot, lambda: "New tag on acme/plugin-b" in str(app.screen.query_one("Label").render()))
+            await pilot.press("enter")
+            await until(pilot, lambda: "release.yml creates" in str(app.screen.query_one("Label").render()))
+            await pilot.press("y")
+            await pilot.pause(1)
             await pilot.press("5")
             images = app.query_one("#packages-table")
             await until(pilot, lambda: images.row_count)
@@ -147,6 +153,7 @@ def test_tui_flow(env, monkeypatch):
             assert any("[dry-run] comment on acme/web#7: thanks" in line for line in log), log
             assert any("[dry-run] branch bump/v0.5.0" in line for line in log), log
             assert any("[dry-run] create the draft release v0.3.1 (v0.3.1)" in line for line in log), log
+            assert any("[dry-run] push the tag v0.3.1 on main of acme/plugin-b" in line for line in log), log
 
     asyncio.run(run())
 

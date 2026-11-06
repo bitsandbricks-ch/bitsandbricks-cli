@@ -70,7 +70,8 @@ BASE_TABS = [("repos", "Repos"), ("prs", "Pull requests"), ("runs", "Runs"), ("r
 TAB_ACTIONS = {
     "merge": {"repos", "prs"}, "merge_all": {"repos", "prs"}, "pr_filter": {"prs"}, "ready": {"prs"},
     "diff": {"prs"}, "approve": {"runs"}, "rerun": {"runs"}, "fix": {"checks"}, "sync": {"checks"},
-    "bump": {"repos", "releases"}, "release": {"repos", "releases"}, "new_release": {"repos", "releases"},
+    "bump": {"repos", "releases"}, "release": {"repos", "releases"},
+    "new_release": {"repos", "releases"}, "new_tag": {"repos", "releases"},
     "update_branch": {"prs"}, "comment": {"prs"}, "close_pr": {"prs"},
     "logs": {"runs"}, "cancel_run": {"runs"}, "new_repo": {"repos"},
 }
@@ -345,6 +346,7 @@ class MasonTui(App):
         Binding("b", "bump", "Bump version"),
         Binding("R", "release", "Release"),
         Binding("N", "new_release", "New release"),
+        Binding("T", "new_tag", "New tag"),
         Binding("f", "fix", "Fix drift"),
         Binding("s", "sync", "Sync files"),
         Binding("n", "new_repo", "New repo"),
@@ -1487,16 +1489,46 @@ class MasonTui(App):
         self.log_line(f"{key}: reading its releases …")
         self.suggest_release(key)
 
+    def action_new_tag(self) -> None:
+        """T: push only a tag (the next patch is suggested); a workflow that publishes on tags does the rest."""
+        key = self.current_key()
+        if self.tab() not in ("repos", "releases") or not key:
+            self.log_line("T pushes a tag for the selected repo: Repos (1) or Releases (4)")
+            return
+        self.log_line(f"{key}: reading its releases and workflows …")
+        self.suggest_release(key, only_tag=True)
+
     @work(thread=True, group="action")
-    def suggest_release(self, repo: str) -> None:
+    def suggest_release(self, repo: str, only_tag: bool = False) -> None:
+        workflow = ""
         try:
             tag = REL.suggest_from(REL.recent(repo))
+            if only_tag:
+                workflow = REL.publishing_workflow(repo)
         except core.RateLimited as err:
             self.call_from_thread(self.rate_limited, err)
             return
         except RuntimeError:
             tag = "v0.1.0"
-        self.call_from_thread(self.ask_release, repo, tag)
+        if only_tag:
+            self.call_from_thread(self.ask_tag, repo, tag, workflow)
+        else:
+            self.call_from_thread(self.ask_release, repo, tag)
+
+    def ask_tag(self, repo: str, suggested: str, workflow: str) -> None:
+        def tagged(tag: str | None) -> None:
+            if not tag or not tag.strip():
+                return
+            try:
+                tag = REL.valid_tag(tag)
+            except RuntimeError as err:
+                self.log_line(str(err))
+                return
+            then = (f"{workflow} creates the release from it." if workflow
+                    else "No workflow of this repo creates a release from it (N makes a release instead).")
+            self.detail_cache.pop(f"relpage:{repo}", None)
+            self.confirm_then(f"Push the tag {tag} on the default branch of {repo}?\n{then}", REL.push_tag, repo, tag)
+        self.push_screen(Ask(f"New tag on {repo} (only the tag is pushed)", value=suggested), tagged)
 
     def ask_release(self, repo: str, suggested: str) -> None:
         got: dict = {}
@@ -1667,6 +1699,7 @@ class MasonTui(App):
                       ("release", "Release: tag v<version> when it is new (R)", self.action_release)]
         if tab in ("repos", "releases"):
             items.append(("new-release", "Create a release: tag, title, notes, draft (N)", self.action_new_release))
+            items.append(("new-tag", "Push a tag only: its workflow makes the release (T)", self.action_new_tag))
         if tab == "releases":
             runs = self.releases[key]["runs"]
             if runs:

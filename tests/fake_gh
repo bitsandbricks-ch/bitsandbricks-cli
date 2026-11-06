@@ -82,6 +82,18 @@ jobs:
         run: echo "${{ github.sha }}"
 """
 SETTINGS = {"allow_auto_merge": True, "delete_branch_on_merge": True, "has_wiki": False}
+RELEASE_YML = """name: Release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - run: gh release create "$GITHUB_REF_NAME" --generate-notes
+"""
 REPOS = {  # full name: (settings, rulesets, files, immutable)
     "acme/plugin-tpl": (SETTINGS, {"main": ruleset("main")},
                         {".gitignore": GITIGNORE, "LICENSE": LICENSE,
@@ -90,7 +102,8 @@ REPOS = {  # full name: (settings, rulesets, files, immutable)
                                                             "plugin.yaml": "name: plugin-a\nversion: 1.0.0\n"}, True),
     "acme/plugin-b": (dict(SETTINGS, has_wiki=True), {}, {
         ".gitignore": GITIGNORE, "LICENSE": "GPL\n", "plugin.yaml": "name: plugin-b\nversion: \"0.4.0\"\n",
-        "CHANGELOG.md": "# Changelog\n\n## [Unreleased]\n\n## [0.4.0] - 2026-11-05\n- Faster\n"}, False),
+        "CHANGELOG.md": "# Changelog\n\n## [Unreleased]\n\n## [0.4.0] - 2026-11-05\n- Faster\n",
+        ".github/workflows/release.yml": RELEASE_YML}, False),
     "acme/web": (dict(SETTINGS, delete_branch_on_merge=False), {}, {".github/workflows/ci.yml": CI_YML}, False),
     "acme/api": (SETTINGS, {"main": ruleset("main", approvals=1)},
                  {"SECURITY.md": SECURITY_MD, ".github/rulesets/release.json": json.dumps(RELEASE_RS)}, False),

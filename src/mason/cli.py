@@ -13,6 +13,7 @@ repo of your orgs. --org and --group narrow that down.
   mason bump name [patch|minor|1.4.0] a PR with the next version and its changelog section
   mason release [names] [--yes]       tag v<version> where it is newer than the latest release
   mason release new name v1.4.0       create a release by hand (--title, --notes, --draft, --prerelease)
+  mason release tag name [v1.4.0]     push only the tag (a workflow that publishes on tags makes the release)
   mason release view name [tag]       one release in full, with the repo's recent releases
   mason pr web#12 [--diff]            one PR in detail
   mason merge [names] [--now]         auto-merge open PRs (drafts and conflicts stay)
@@ -117,7 +118,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict]:
     sp.add_argument("--notes", default="", help="new: the release notes, Markdown (- reads them from stdin)")
     sp.add_argument("--draft", action="store_true", help="new: save it as a draft")
     sp.add_argument("--prerelease", action="store_true", help="new: mark it as a pre-release")
-    sp.add_argument("--target", default="", help="new: branch or commit for a new tag (default: the default branch)")
+    sp.add_argument("--target", default="", help="new, tag: branch or commit for the tag (default: the default branch)")
     sp.add_argument("--generate-notes", action="store_true", help="new: GitHub writes the notes from merged PRs")
     sp = sub.add_parser("pr", parents=[common], help="one PR in detail")
     sp.add_argument("target", help="name#12 or a PR URL")
@@ -292,7 +293,7 @@ def main(argv: list[str] | None = None) -> None:
                 level = args.repos.pop()
             names, _ = repos.pick_repos(cfg, args.repos, args.group)
             return versions.bump_all(cfg, names, level, args.auto_merge)
-        if args.cmd == "release" and args.repos[:1] in (["new"], ["view"]):
+        if args.cmd == "release" and args.repos[:1] in (["new"], ["view"], ["tag"]):
             return release_new_or_view(cfg, args)
         if args.cmd == "release":
             names, _ = repos.pick_repos(cfg, args.repos, args.group)
@@ -317,6 +318,18 @@ def release_new_or_view(cfg, args) -> None:
     tag = rest[1] if len(rest) > 1 else ""
     if action == "view":
         return releases.view(cfg, repo, tag or None)
+    if action == "tag":
+        tag = tag or releases.suggest_from(releases.recent(repo))
+        if not args.yes and not core.dry_run():
+            try:
+                answer = input(f"Push the tag {tag} on {args.target or 'the default branch'} of {repo}? [y/N] ")
+            except EOFError:
+                answer = ""
+            if answer.strip().lower() not in ("y", "yes"):
+                print("left as it is")
+                return None
+        releases.push_tag(repo, tag, args.target)
+        return None
     if not tag:
         sys.exit("Name the tag: mason release new name v1.4.0")
     notes = sys.stdin.read() if args.notes == "-" else args.notes
