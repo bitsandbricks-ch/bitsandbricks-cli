@@ -13,6 +13,7 @@ GITHUB_SCOPES = "repo read:org workflow security_events read:packages"
 # Mason's own GitHub OAuth app. A client ID is public (it is in every authorize URL), so it is safe to
 # ship: with it anyone can sign in with GitHub's device flow, no client secret needed. GITHUB_CLIENT_ID
 # overrides it, and with GITHUB_CLIENT_SECRET the usual redirect sign-in works too.
+# Without a secret Mason can't revoke tokens at GitHub (oauth.revoke): users get the link to do it.
 GITHUB_CLIENT_ID = "Ov23liFJgLtIjB3ZtuOy"
 DEFAULT_PORT = 8080
 LOCAL_SUFFIXES = (".localhost", ".local", ".lan", ".home.arpa")
@@ -87,6 +88,18 @@ class Settings:
     plugin_index_keys: list = field(default_factory=list)
     plugin_install: bool = False
     trusted_proxies: int = 0
+    audit_days: int = 90
+    audit_rows: int = 1000
+    audit_output: int = 1000
+    audit_ips: str = "hash"
+    rate_api: int = 600
+    rate_writes: int = 60
+    rate_anon: int = 120
+    signups_per_hour: int = 60
+    signups_per_ip: int = 5
+    max_users: int = 1000
+    max_keys: int = 50
+    max_sessions: int = 20
 
     @property
     def secure_cookies(self) -> bool:
@@ -109,6 +122,12 @@ class Settings:
         elif parts.scheme == "http" and not local_host(parts.hostname):
             out.append("MASON_URL must be https:// (plain http is only for localhost, private addresses and "
                        ".local, .lan or .home.arpa names)")
+        if self.audit_ips not in ("hash", "none", "full"):
+            out.append(f"MASON_AUDIT_IPS is hash, none or full (got {self.audit_ips!r})")
+        if min(self.audit_days, self.audit_rows) < 1 or self.audit_output < 0:
+            out.append("MASON_AUDIT_DAYS and MASON_AUDIT_ROWS must be at least 1, MASON_AUDIT_OUTPUT at least 0")
+        if min(self.max_keys, self.max_sessions) < 1:
+            out.append("MASON_MAX_KEYS and MASON_MAX_SESSIONS must be at least 1")
         return out
 
 
@@ -168,4 +187,16 @@ def load(port: int | None = None) -> Settings:
         plugin_index_keys=_list("MASON_PLUGIN_INDEX_KEYS"),
         plugin_install=_env("MASON_PLUGIN_INSTALL") == "1",
         trusted_proxies=int(_env("MASON_TRUSTED_PROXIES", "0")),
+        audit_days=int(_env("MASON_AUDIT_DAYS", "90")),
+        audit_rows=int(_env("MASON_AUDIT_ROWS", "1000")),
+        audit_output=int(_env("MASON_AUDIT_OUTPUT", "1000")),
+        audit_ips=_env("MASON_AUDIT_IPS", "hash").lower(),
+        rate_api=int(_env("MASON_RATE_API", "600")),
+        rate_writes=int(_env("MASON_RATE_WRITES", "60")),
+        rate_anon=int(_env("MASON_RATE_ANON", "120")),
+        signups_per_hour=int(_env("MASON_SIGNUPS_PER_HOUR", "60")),
+        signups_per_ip=int(_env("MASON_SIGNUPS_PER_IP", "5")),
+        max_users=int(_env("MASON_MAX_USERS", "1000")),
+        max_keys=int(_env("MASON_MAX_KEYS", "50")),
+        max_sessions=int(_env("MASON_MAX_SESSIONS", "20")),
     )

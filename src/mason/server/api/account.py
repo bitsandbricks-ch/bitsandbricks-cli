@@ -3,11 +3,12 @@ device login, settings, secrets and the audit log."""
 
 from __future__ import annotations
 
+import json
 from datetime import timedelta
 
 from flask import Blueprint, abort, current_app, g, jsonify, make_response, redirect, request
 
-from mason.server import auth, oauth, security
+from mason.server import auth, limits, oauth, retention, security
 from mason.server.auth import audit, need
 from mason.server.context import clean_settings, user_settings
 from mason.server.models import (
@@ -85,6 +86,7 @@ def login(name: str):
     if auth.throttled(f"login:{ip}", 30):
         abort(429, "too many sign-ins from this address; wait a few minutes")
     auth.record_failure(f"login:{ip}")  # counts attempts, not failures: 30 per 5 minutes
+    limits.pending(OAuthState)
     vault = current_app.config["VAULT"]
     state, binding = security.random_token(), security.random_token()
     verifier, challenge = security.pkce_pair()
@@ -175,6 +177,7 @@ def device_sign_in(name: str):
     if auth.throttled(f"login:{ip}", 30):
         abort(429, "too many sign-ins from this address; wait a few minutes")
     auth.record_failure(f"login:{ip}")  # counts attempts, like the redirect sign-in
+    limits.pending(DeviceSignIn)
     data = body()
     link = g.user.id if data.get("link") and g.get("user") and g.get("session") else None
     try:
@@ -247,8 +250,10 @@ def device_sign_in_poll(name: str):
 
 
 def audit_anon(action: str, detail: str, ok: bool) -> None:
-    db.add(Audit(user_id=None, via="web", ip=auth.client_ip(), action=action, detail=detail[:500], ok=ok))
+    db.add(Audit(user_id=None, via="web", ip=retention.audit_ip(auth.client_ip()), action=action,
+                 detail=detail[:500], ok=ok))
     db.commit()
+    retention.trim(None)
 
 
 @bp.post("/auth/logout")
@@ -290,12 +295,19 @@ def unlink(ident_id: int):
         abort(404)
     if len(g.user.identities) < 2:
         abort(400, "this is your only login; delete your account instead")
-    oauth.revoke(ident)
+    got = oauth.revoke(ident)
     db.delete(ident)
     db.commit()
     oauth.forget_transports(g.user.id)
-    audit("unlink", f"{ident.provider}:{ident.login}")
-    return jsonify({"ok": True})
+    audit("unlink", f"{ident.provider}:{ident.login}", ok=got["revoked"], detail=_revoke_note(got))
+    return jsonify({"ok": True, "revoked": [got]})
+
+
+def _revoke_note(got: dict) -> str:
+    who = f"{got['provider']}:{got['login']}"
+    if got["revoked"]:
+        return f"{who}: token revoked"
+    return f"{who}: token not revoked by Mason; revoke it at {got['manual']}"
 
 
 @bp.get("/sessions")
@@ -324,12 +336,16 @@ def end_other_session(sid: str):
 def delete_me():
     if g.get("session") is None:
         abort(403, "delete your account in the browser")
-    for i in g.user.identities:
-        oauth.revoke(i)
-    audit("account.delete", g.user.name)
+    revoked = [oauth.revoke(i) for i in g.user.identities]
+    oauth.forget_transports(g.user.id)
+    retention.forget_user(g.user.id)  # the account's audit rows go with it
+    # one row without name, user or address says it happened, and whether Mason could revoke the tokens
+    left = [r["provider"] for r in revoked if not r["revoked"]]
+    db.add(Audit(user_id=None, via="web", action="account.delete", ok=not left,
+                 detail=f"tokens not revoked by Mason: {', '.join(left)}" if left else "tokens revoked"))
     db.delete(g.user)
     db.commit()
-    resp = make_response(jsonify({"ok": True}))
+    resp = make_response(jsonify({"ok": True, "revoked": revoked}))
     auth.clear_session_cookie(resp)
     return resp
 
@@ -343,7 +359,30 @@ def key_json(k: ApiKey) -> dict:
             "last_ip": k.last_ip, "revoked": k.revoked_at is not None}
 
 
+def check_key_room(user: User) -> None:
+    """At most MASON_MAX_KEYS working keys; revoked and expired ones beyond twice that are deleted."""
+    cap = current_app.config["OP"].max_keys
+    now = utcnow()
+    rows = db.query(ApiKey).filter_by(user_id=user.id).order_by(ApiKey.created_at.desc()).all()
+    live = [k for k in rows if k.revoked_at is None and (k.expires_at is None or k.expires_at > now)]
+    if len(live) >= cap:
+        abort(409, f"you have {len(live)} API keys, the most Mason keeps; revoke one first")
+    dead = [k for k in rows if k not in live]
+    for k in dead[max(0, 2 * cap - len(live) - 1):]:
+        db.delete(k)
+    db.commit()
+
+
+def valid_days(days, default=None):
+    if days is None:
+        return default
+    if isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= 3650:
+        abort(400, "days: 1 to 3650, or leave it out for no expiry")
+    return days
+
+
 def issue_key(user: User, name: str, scope: str, days: int | None) -> tuple[str, ApiKey]:
+    check_key_room(user)
     full, prefix, hashed = security.new_api_key()
     k = ApiKey(user_id=user.id, name=name[:100] or "key", prefix=prefix, hash=hashed, scope=scope,
                expires_at=utcnow() + timedelta(days=days) if days else None)
@@ -368,9 +407,7 @@ def new_key():
     scope = data.get("scope", "read")
     if scope not in ("read", "write"):
         abort(400, "scope is read or write")
-    days = data.get("days")
-    if days is not None and (not isinstance(days, int) or not 1 <= days <= 3650):
-        abort(400, "days: 1 to 3650, or leave it out for no expiry")
+    days = valid_days(data.get("days"))
     full, k = issue_key(g.user, str(data.get("name") or "key"), scope, days)
     audit("key.create", f"{k.name} ({scope})")
     return jsonify({"key": full, **key_json(k)}), 201
@@ -397,6 +434,7 @@ def device_code():
     if auth.throttled(f"device:{ip}", 20):
         abort(429, "too many device logins from this address; wait a few minutes")
     auth.record_failure(f"device:{ip}")
+    limits.pending(DeviceGrant)
     data = body()
     scope = data.get("scope", "write")
     if scope not in ("read", "write"):
@@ -443,8 +481,12 @@ def device_token():
 @bp.get("/device/info")
 @need("read")
 def device_info():
+    ip = auth.client_ip()
+    if auth.throttled(f"devcode:{ip}"):
+        abort(429, "too many wrong codes; wait a few minutes")
     row = db.query(DeviceGrant).filter_by(user_code=str(request.args.get("code", "")).upper()).one_or_none()
     if row is None or row.expires_at < utcnow() or row.approved_by or row.denied:
+        auth.record_failure(f"devcode:{ip}")
         abort(404, "no such code, or it expired")
     return jsonify({"user_code": row.user_code, "client": row.client_name, "scope": row.scope,
                     "created_at": iso(row.created_at)})
@@ -472,7 +514,7 @@ def device_approve():
     scope = data.get("scope") or row.scope
     if scope not in ("read", "write"):
         abort(400, "scope is read or write")
-    full, k = issue_key(g.user, f"{row.client_name} (device login)", scope, data.get("days") or 365)
+    full, k = issue_key(g.user, f"{row.client_name} (device login)", scope, valid_days(data.get("days"), 365))
     row.approved_by, row.scope = g.user.id, scope
     row.key_enc = current_app.config["VAULT"].encrypt(full)
     db.commit()
@@ -493,6 +535,8 @@ def get_settings():
 @need("write")
 def put_settings():
     new = {**g.user.settings, **clean_settings(body())}
+    if len(json.dumps(new)) > limits.SETTINGS_BYTES:
+        abort(413, f"settings are limited to {limits.SETTINGS_BYTES // 1024} KB")
     g.user.settings = new
     db.commit()
     audit("settings", ", ".join(sorted(new)))

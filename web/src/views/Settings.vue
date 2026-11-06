@@ -5,7 +5,7 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { del, get, loadMe, log, post, put, state } from '../api.js'
 import { deviceSignIn } from '../signin.js'
-import { ago, ask } from '../ui.js'
+import { ago, ask, tellRevoked } from '../ui.js'
 
 const router = useRouter()
 const s = ref(null)
@@ -51,8 +51,8 @@ async function saveSettings() {
   } catch (e) { log(e.message, 'error') }
 }
 async function unlink(i) {
-  if (!(await ask(`Disconnect ${i.provider} (${i.login})? Mason revokes its token.`, { allowDry: false }))) return
-  try { await del(`/me/identities/${i.id}`); await loadMe() } catch (e) { log(e.message, 'error') }
+  if (!(await ask(`Disconnect ${i.provider} (${i.login})? Mason deletes its token and revokes it where ${i.provider} lets it.`, { allowDry: false }))) return
+  try { const got = await del(`/me/identities/${i.id}`); await loadMe(); await tellRevoked(got) } catch (e) { log(e.message, 'error') }
 }
 async function makeKey() {
   try {
@@ -83,7 +83,12 @@ async function dropSecret(x) {
 async function deleteAccount() {
   const name = await ask('Delete your account? Type your user name to confirm. Your keys, sessions and secrets go too; your repos stay as they are.', { input: { placeholder: state.me.user.name }, allowDry: false })
   if (name !== state.me.user.name) return
-  try { await del('/me'); state.me = { user: null, providers: state.me.providers }; router.push('/login') } catch (e) { log(e.message, 'error') }
+  try {
+    const got = await del('/me')
+    state.me = { user: null, providers: state.me.providers }
+    await tellRevoked(got)
+    router.push('/login')
+  } catch (e) { log(e.message, 'error') }
 }
 onMounted(load)
 </script>
