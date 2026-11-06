@@ -1,6 +1,7 @@
 <script setup>
-// Which repos a list shows: GitHub, GitLab or both, and one group.
+// Which repos a list shows: GitHub, GitLab or both, and one group (of the defaults, or an org).
 import { scope } from '../scope.js'
+import GroupSelect from './GroupSelect.vue'
 defineProps({ groups: { type: Array, default: () => [] } })
 </script>
 
@@ -11,9 +12,6 @@ defineProps({ groups: { type: Array, default: () => [] } })
       <option value="github">github</option>
       <option value="gitlab">gitlab</option>
     </select>
-    <select v-if="groups.length" v-model="scope.group" aria-label="group">
-      <option value="">all groups</option>
-      <option v-for="g in groups" :key="g" :value="g">{{ g }}</option>
-    </select>
+    <GroupSelect :groups="groups" />
   </span>
 </template>

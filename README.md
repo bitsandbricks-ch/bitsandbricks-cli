@@ -20,7 +20,7 @@ The project was called Mortar before, and before that it was `bitsandbricks-ch/b
 
 ## Commands
 
-Repos are named as `owner/name`, as a bare `name` when only one repo has it, or by their group alias (the group's `prefix` dropped, so `plugin-budgets` is also `budgets`). `name#12` is a pull request. Without names a command runs on every repo of your orgs. `--org` and `--group` narrow it down, and `--dry-run` shows what would change.
+Repos are named as `owner/name`, as a bare `name` when only one repo has it, or by their group alias (the group's `prefix` dropped, so `plugin-budgets` is also `budgets`). `name#12` is a pull request. Without names a command runs on every repo of your orgs. `--org` and `--group` narrow it down (`--group` takes a group's name, or an org with a trailing slash: `--group acme/` is every repo of the GitHub org acme, `--group gitlab:grp/` every project under the GitLab group grp, matched by a group or not), and `--dry-run` shows what would change.
 
 | Command | What it does |
 |---|---|

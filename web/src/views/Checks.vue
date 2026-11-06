@@ -4,7 +4,8 @@ import { computed, onMounted, ref } from 'vue'
 import { get, log, post } from '../api.js'
 import { act } from '../load.js'
 import { useKeys } from '../keys.js'
-import { loadGroups, scope } from '../scope.js'
+import { loadGroups, ownerLabel, scope } from '../scope.js'
+import GroupSelect from '../components/GroupSelect.vue'
 import TextPane from '../components/TextPane.vue'
 
 const output = ref('')
@@ -18,7 +19,7 @@ onMounted(async () => {
   } catch { /* none */ }
 })
 const repos = computed(() => only.value.split(/[\s,]+/).filter(Boolean))
-const where = computed(() => (repos.value.length ? repos.value.join(', ') : scope.group ? `group ${scope.group}` : 'every repo'))
+const where = computed(() => (repos.value.length ? repos.value.join(', ') : scope.group.endsWith('/') ? ownerLabel(scope.group) : scope.group ? `group ${scope.group}` : 'every repo'))
 
 async function doctor() {
   running.value = 'doctor'
@@ -45,7 +46,7 @@ useKeys({ c: doctor, f: fix, s: sync })
 <template>
   <div class="view">
     <div class="toolbar">
-      <select v-model="scope.group" aria-label="group"><option value="">all groups</option><option v-for="g in scope.groups" :key="g" :value="g">{{ g }}</option></select>
+      <GroupSelect :groups="scope.groups" />
       <input v-model="only" placeholder="repos (empty: all), e.g. web api gitlab:grp/x" style="min-width: 28ch">
       <button class="primary" :disabled="!!running" @click="doctor"><span class="k">c</span> doctor</button>
       <button :disabled="!!running" @click="fix"><span class="k">f</span> fix drift</button>

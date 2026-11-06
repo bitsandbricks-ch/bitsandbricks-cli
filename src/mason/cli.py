@@ -45,7 +45,7 @@ ON_REPOS = ("status", "prs", "merge", "runs", "rerun", "releases", "packages", "
 def common_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--org", action="append", metavar="ORG", help="only this org or user (repeatable)")
-    common.add_argument("--group", help="only repos of this group")
+    common.add_argument("--group", help="only repos of this group, or of an org: acme/ (GitLab: gitlab:grp/)")
     common.add_argument("--dry-run", action="store_true", help="show what would change, change nothing")
     return common
 

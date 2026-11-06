@@ -9,7 +9,7 @@ import re
 import webbrowser
 
 from mason import core, plugins
-from mason.config import Config
+from mason.config import Config, orgs_of
 from mason.core import WEB, ago, api, api_pages, for_each, graphql, newest, say, short, table
 
 # ── the repo list ────────────────────────────────────────────────────────────
@@ -105,10 +105,12 @@ def pick_repos(cfg: Config, names: list[str], group: str | None = None) -> tuple
             if number:
                 pick.setdefault(repo, []).append(number)
     if group:
-        repos_all, repos = repos, [r for r in repos if (g := group_of(cfg, r)) and g.name == group]
+        known = listing(cfg)
+        repos_all, repos = repos, [r for r in repos if cfg.in_group(r, group, (known.get(r) or {}).get("topics"))]
         if not repos:
             groups = ", ".join(g.name for g in cfg.groups_for(repos_all)) or "none"
-            raise RuntimeError(f"No repos in group {group!r}. Groups: {groups}")
+            orgs = ", ".join(dict.fromkeys(o for r in repos_all for o in orgs_of(r))) or "none"
+            raise RuntimeError(f"No repos in group {group!r}. Groups: {groups}. Orgs: {orgs}")
     return repos, pick
 
 
