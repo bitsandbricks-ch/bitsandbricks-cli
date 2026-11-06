@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import secrets
+import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
 
 GITHUB_SCOPES = "repo read:org workflow security_events read:packages"
+# Mortar's own GitHub OAuth app. A client ID is public (it is in every authorize URL), so it is safe to
+# ship: with it anyone can sign in with GitHub's device flow, no client secret needed. GITHUB_CLIENT_ID
+# overrides it, and with GITHUB_CLIENT_SECRET the usual redirect sign-in works too.
+GITHUB_CLIENT_ID = "Ov23liFJgLtIjB3ZtuOy"
+DEFAULT_URL = "http://localhost:8080"
+LOCAL_SUFFIXES = (".localhost", ".local", ".lan", ".home.arpa")
 GITLAB_SCOPES = "api"
 
 
@@ -38,8 +46,23 @@ class Provider:
     scopes: str
 
     @property
-    def enabled(self) -> bool:
+    def redirect(self) -> bool:
+        """The redirect sign-in (authorization code + PKCE) needs the app's client ID and secret."""
         return bool(self.client_id and self.client_secret)
+
+    @property
+    def device(self) -> bool:
+        """GitHub's device flow needs only the client ID (the app must have device flow switched on)."""
+        return self.name == "github" and bool(self.client_id)
+
+    @property
+    def enabled(self) -> bool:
+        return self.redirect or self.device
+
+    @property
+    def method(self) -> str:
+        """How the web app signs in with this provider: redirect, device or '' (off)."""
+        return "redirect" if self.redirect else "device" if self.device else ""
 
     @property
     def host(self) -> str:
@@ -52,12 +75,10 @@ class Settings:
     data: Path
     database: str
     secret_key: str
-    dev: bool
     github: Provider
     gitlab: Provider
     allow_users: set = field(default_factory=set)
     allow_orgs: set = field(default_factory=set)
-    allow_anyone: bool = False
     admins: set = field(default_factory=set)
     idle_hours: int = 12
     session_days: int = 7
@@ -71,18 +92,36 @@ class Settings:
     def secure_cookies(self) -> bool:
         return self.url.startswith("https://")
 
+    @property
+    def open_sign_in(self) -> bool:
+        """No allow lists: anyone with a GitHub or GitLab account may sign in (and sees only their own)."""
+        return not (self.allow_users or self.allow_orgs)
+
     def problems(self) -> list[str]:
         """Settings that would make the operator unsafe; it refuses to start with any of them."""
         out = []
         if not (self.github.enabled or self.gitlab.enabled):
-            out.append("no login: set GITHUB_CLIENT_ID/GITHUB_CLIENT_SECRET and/or "
+            out.append("no login: set GITHUB_CLIENT_ID (and GITHUB_CLIENT_SECRET) and/or "
                        "GITLAB_CLIENT_ID/GITLAB_CLIENT_SECRET")
-        if not (self.allow_users or self.allow_orgs or self.allow_anyone or self.admins):
-            out.append("nobody may sign in: set MTR_ALLOW_USERS, MTR_ALLOW_ORGS or "
-                       "MTR_ADMINS (or MTR_ALLOW_ANYONE=1 on purpose)")
-        if not self.dev and not self.secure_cookies:
-            out.append("MTR_URL must be https:// (MTR_DEV=1 allows http for local development)")
+        parts = urllib.parse.urlsplit(self.url)
+        if parts.scheme not in ("http", "https") or not parts.hostname:
+            out.append(f"MTR_URL must be a full URL like https://mortar.example.org (got {self.url!r})")
+        elif parts.scheme == "http" and not local_host(parts.hostname):
+            out.append("MTR_URL must be https:// (plain http is only for localhost, private addresses and "
+                       ".local, .lan or .home.arpa names)")
         return out
+
+
+def local_host(host: str) -> bool:
+    """localhost, a loopback, private or link-local address, or a .local/.lan/.home.arpa name."""
+    host = host.lower().rstrip(".").strip("[]")
+    if host == "localhost" or host.endswith(LOCAL_SUFFIXES):
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return ip.is_loopback or ip.is_private or ip.is_link_local
 
 
 def secret_key(data: Path) -> str:
@@ -107,20 +146,18 @@ def load() -> Settings:
     gh_web = _env("GITHUB_URL", "https://github.com").rstrip("/")
     public = gh_web == "https://github.com"
     gh_api = _env("GITHUB_API_URL") or ("https://api.github.com" if public else f"{gh_web}/api/v3")
-    dev = _env("MTR_DEV") == "1"
+    gh_id = _env("GITHUB_CLIENT_ID") or (GITHUB_CLIENT_ID if public else "")
     return Settings(
-        url=_env("MTR_URL", "http://localhost:8080" if dev else "").rstrip("/"),
+        url=(_env("MTR_URL") or DEFAULT_URL).rstrip("/"),
         data=data,
         database=_env("DATABASE_URL") or f"sqlite:///{data / 'operator.db'}",
         secret_key=secret_key(data),
-        dev=dev,
-        github=Provider("github", _env("GITHUB_CLIENT_ID"), _env("GITHUB_CLIENT_SECRET"), gh_web, gh_api,
+        github=Provider("github", gh_id, _env("GITHUB_CLIENT_SECRET"), gh_web, gh_api,
                         _env("GITHUB_SCOPES", GITHUB_SCOPES)),
         gitlab=Provider("gitlab", _env("GITLAB_CLIENT_ID"), _env("GITLAB_CLIENT_SECRET"), gl_web,
                         f"{gl_web}/api/v4", _env("GITLAB_SCOPES", GITLAB_SCOPES)),
         allow_users=_who(_list("MTR_ALLOW_USERS")),
         allow_orgs=_who(_list("MTR_ALLOW_ORGS")),
-        allow_anyone=_env("MTR_ALLOW_ANYONE") == "1",
         admins=_who(_list("MTR_ADMINS")),
         idle_hours=int(_env("MTR_IDLE_HOURS", "12")),
         session_days=int(_env("MTR_SESSION_DAYS", "7")),

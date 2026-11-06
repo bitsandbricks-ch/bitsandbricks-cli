@@ -26,7 +26,7 @@ STATIC = Path(__file__).parent / "static"
 def create_app(op: S.Settings | None = None) -> Flask:
     op = op or S.load()
     problems = op.problems()
-    if problems and not op.dev:
+    if problems:
         raise SystemExit("Mortar won't start:\n  - " + "\n  - ".join(problems))
     app = Flask(__name__, static_folder=None)
     app.config.update(OP=op, VAULT=security.Vault(op.secret_key), MAX_CONTENT_LENGTH=1024 * 1024,
@@ -118,10 +118,13 @@ def main(argv: list[str] | None = None) -> None:
         print(f"url          {op.url or '(MTR_URL is not set)'}")
         print(f"data         {op.data}")
         print(f"database     {op.database.split('@')[-1]}")
-        print(f"github       {'on' if op.github.enabled else 'off'} ({op.github.web})")
-        print(f"gitlab       {'on' if op.gitlab.enabled else 'off'} ({op.gitlab.web})")
-        print(f"sign-in      users {sorted(op.allow_users) or '-'}, orgs {sorted(op.allow_orgs) or '-'}, "
-              f"anyone {op.allow_anyone}, admins {sorted(op.admins) or '-'}")
+        for p in (op.github, op.gitlab):
+            how = {"redirect": f"on, redirect to {op.url}/api/v1/auth/{p.name}/callback",
+                   "device": f"on, device flow (client {p.client_id})"}.get(p.method, "off")
+            print(f"{p.name:<13}{how} ({p.web})")
+        who = ("anyone with an account" if op.open_sign_in
+               else f"users {sorted(op.allow_users) or '-'}, orgs {sorted(op.allow_orgs) or '-'}")
+        print(f"sign-in      {who}; admins {sorted(op.admins) or '-'}")
         print(f"plugins      index {op.plugin_index}, install from the web {'on' if op.plugin_install else 'off'}")
         for problem in op.problems():
             print(f"PROBLEM      {problem}")

@@ -14,6 +14,7 @@ from mortar.server.models import (
     ApiKey,
     Audit,
     DeviceGrant,
+    DeviceSignIn,
     Identity,
     OAuthState,
     Secret,
@@ -25,6 +26,7 @@ from mortar.server.models import (
 
 bp = Blueprint("account", __name__, url_prefix="/api/v1")
 STATE_COOKIE = "mtr_oauth"
+DEVICE_COOKIE = "mtr_device"
 DEVICE_MINUTES = 10
 
 
@@ -57,10 +59,17 @@ def iso(dt) -> str | None:
 # ── OAuth ────────────────────────────────────────────────────────────────────
 
 
+def sign_in_methods() -> dict[str, str]:
+    """{provider: redirect | device} of the sign-ins that are set up."""
+    op = current_app.config["OP"]
+    return {p.name: p.method for p in (op.github, op.gitlab) if p.enabled}
+
+
 @bp.get("/auth/providers")
 def providers():
     op = current_app.config["OP"]
-    return jsonify([{"name": p.name, "web": p.web, "enabled": p.enabled} for p in (op.github, op.gitlab)])
+    return jsonify([{"name": p.name, "web": p.web, "enabled": p.enabled, "method": p.method}
+                    for p in (op.github, op.gitlab)])
 
 
 def safe_next(value: str | None) -> str:
@@ -70,7 +79,7 @@ def safe_next(value: str | None) -> str:
 
 @bp.get("/auth/<name>/login")
 def login(name: str):
-    if oauth.provider(name) is None:
+    if oauth.redirect_provider(name) is None:
         abort(404, f"{name} sign-in isn't set up on this operator")
     ip = auth.client_ip()
     if auth.throttled(f"login:{ip}", 30):
@@ -105,7 +114,7 @@ def _q(text: str) -> str:
 
 @bp.get("/auth/<name>/callback")
 def callback(name: str):
-    if oauth.provider(name) is None:
+    if oauth.redirect_provider(name) is None:
         abort(404)
     if request.args.get("error"):
         return _fail(request.args.get("error_description") or request.args["error"])
@@ -130,6 +139,12 @@ def callback(name: str):
         return _fail(str(err))
     resp = make_response(redirect(row.return_to or "/"))
     resp.delete_cookie(STATE_COOKIE, path="/api/v1/auth/")
+    _signed_in(resp, name, user, link_user)
+    return resp
+
+
+def _signed_in(resp, name: str, user: User, link_user: User | None) -> None:
+    """A new session for a sign-in (the old one goes); nothing new when a login was linked."""
     if link_user is None:
         if g.get("session") is not None:  # signing in again: the old session goes
             db.delete(g.session)
@@ -138,6 +153,96 @@ def callback(name: str):
     g.user, g.via = user, "web"
     oauth.forget_transports(user.id)
     audit(f"{'link' if link_user else 'login'}.{name}", user.identity(name).login if user.identity(name) else "")
+
+
+# ── GitHub's device flow: show the code, the user enters it at github.com/login/device ──
+
+
+def _device_provider(name: str):
+    p = oauth.provider(name)
+    if p is None or not p.device:
+        abort(404, f"{name} device sign-in isn't set up on this operator")
+    origin = request.headers.get("Origin")  # signed-out callers skip the CSRF check: same origin only
+    if origin and origin.rstrip("/") != current_app.config["OP"].url:
+        abort(403, "cross-site request refused")
+    return p
+
+
+@bp.post("/auth/<name>/device")
+def device_sign_in(name: str):
+    _device_provider(name)
+    ip = auth.client_ip()
+    if auth.throttled(f"login:{ip}", 30):
+        abort(429, "too many sign-ins from this address; wait a few minutes")
+    auth.record_failure(f"login:{ip}")  # counts attempts, like the redirect sign-in
+    data = body()
+    link = g.user.id if data.get("link") and g.get("user") and g.get("session") else None
+    try:
+        got = oauth.device_start(name)
+    except RuntimeError as err:
+        abort(502, str(err))
+    db.query(DeviceSignIn).filter(DeviceSignIn.expires_at < utcnow()).delete()
+    raw = security.random_token()
+    minutes = max(1, min(int(got.get("expires_in") or 900) // 60, 30))
+    row = DeviceSignIn(cookie_hash=security.sha256(raw), provider=name,
+                       device_enc=current_app.config["VAULT"].encrypt(got["device_code"]),
+                       user_code=str(got.get("user_code") or "")[:20],
+                       verification_uri=str(got.get("verification_uri") or "")[:300], link_user_id=link,
+                       return_to=safe_next(data.get("next")), interval=int(got.get("interval") or 5),
+                       expires_at=utcnow() + timedelta(minutes=minutes))
+    db.add(row)
+    db.commit()
+    resp = make_response(jsonify({"user_code": row.user_code, "verification_uri": row.verification_uri,
+                                  "expires_in": minutes * 60, "interval": row.interval}))
+    op = current_app.config["OP"]
+    resp.set_cookie(DEVICE_COOKIE, raw, httponly=True, secure=op.secure_cookies, samesite="Strict",
+                    max_age=minutes * 60, path="/api/v1/auth/")
+    return resp
+
+
+def _device_end(row: DeviceSignIn | None, payload: dict, status: int = 200):
+    if row is not None:
+        db.delete(row)
+        db.commit()
+    resp = make_response(jsonify(payload), status)
+    resp.delete_cookie(DEVICE_COOKIE, path="/api/v1/auth/")
+    return resp
+
+
+@bp.post("/auth/<name>/device/poll")
+def device_sign_in_poll(name: str):
+    _device_provider(name)
+    raw = request.cookies.get(DEVICE_COOKIE, "")
+    row = db.get(DeviceSignIn, security.sha256(raw)) if raw else None
+    now = utcnow()
+    if row is None or row.provider != name or row.expires_at < now:
+        return _device_end(row, {"status": "expired", "error": "the sign-in expired or was started in another "
+                                 "browser; start again"}, 410)
+    if row.last_poll is not None and (now - row.last_poll).total_seconds() < row.interval - 1:
+        return jsonify({"status": "pending", "interval": row.interval})  # GitHub would say slow_down
+    row.last_poll = now
+    db.commit()
+    try:
+        got = oauth.device_poll(name, current_app.config["VAULT"].decrypt(row.device_enc))
+    except oauth.DeviceFlowError as err:
+        return _device_end(row, {"status": "failed", "error": str(err)}, 400)
+    except RuntimeError as err:
+        abort(502, str(err))
+    if got is None or "access_token" not in got:
+        if got:
+            row.interval = max(row.interval, int(got["interval"]))
+            db.commit()
+        return jsonify({"status": "pending", "interval": row.interval})
+    link_user = db.get(User, row.link_user_id) if row.link_user_id else None
+    try:
+        user = oauth.sign_in(name, got, link_user)
+    except PermissionError as err:
+        audit_anon(f"login.{name}", str(err), ok=False)
+        return _device_end(row, {"status": "failed", "error": str(err)}, 403)
+    except RuntimeError as err:
+        return _device_end(row, {"status": "failed", "error": str(err)}, 502)
+    resp = _device_end(row, {"status": "done", "next": row.return_to or "/"})
+    _signed_in(resp, name, user, link_user)
     return resp
 
 
@@ -163,15 +268,14 @@ def logout():
 
 @bp.get("/me")
 def me():
-    op = current_app.config["OP"]
     if g.get("user") is None:
-        return jsonify({"user": None, "providers": [p.name for p in (op.github, op.gitlab) if p.enabled]})
+        return jsonify({"user": None, "providers": list(sign_in_methods()), "sign_in": sign_in_methods()})
     u = g.user
     return jsonify({
         "user": {"id": u.id, "name": u.name, "avatar_url": u.avatar_url, "is_admin": u.is_admin},
         "identities": [{"id": i.id, "provider": i.provider, "host": i.host, "login": i.login, "scopes": i.scopes,
                         "expires_at": iso(i.expires_at)} for i in u.identities],
-        "providers": [p.name for p in (op.github, op.gitlab) if p.enabled],
+        "providers": list(sign_in_methods()), "sign_in": sign_in_methods(),
         "via": g.via, "scope": g.scope,
         "csrf": g.session.csrf if g.get("session") is not None else None,
         "settings": user_settings(u),

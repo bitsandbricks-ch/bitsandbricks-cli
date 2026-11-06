@@ -27,9 +27,9 @@ def op(env, monkeypatch, tmp_path):
 
     settings = S.Settings(
         url="http://localhost:8080", data=tmp_path, database=f"sqlite:///{tmp_path / 'op.db'}", secret_key="k" * 40,
-        dev=True, github=S.Provider("github", "id", "secret", "https://github.com", "https://api.github.com", "repo"),
+        github=S.Provider("github", "id", "secret", "https://github.com", "https://api.github.com", "repo"),
         gitlab=S.Provider("gitlab", "", "", "https://gitlab.com", "https://gitlab.com/api/v4", "api"),
-        allow_users={("github", "mike")}, plugin_index=str(tmp_path / "index.json"))
+        allow_users={("github", "mike")}, admins={("github", "mike")}, plugin_index=str(tmp_path / "index.json"))
     app = create_app(settings)
     vault = app.config["VAULT"]
     # every GitHub call goes to the fake gh, with the user's token in GH_TOKEN
@@ -238,3 +238,173 @@ def test_stats(op):
     _, c = op
     m = c.get("/api/v1/metrics?days=30").json
     assert m["days"] == 30 and "merged_by_week" in m["totals"] and m["repos"]
+
+
+# ── sign-in: settings, open sign-in, GitHub's device flow, admins ────────────
+
+
+def test_settings_defaults(monkeypatch, tmp_path):
+    from mortar.server import settings as S
+    for k in ("MTR_URL", "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "GITHUB_URL", "GITLAB_CLIENT_ID",
+              "GITLAB_CLIENT_SECRET", "MTR_ALLOW_USERS", "MTR_ALLOW_ORGS", "MTR_ADMINS"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("MTR_DATA", str(tmp_path))
+    op = S.load()
+    assert op.url == "http://localhost:8080" and op.problems() == []  # no MTR_DEV, no allow lists needed
+    assert op.github.client_id == S.GITHUB_CLIENT_ID == "Ov23liFJgLtIjB3ZtuOy"
+    assert op.github.method == "device" and not op.gitlab.enabled and op.open_sign_in
+    monkeypatch.setenv("GITHUB_CLIENT_ID", "mine")
+    monkeypatch.setenv("GITHUB_CLIENT_SECRET", "s")
+    monkeypatch.setenv("GITLAB_CLIENT_ID", "gl")
+    monkeypatch.setenv("GITLAB_CLIENT_SECRET", "gs")
+    monkeypatch.setenv("MTR_ALLOW_ORGS", "acme")
+    op = S.load()
+    assert (op.github.client_id, op.github.method, op.gitlab.method) == ("mine", "redirect", "redirect")
+    assert not op.open_sign_in
+    monkeypatch.delenv("GITHUB_CLIENT_ID")
+    monkeypatch.setenv("GITHUB_URL", "https://ghe.example.org")  # the public app means nothing there
+    assert S.load().github.client_id == ""
+    for url in ("http://localhost:8080", "http://127.0.0.1", "http://192.168.1.5:8080", "http://10.0.0.2",
+                "http://[::1]:8080", "http://nas.local", "http://mortar.lan", "http://box.home.arpa",
+                "https://mortar.example.org"):
+        op.url = url
+        assert op.problems() == [], url
+    for url in ("http://mortar.example.org", "http://8.8.8.8", "http://local.example.org", "mortar.example.org"):
+        op.url = url
+        assert op.problems(), url
+
+
+class FakeGitHub:
+    """GitHub's device flow and /user, answering in order."""
+
+    def __init__(self, login="ann", uid="77"):
+        self.answers = []
+        self.calls = []
+        self.login, self.uid = login, uid
+
+    def __call__(self, method, url, data=None, token=None, headers=None):
+        self.calls.append((method, url, dict(data or {})))
+        if url.endswith("/login/device/code"):
+            return 200, {"device_code": "dev-123", "user_code": "ABCD-1234", "interval": 5, "expires_in": 900,
+                         "verification_uri": "https://github.com/login/device"}
+        if url.endswith("/login/oauth/access_token"):
+            return self.answers.pop(0)
+        if url.endswith("/user"):
+            return 200, {"id": int(self.uid), "login": self.login, "name": self.login.title(), "avatar_url": ""}
+        return 404, {}
+
+
+def _poll(app, client):
+    from mortar.server.models import DeviceSignIn, db
+    with app.app_context():  # pretend the interval has passed
+        db.query(DeviceSignIn).update({"last_poll": None})
+        db.commit()
+    return client.post("/api/v1/auth/github/device/poll", json={})
+
+
+def test_device_sign_in_is_open_to_anyone(op, monkeypatch):
+    app, mike = op
+    from mortar.server import oauth
+    app.config["OP"].allow_users = set()  # no allow lists: anyone may sign in
+    fake = FakeGitHub()
+    monkeypatch.setattr(oauth, "_http", fake)
+    ann = app.test_client()
+    assert ann.get("/api/v1/me").json["sign_in"] == {"github": "redirect"}
+    assert ann.post("/api/v1/auth/github/device", json={}, headers={"Origin": "https://evil.example"}).status_code \
+        == 403
+    assert ann.post("/api/v1/auth/github/device/poll", json={}).json["status"] == "expired"  # nothing started
+    r = ann.post("/api/v1/auth/github/device", json={"next": "/prs"})
+    assert r.json["user_code"] == "ABCD-1234" and r.json["verification_uri"] == "https://github.com/login/device"
+    assert "mtr_device=" in r.headers["Set-Cookie"] and "HttpOnly" in r.headers["Set-Cookie"]
+    assert fake.calls[0][2] == {"client_id": "id", "scope": "repo"}
+    assert "dev-123" not in r.get_data(as_text=True)  # GitHub's device code stays on the server
+    fake.answers = [(200, {"error": "authorization_pending"}), (200, {"error": "slow_down", "interval": 10}),
+                    (200, {"access_token": "ann-token", "scope": "repo"})]
+    assert _poll(app, ann).json == {"status": "pending", "interval": 5}
+    assert ann.post("/api/v1/auth/github/device/poll", json={}).json["status"] == "pending"  # too soon: no call
+    assert len([c for c in fake.calls if c[1].endswith("access_token")]) == 1
+    assert _poll(app, ann).json == {"status": "pending", "interval": 10}
+    got = _poll(app, ann)
+    assert got.json == {"status": "done", "next": "/prs"}
+    assert any("mtr_session=" in h for h in got.headers.getlist("Set-Cookie"))
+    assert fake.calls[-2][2]["grant_type"] == oauth.DEVICE_GRANT and "client_secret" not in fake.calls[-2][2]
+    me = ann.get("/api/v1/me").json
+    assert me["user"]["name"] == "Ann" and not me["user"]["is_admin"] and me["identities"][0]["login"] == "ann"
+    # each user sees only their own keys, sessions and audit log
+    mike.post("/api/v1/keys", json={"name": "mike-key"}, headers=H)
+    assert ann.get("/api/v1/keys").json == []
+    assert len(ann.get("/api/v1/sessions").json) == 1
+    assert {a["action"] for a in ann.get("/api/v1/audit").json} == {"login.github"}
+    assert ann.get("/api/v1/admin/users").status_code == 403  # only admins
+    assert _poll(app, ann).status_code == 403  # signed in now: writes need the CSRF token
+    r = ann.post("/api/v1/auth/github/device/poll", json={}, headers={"X-CSRF-Token": me["csrf"]})
+    assert r.json["status"] == "expired"  # the cookie was for one sign-in
+
+
+def test_device_sign_in_respects_allow_lists_and_admins(op, monkeypatch):
+    app, mike = op
+    from mortar.server import oauth
+    fake = FakeGitHub(login="eve", uid="66")
+    monkeypatch.setattr(oauth, "_http", fake)
+    eve = app.test_client()  # MTR_ALLOW_USERS=github:mike
+    eve.post("/api/v1/auth/github/device", json={})
+    fake.answers = [(200, {"access_token": "eve-token"})]
+    r = _poll(app, eve)
+    assert r.status_code == 403 and "may not use this operator" in r.json["error"]
+    assert eve.get("/api/v1/me").json["user"] is None
+    eve.post("/api/v1/auth/github/device", json={})
+    fake.answers = [(200, {"error": "access_denied"})]
+    assert _poll(app, eve).json == {"status": "failed", "error": "you cancelled the sign-in at GitHub"}
+    # admins come only from MTR_ADMINS, also for an existing session
+    assert mike.get("/api/v1/me").json["user"]["is_admin"]
+    app.config["OP"].admins = set()
+    assert not mike.get("/api/v1/me").json["user"]["is_admin"]
+    assert mike.get("/api/v1/admin/users").status_code == 403
+
+
+def test_device_only_github(op, monkeypatch):
+    app, _ = op
+    gh = app.config["OP"].github
+    gh.client_secret = ""  # only the public client ID: device flow, no redirect sign-in
+    anon = app.test_client()
+    assert anon.get("/api/v1/me").json["sign_in"] == {"github": "device"}
+    assert anon.get("/api/v1/auth/github/login").status_code == 404
+    assert anon.get("/api/v1/auth/github/callback?state=x&code=y").status_code == 404
+    from mortar.server import oauth
+    monkeypatch.setattr(oauth, "_http", lambda *a, **k: (400, {"error": "device_flow_disabled"}))
+    r = anon.post("/api/v1/auth/github/device", json={})
+    assert r.status_code == 502 and "device flow switched on" in r.json["error"]
+    assert anon.post("/api/v1/auth/gitlab/device", json={}).status_code == 404
+
+
+def test_redirect_sign_in_github_and_gitlab(op, monkeypatch):
+    app, _ = op
+    from urllib.parse import parse_qs, urlsplit
+
+    from mortar.server import oauth
+    op_ = app.config["OP"]
+    op_.gitlab.client_id, op_.gitlab.client_secret = "gl-id", "gl-secret"
+    op_.allow_users = set()
+    anon = app.test_client()
+    assert anon.get("/api/v1/me").json["sign_in"] == {"github": "redirect", "gitlab": "redirect"}
+    for name, host in (("github", "https://github.com/login/oauth/authorize"),
+                       ("gitlab", "https://gitlab.com/oauth/authorize")):
+        r = anon.get(f"/api/v1/auth/{name}/login?next=/runs")
+        loc = r.headers["Location"]
+        q = parse_qs(urlsplit(loc).query)
+        assert loc.startswith(host) and q["redirect_uri"] == [f"http://localhost:8080/api/v1/auth/{name}/callback"]
+    state = q["state"][0]
+
+    def fake(method, url, data=None, token=None, headers=None):
+        if url == "https://gitlab.com/oauth/token":
+            assert data["client_secret"] == "gl-secret" and data["grant_type"] == "authorization_code"
+            return 200, {"access_token": "gl-token", "refresh_token": "r", "expires_in": 7200}
+        if url == "https://gitlab.com/api/v4/user":
+            return 200, {"id": 9, "username": "gil", "name": "Gil"}
+        return 404, {}
+    monkeypatch.setattr(oauth, "_http", fake)
+    r = anon.get(f"/api/v1/auth/gitlab/callback?state={state}&code=abc")
+    assert r.status_code == 302 and r.headers["Location"] == "/runs"
+    me = anon.get("/api/v1/me").json
+    assert me["identities"][0]["provider"] == "gitlab" and me["identities"][0]["login"] == "gil"
+    assert not me["user"]["is_admin"]

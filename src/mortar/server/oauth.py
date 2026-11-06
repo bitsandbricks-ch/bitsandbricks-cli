@@ -1,5 +1,6 @@
-"""Sign in with GitHub or GitLab (OAuth 2 authorization code with PKCE and state), and each user's
-own transports to GitHub and GitLab built from the stored, encrypted tokens.
+"""Sign in with GitHub or GitLab (OAuth 2 authorization code with PKCE and state, or GitHub's device
+flow, which needs only the public client ID), and each user's own transports to GitHub and GitLab built
+from the stored, encrypted tokens.
 
 The operator never has a token of its own: everything it does at GitHub or GitLab it does with the
 token of the user who asked, so nobody sees or changes more through the operator than they could
@@ -23,6 +24,7 @@ from mortar.server.models import Identity, User, db, utcnow
 from mortar.transport import HttpTransport
 
 STATE_MINUTES = 10
+DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code"
 
 
 def _http(method: str, url: str, data: dict | None = None, token: str | None = None,
@@ -56,6 +58,12 @@ def provider(name: str):
     return p
 
 
+def redirect_provider(name: str):
+    """The provider when its redirect sign-in is set up (client ID and secret), else None."""
+    p = provider(name)
+    return p if p is not None and p.redirect else None
+
+
 def redirect_uri(name: str) -> str:
     return f"{current_app.config['OP'].url}/api/v1/auth/{name}/callback"
 
@@ -85,6 +93,48 @@ def exchange(name: str, code: str, verifier: str) -> dict:
     return got
 
 
+# ── GitHub's device flow: the user types a code at github.com/login/device ───
+
+
+class DeviceFlowError(RuntimeError):
+    """GitHub ended the device flow: `code` is expired_token, access_denied or another OAuth error."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+def device_start(name: str = "github") -> dict:
+    """GitHub's answer: device_code, user_code, verification_uri, expires_in, interval."""
+    p = provider(name)
+    status, got = _http("POST", f"{p.web}/login/device/code", {"client_id": p.client_id, "scope": p.scopes})
+    if status != 200 or not got.get("device_code"):
+        err = got.get("error") or str(status)
+        if err == "device_flow_disabled":
+            raise RuntimeError("GitHub sign-in needs device flow switched on in the OAuth app's settings")
+        raise RuntimeError(f"{name} didn't start the sign-in: {got.get('error_description') or err}")
+    return got
+
+
+def device_poll(name: str, device_code: str) -> dict | None:
+    """The token answer once the user entered the code, None while GitHub still waits for them.
+    {"interval": n} back means slow down. DeviceFlowError when the code expired or was denied."""
+    p = provider(name)
+    status, got = _http("POST", f"{p.web}/login/oauth/access_token",
+                        {"client_id": p.client_id, "device_code": device_code, "grant_type": DEVICE_GRANT})
+    if got.get("access_token"):
+        return got
+    err = got.get("error") or str(status)
+    if err == "authorization_pending":
+        return None
+    if err == "slow_down":
+        return {"interval": int(got.get("interval") or 10)}
+    messages = {"expired_token": "the code expired; start again",
+                "access_denied": "you cancelled the sign-in at GitHub"}
+    raise DeviceFlowError(err, messages.get(err) or f"{name} refused the login: "
+                          f"{got.get('error_description') or err}")
+
+
 def profile(name: str, token: str) -> dict:
     """{uid, login, name, avatar_url} of the token's user."""
     p = provider(name)
@@ -105,15 +155,21 @@ def member_of(name: str, token: str, uid: str, org: str) -> bool:
 
 
 def allowed(name: str, login: str, token: str, uid: str) -> bool:
+    """With no MTR_ALLOW_USERS or MTR_ALLOW_ORGS anyone may sign in; with them, only those (and admins)."""
     op = current_app.config["OP"]
     who = {(name, login.lower()), ("*", login.lower())}
-    if op.allow_anyone or who & op.allow_users or who & op.admins:
+    if op.open_sign_in or who & op.allow_users or who & op.admins:
         return True
     return any(prov in (name, "*") and member_of(name, token, uid, org) for prov, org in op.allow_orgs)
 
 
 def is_admin(name: str, login: str) -> bool:
     return bool({(name, login.lower()), ("*", login.lower())} & current_app.config["OP"].admins)
+
+
+def admin_of(user: User) -> bool:
+    """Admins come only from MTR_ADMINS: a user is one while one of their logins is listed there."""
+    return any(is_admin(i.provider, i.login) for i in user.identities)
 
 
 def sign_in(name: str, got: dict, link_user: User | None) -> User:
@@ -146,8 +202,9 @@ def sign_in(name: str, got: dict, link_user: User | None) -> User:
         ident.refresh_enc = vault.encrypt(got["refresh_token"])
     ident.expires_at = utcnow() + timedelta(seconds=int(got["expires_in"])) if got.get("expires_in") else None
     ident.scopes = str(got.get("scope") or p.scopes)[:500]
-    if is_admin(name, me["login"]):
-        user.is_admin = True
+    db.flush()
+    db.refresh(user, ["identities"])
+    user.is_admin = admin_of(user)
     if not user.avatar_url:
         user.avatar_url = me["avatar_url"]
     db.commit()
@@ -159,8 +216,10 @@ def access_token(ident: Identity) -> str:
     vault = current_app.config["VAULT"]
     if ident.expires_at and ident.expires_at - utcnow() < timedelta(minutes=2) and ident.refresh_enc:
         p = provider(ident.provider)
-        data = {"client_id": p.client_id, "client_secret": p.client_secret, "grant_type": "refresh_token",
+        data = {"client_id": p.client_id, "grant_type": "refresh_token",
                 "refresh_token": vault.decrypt(ident.refresh_enc)}
+        if p.client_secret:
+            data["client_secret"] = p.client_secret
         url = f"{p.web}/login/oauth/access_token" if ident.provider == "github" else f"{p.web}/oauth/token"
         if ident.provider == "gitlab":
             data["redirect_uri"] = redirect_uri("gitlab")
@@ -180,7 +239,7 @@ def revoke(ident: Identity) -> None:
     """Best effort: tell GitHub/GitLab the operator no longer needs the token."""
     p = provider(ident.provider)
     token = current_app.config["VAULT"].decrypt(ident.access_enc)
-    if not p or not token:
+    if not p or not token or not p.client_secret:  # revoking needs the app's secret
         return
     try:
         if ident.provider == "gitlab":
