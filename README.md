@@ -6,13 +6,17 @@ The defaults live in a repository you choose. Point `mtr` at any repo (or local 
 
 ## Install
 
+Mortar isn't on PyPI yet, so install it from GitHub with pipx. The `tui` extra adds `mtr tui`, `server` adds `mtr serve` (the web app), and `market` adds signature checks for `mtr market`:
+
 ```sh
-pipx install "mortar-cli[tui] @ git+https://github.com/bitsandbricks-ch/mortar-cli"
-gh auth login          # mtr talks to GitHub through the gh CLI and never sees a token
+pipx install "mortar-cli[tui,server] @ git+https://github.com/bitsandbricks-ch/mortar-cli"
+gh auth login          # on its own, mtr talks to GitHub through the gh CLI and never sees a token
 mtr init your-org/your-defaults
 ```
 
-To update a git install to a new version: `pipx install --force "git+https://..."`.
+To update: `pipx install --force "mortar-cli[tui,server] @ git+https://github.com/bitsandbricks-ch/mortar-cli"`. A pipx install doesn't include the web UI's built files; run the web app from the Docker image or a clone (see [Mortar (web app)](#mortar-web-app)).
+
+The repository used to be `bitsandbricks-ch/bitsandbricks-cli` with a `bnb` command. Only the names `mtr`, `MTR_*`, `mortar.toml` and `~/.config/mortar` work now.
 
 ## Commands
 
@@ -25,35 +29,35 @@ Repos are named as `owner/name`, as a bare `name` when only one repo has it, or 
 | `mtr repos` | The repos mtr sees, with their group. |
 | `mtr status` | One line per repo: group, latest release, PRs ready/draft, CI. One GraphQL query per 20 repos. |
 | `mtr prs` | Open PRs with checks, reviews, conflicts and auto-merge. |
-| `mtr pr web#12 [--diff]` | One PR in detail: merge state, failing checks with links, files, description. |
-| `mtr merge [names] [--now] [--ready]` | Auto-merge open PRs (or merge now). Drafts and conflicts stay open. |
-| `mtr runs [--failed]` | Latest workflow runs. |
+| `mtr pr web#12 [--diff] [--body]` | One PR in detail: merge state, failing checks with links, files, description (`--body`: all of it). Takes a PR URL too. |
+| `mtr merge [names] [--now] [--ready] [--method squash\|merge\|rebase]` | Auto-merge open PRs (or merge now; squash by default). Drafts and conflicts stay open; `--ready` marks named drafts ready first. |
+| `mtr runs [--failed] [--limit 3]` | Latest workflow runs per repo. |
 | `mtr rerun name [--run ID] [--yes]` | Re-runs the failed jobs of the repo's newest failed run (or of run ID), after listing its jobs and the step that failed. Jobs that passed and approvals already given stay. |
 | `mtr releases [--problems]` | Each repo's latest release, its assets, and its release runs. Flags assets the group's `release_assets` wants but the release lacks, and a failed last release run with the job and step that failed. |
 | `mtr packages [--problems]` | Container images on GHCR of your orgs: newest tags, whether the repo's latest release has an image with its tag, and a failed last image build (a run named or filed like image, docker or container) with the job and step that failed. |
 | `mtr bump name [patch\|minor\|major\|1.4.0] [--auto-merge]` | Opens a PR on `bump/v<new>` that sets the version in the group's `version` file (plugin.yaml, pyproject.toml, package.json, VERSION, ...) and adds the section to each `changelog`: Keep a Changelog `[Unreleased]` entries become `## [1.4.0] - date`, otherwise a `## 1.4.0` section lists the PRs merged since the last release. Default: patch. |
-| `mtr release [names] [--yes]` | Pushes the tag `v<version>` on the default branch of each named repo whose version is newer than its latest release (and whose first changelog has the section), after asking. The repo's own workflow builds and publishes. When the tag is there already it shows its release run. No names: a table of version against latest release. |
+| `mtr release [names] [--yes] [--list]` | Pushes the tag `v<version>` on the default branch of each named repo whose version is newer than its latest release (and whose first changelog has the section), after asking. The repo's own workflow builds and publishes. When the tag is there already it shows its release run. No names (or `--list`): a table of version against latest release. |
 | `mtr approve [--yes]` | Runs waiting for you: environments you review, and outside contributors' runs. A run that waits for someone else says why you can't approve it, for example "Prevent self-review" when you started it and are its only reviewer. |
 | `mtr security` | Open Dependabot, secret scanning and code scanning alerts. |
 | `mtr doctor [names] [--fix]` | Settings, security, release immutability, rulesets and files against the defaults. `--fix` applies them. |
 | `mtr sync [names] [--only PATH]` | Opens a PR per repo whose shared files differ. |
-| `mtr issues [names] [--mine] [--label L] [--assignee X] [--stale DAYS] [--state closed\|all]` | Issues across repos, newest activity first; PRs are left out. |
-| `mtr issue new name "title" [--body TEXT] [--label L] [--assignee X]` | Opens an issue. `mtr issue view\|close\|reopen\|comment name#12` shows, closes (`--not-planned`), reopens or comments on one. |
+| `mtr issues [names] [--mine] [--label L] [--assignee X] [--stale DAYS] [--state open\|closed\|all] [--limit 20]` | Issues across repos, newest activity first; PRs are left out. `--assignee none` shows unassigned ones, `*` any assigned; `--label` repeats. |
+| `mtr issue new name "title" [--body TEXT] [--label L] [--assignee X]` | Opens an issue (`--body -` reads it from stdin). `mtr issue view\|close\|reopen name#12` shows, closes (`--not-planned`) or reopens one, `mtr issue comment name#12 "text"` comments. An issue URL works too. |
 | `mtr workflows [names] [--fix]` | Risky GitHub Actions workflows: actions not pinned to a commit, `write-all` or missing `permissions`, `pull_request_target` that checks out the PR, script injection from `${{ github.event... }}`. `--fix` opens a PR per repo that pins the actions to commit SHAs. |
-| `mtr new owner/name [--group G] [--public]` | Creates a repo the way its group wants it: from the reference repo when that is a GitHub template, the group's files committed, then its settings, security and rulesets applied. Private unless `--public`. |
-| `mtr open web#12` | Prints the link, and opens it (or copies it over SSH; `MTR_OPEN=browser\|copy\|print`). |
+| `mtr new owner/name [--group G] [--public] [--description TEXT]` | Creates a repo the way its group wants it: from the reference repo when that is a GitHub template, the group's files committed, then its settings, security and rulesets applied. Private unless `--public`. |
+| `mtr open web#12 [--actions] [--releases]` | Prints the link, and opens it (or copies it over SSH; `MTR_OPEN=browser\|copy\|print`). `--actions` and `--releases` link those pages of a repo. |
 | `mtr stats [--days 30]` | Pull requests merged and opened, median time to merge, open and stale PRs, workflow runs with success rate and duration, releases. |
 | `mtr plugins` | Installed plugins. |
-| `mtr market [install NAME]` | Plugins in the signed plugin index; `install` adds one (only from a verified index). `keygen`, `sign` and `verify` are for whoever publishes an index. |
-| `mtr serve [--check]` | Run Mortar, the web app (`pipx inject mortar-cli 'mortar-cli[server]'`); `--check` shows what its settings allow. See [docs/mortar.md](docs/mortar.md). |
-| `mtr login https://mortar` | Go through [Mortar](docs/mortar.md), the web app, with an API key: approve a code in the browser, and every command and the TUI then work without gh or a GitHub token here. `mtr logout` forgets the key, `mtr whoami` says how mtr reaches GitHub. |
+| `mtr market [install NAME] [--index URL]` | Plugins in the signed plugin index; `install` adds one (only from a verified index). `keygen`, `sign` and `verify` are for whoever publishes an index. |
+| `mtr serve [--host 127.0.0.1] [--port 8080]` | Runs Mortar, the web app, on Flask's development server (needs the `server` extra). `mtr serve --check` shows what its settings allow and what is missing. See [docs/mortar.md](docs/mortar.md). |
+| `mtr login https://mortar [--read] [--key KEY]` | Go through [Mortar](docs/mortar.md), the web app, with an API key: mtr shows a code, you approve it in the browser, and every command and the TUI then work without gh or a GitHub token here. `--read` asks for a read-only key, `--key` uses one you made in Settings › API keys. `mtr logout` forgets the key, `mtr whoami` says how mtr reaches GitHub and as whom. |
 | `mtr tui` | Everything above, full screen. |
 
 Security alerts need the `security_events` scope and packages the `read:packages` scope: `gh auth refresh -s security_events,read:packages`.
 
 ## TUI
 
-`mtr tui` has tabs for Repos, Pull requests, Runs, Releases, Packages, Security, Checks (doctor plus plugin checks) and Settings (defaults repo, orgs, groups, plugins, theme, config file), plus any tabs that plugins add.
+`mtr tui` has tabs for Repos, Pull requests, Runs, Releases, Packages, Security, Checks (doctor plus plugin checks) and Settings (defaults repo, orgs, groups, plugins, theme, config file), plus any tabs that plugins add. Issues and workflow hardening are commands and web app tabs, not TUI tabs yet.
 
 - **Keys per row:** the footer and the top of the right side list only the keys that do something for the selected row (approve only on a run that waits, re-run only on a failed one, ready only on a draft).
 - **Pull requests:** **u** updates the branch from its base, **c** comments, **C** closes without merging, besides merge, ready and diff.
@@ -75,9 +79,21 @@ Your own config is `~/.config/mortar/config.toml` (`mtr init` writes it):
 defaults = "your-org/your-defaults"   # a GitHub repo, or a local folder
 ref = "main"                          # optional branch or tag
 orgs = ["another-org"]                # added to the orgs the defaults name
+repos = ["someone/their-repo"]        # added to the defaults' repos
+exclude = ["another-org/archive-*"]   # added to the defaults' exclude
 ```
 
-`MTR_DEFAULTS`, `MTR_DEFAULTS_REF` and `MTR_ORGS` (comma separated) override it for one run.
+It lives in `$XDG_CONFIG_HOME/mortar` when that is set, and `MTR_CONFIG` points mtr at another file. `MTR_DEFAULTS`, `MTR_DEFAULTS_REF` and `MTR_ORGS` (comma separated, replacing the orgs) override it for one run.
+
+| Variable | What it does |
+|---|---|
+| `MTR_CONFIG` | Your config file, instead of `~/.config/mortar/config.toml`. |
+| `MTR_DEFAULTS`, `MTR_DEFAULTS_REF` | The defaults repo (or folder) and its branch or tag. |
+| `MTR_ORGS` | The orgs to look at, comma separated. |
+| `MTR_SERVER`, `MTR_KEY` | Go through Mortar with this URL and API key (for CI). `MTR_SERVER=` (set but empty) uses gh even after `mtr login`. |
+| `MTR_OPEN` | How `mtr open` opens links: `browser`, `copy` or `print`. |
+| `MTR_PLUGINS` | `none`, or a comma separated list of the plugins to load. |
+| `MTR_PLUGIN_INDEX`, `MTR_PLUGIN_INDEX_KEYS` | The plugin index for `mtr market`, and extra public keys (base64, comma separated) it may be signed with. |
 
 `mortar.toml` in the defaults repo is shared by everyone who points mtr at it:
 
@@ -88,7 +104,7 @@ exclude = ["your-org/old-*"]
 
 [[group]]
 name = "plugins"
-match = { org = "your-org", prefix = "plugin-" }   # also: suffix, repos, exclude, topics
+match = { org = "your-org", prefix = "plugin-" }   # also: suffix, repos, exclude, topics, provider
 from = "your-org/plugin-template"                  # a live reference repo
 files = [".gitignore", "LICENSE"]                  # files that must match the reference
 require = { allow_auto_merge = true }              # what the reference itself must have
@@ -135,7 +151,7 @@ A plugin is a Python package with an entry point in the `mortar.plugins` group. 
 
 ```toml
 [project.entry-points."mortar.plugins"]
-hubra = "hubra_cli.bnb:HubraPlugin"
+myplugin = "my_package.mortar:MyPlugin"
 ```
 
 Install one next to mtr with `pipx inject mortar-cli <package>`. `MTR_PLUGINS=none` (or a comma separated list of names) limits which plugins load.
@@ -144,13 +160,26 @@ hubra-cli is one: it adds Hubra plugin releases, signing checks and a Hubra tab.
 
 ## Mortar (web app)
 
-`mtr serve` runs mtr as a web app: people sign in with GitHub and GitLab (OAuth, their own tokens), and
-get every command and TUI view in a terminal-style browser UI, plus a defaults editor with templates,
-stats, a console, plugins and a signed plugin marketplace. `mtr login https://your-mortar` points the CLI
-and TUI at it with an API key, so a laptop needs neither gh nor a token.
+`mtr serve` runs mtr as a web app. People sign in with their own GitHub or GitLab account (OAuth, so every
+call uses their own token) and get every command and TUI view in a terminal-style browser UI, plus issues,
+workflow hardening, a defaults editor with templates, stats, a console, plugins and a signed plugin
+marketplace. It works on a phone too. `mtr login https://your-mortar` points the CLI and TUI at it with an
+API key, so a laptop needs neither gh nor a token.
+
+The quickest way to run it is Docker, which builds the UI too:
+
+```sh
+cp deploy/mortar.env.example deploy/mortar.env       # fill in MTR_URL, an OAuth app, who may sign in
+docker compose -f deploy/docker-compose.yml up -d    # Mortar and Postgres, on 127.0.0.1:8080
+```
+
+From a clone, for development:
 
 ```sh
 docker compose -f deploy/docker-compose.yml up -d   # after filling in deploy/.env (see docs/mortar.md)
+pip install -e ".[server]" && (cd web && npm ci && npm run build)
+export GITHUB_CLIENT_ID=... GITHUB_CLIENT_SECRET=... MTR_ADMINS=github:you MTR_DEV=1
+mtr serve --check && mtr serve                       # http://localhost:8080
 ```
 
 ![Mortar's pull requests view](docs/screenshots/03-pull-requests.png)
