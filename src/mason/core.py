@@ -95,7 +95,8 @@ class Scoped:
         self.name = name
 
     def _d(self) -> dict:
-        return transport().caches.setdefault(self.name, {})
+        caches = transport().caches
+        return caches.space(self.name) if hasattr(caches, "space") else caches.setdefault(self.name, {})
 
     def __getitem__(self, k):
         return self._d()[k]

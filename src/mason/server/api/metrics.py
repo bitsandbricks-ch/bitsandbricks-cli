@@ -31,5 +31,5 @@ def metrics():
             by_group.setdefault(g.name if g else "-", []).append(r)
         return jsonify({"days": days, "repos": rows, "totals": stats.totals(rows, days),
                         "groups": {k: stats.totals(v, days) for k, v in by_group.items()},
-                        "cache": {"github": getattr(gh, "stats", {}),
-                                  "gitlab": getattr(gl, "stats", {}) if gl else {}}})
+                        "cache": {"github": gh.cache_info() if hasattr(gh, "cache_info") else {},
+                                  "gitlab": gl.cache_info() if gl else {}}})
