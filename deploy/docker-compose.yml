@@ -1,18 +1,18 @@
-# Mortar (mtr as a web app) with Postgres, from the image CI publishes to GHCR.
-# Put it behind a TLS proxy (Caddy, Traefik, nginx) that serves MTR_URL and forwards to 127.0.0.1:8080.
+# Mason, the web app, with Postgres, from the image CI publishes to GHCR.
+# Put it behind a TLS proxy (Caddy, Traefik, nginx) that serves MASON_URL and forwards to 127.0.0.1:8080.
 #   cd deploy
-#   cp .env.example .env      # fill in MTR_URL, the OAuth apps, MTR_ADMINS and POSTGRES_PASSWORD
+#   cp .env.example .env      # fill in MASON_URL, the OAuth apps, MASON_ADMINS and POSTGRES_PASSWORD
 #   docker compose up -d
-#   docker compose run --rm mortar mtr serve --check   # what the settings allow, and what is missing
+#   docker compose run --rm mason mason serve --check   # what the settings allow, and what is missing
 # Build from this checkout instead of pulling: docker compose up -d --build
 services:
-  mortar:
-    image: ghcr.io/bitsandbricks-ch/mortar-cli:${MTR_TAG:-latest}
+  mason:
+    image: ghcr.io/bitsandbricks-ch/mason-cli:${MASON_TAG:-latest}
     build: ..
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+psycopg://mtr:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db/mtr
-      MTR_TRUSTED_PROXIES: ${MTR_TRUSTED_PROXIES:-1}
+      DATABASE_URL: postgresql+psycopg://mason:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db/mason
+      MASON_TRUSTED_PROXIES: ${MASON_TRUSTED_PROXIES:-1}
     ports: ["127.0.0.1:8080:8080"]
     volumes: [data:/data]
     depends_on:
@@ -21,12 +21,12 @@ services:
   db:
     image: postgres:17-alpine
     environment:
-      POSTGRES_USER: mtr
-      POSTGRES_DB: mtr
+      POSTGRES_USER: mason
+      POSTGRES_DB: mason
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
     volumes: [db:/var/lib/postgresql/data]
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "mtr", "-d", "mtr"]
+      test: ["CMD", "pg_isready", "-U", "mason", "-d", "mason"]
       interval: 5s
       timeout: 3s
       retries: 20

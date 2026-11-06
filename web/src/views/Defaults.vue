@@ -9,7 +9,7 @@ import { ask } from '../ui.js'
 import TextPane from '../components/TextPane.vue'
 
 const info = ref(null)
-const TOML = computed(() => info.value?.path || 'mortar.toml')
+const TOML = computed(() => info.value?.path || 'mason.toml')
 const missing = ref('')
 const path = ref('')
 const text = ref('')
@@ -110,7 +110,7 @@ onMounted(load)
 <template>
   <div class="view">
     <div v-if="missing" class="pad">
-      <div class="box"><span class="warn">{{ missing }}</span><br><br>The defaults repo holds <span class="accent">mortar.toml</span>
+      <div class="box"><span class="warn">{{ missing }}</span><br><br>The defaults repo holds <span class="accent">mason.toml</span>
         (groups, settings, rulesets, files) the same way the CLI reads it. Pick one in <RouterLink to="/settings">settings</RouterLink>.</div>
     </div>
     <template v-else-if="info">

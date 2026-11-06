@@ -1,6 +1,6 @@
 name: Image
 
-# Builds the Mortar web server image (Dockerfile) and pushes it to GHCR:
+# Builds the Mason web server image (Dockerfile) and pushes it to GHCR:
 #   main       -> ghcr.io/<owner>/<repo>:main, :sha-<short>
 #   v1.2.3 tag -> :1.2.3, :1.2, :latest, :sha-<short>
 # Pull requests that touch the image only build it (nothing is pushed).
@@ -84,7 +84,7 @@ jobs:
           TAG_ARGS: ${{ steps.tags.outputs.args }}
           SOURCE: ${{ github.server_url }}/${{ github.repository }}
         run: |
-          docker buildx create --use --driver docker-container --name mortar
+          docker buildx create --use --driver docker-container --name mason
           cache=(--cache-from "type=registry,ref=$IMAGE:buildcache")
           output=(--load)
           if [[ "$PUSH" == true ]]; then
@@ -98,7 +98,7 @@ jobs:
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
             --label "org.opencontainers.image.version=$VERSION" \
             --label "org.opencontainers.image.licenses=MIT" \
-            --label "org.opencontainers.image.description=Mortar, the mtr web app for GitHub and GitLab"
+            --label "org.opencontainers.image.description=Mason, the web app for GitHub and GitLab"
 
       - name: Smoke test
         if: env.PUSH != 'true'
@@ -106,4 +106,4 @@ jobs:
           IMAGE: ${{ steps.tags.outputs.image }}
         run: |
           img="$(docker images --format '{{.Repository}}:{{.Tag}}' "$IMAGE" | head -1)"
-          docker run --rm -e MTR_ADMINS=github:ci "$img" mtr serve --check
+          docker run --rm -e MASON_ADMINS=github:ci "$img" mason serve --check

@@ -10,9 +10,9 @@ import PromptDialog from './components/PromptDialog.vue'
 const route = useRoute()
 const router = useRouter()
 const themes = ['phosphor', 'amber', 'paper']
-const theme = ref(localStorage.getItem('mtr-theme') || 'phosphor')
+const theme = ref(localStorage.getItem('mason-theme') || 'phosphor')
 const plugins = ref([])
-watch(theme, (t) => { document.documentElement.dataset.theme = t; try { localStorage.setItem('mtr-theme', t) } catch { /* private mode */ } }, { immediate: true })
+watch(theme, (t) => { document.documentElement.dataset.theme = t; try { localStorage.setItem('mason-theme', t) } catch { /* private mode */ } }, { immediate: true })
 
 const signedIn = computed(() => !!state.me?.user)
 const who = computed(() => (state.me?.identities || []).map((i) => `${i.provider}:${i.login}`).join(' '))
@@ -65,7 +65,7 @@ window.addEventListener('keydown', (e) => {
   <router-view v-else-if="!signedIn || route.meta.public" />
   <div v-else class="screen">
     <header class="top">
-      <span class="prompt accent">{{ state.me.user.name.toLowerCase().replace(/\s+/g, '') }}@mortar</span><span class="dim hide-xs">:~$</span>
+      <span class="prompt accent">{{ state.me.user.name.toLowerCase().replace(/\s+/g, '') }}@mason</span><span class="dim hide-xs">:~$</span>
       <span class="dim hide-sm">{{ who }}</span>
       <span class="spacer" />
       <span v-if="state.busy" class="warn">working…</span>

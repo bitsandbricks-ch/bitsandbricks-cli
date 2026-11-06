@@ -123,7 +123,7 @@ files = "files/default"
 """
 DEFAULTS_MAIN = {"name": "main", "target": "branch", "enforcement": "active",
                  "rules": [{"type": "deletion"}, {"type": "non_fast_forward"}, {"type": "pull_request"}]}
-REPOS["acme/defaults"] = ({}, {}, {"mortar.toml": DEFAULTS_TOML,
+REPOS["acme/defaults"] = ({}, {}, {"mason.toml": DEFAULTS_TOML,
                                    "rulesets/default/main.json": json.dumps(DEFAULTS_MAIN),
                                    "files/default/SECURITY.md": SECURITY_MD}, False)
 RS_IDS = {}
