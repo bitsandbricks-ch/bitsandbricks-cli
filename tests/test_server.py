@@ -16,9 +16,9 @@ if sys.version_info < (3, 10):  # pragma: no cover
 
 @pytest.fixture()
 def op(env, monkeypatch, tmp_path):
-    for key in ("PATH", "FAKE_GH_LOG", "XDG_CONFIG_HOME", "BNB_OPEN", "BNB_PLUGINS"):
+    for key in ("PATH", "FAKE_GH_LOG", "XDG_CONFIG_HOME", "MTR_OPEN", "MTR_PLUGINS"):
         monkeypatch.setenv(key, env[key])
-    monkeypatch.delenv("BNB_DEFAULTS", raising=False)
+    monkeypatch.delenv("MTR_DEFAULTS", raising=False)
     from mortar import config, transport
     from mortar.server import oauth, security
     from mortar.server import settings as S
@@ -46,7 +46,7 @@ def op(env, monkeypatch, tmp_path):
         db.add(Session(id=security.sha256(raw), user_id=user.id, csrf="csrf-token"))
         db.commit()
     client = app.test_client()
-    client.set_cookie("bnbo_session", raw, domain="localhost")
+    client.set_cookie("mtr_session", raw, domain="localhost")
     config._loaded.clear()
     yield app, client
     transport.set_default(None)
@@ -66,7 +66,7 @@ def test_signed_out_and_headers(op):
     assert anon.get("/api/v1/status").status_code == 401
     r = anon.get("/api/v1/auth/github/login")
     assert r.status_code == 302 and "code_challenge_method=S256" in r.headers["Location"]
-    assert "state=" in r.headers["Location"] and "bnbo_oauth=" in r.headers["Set-Cookie"]
+    assert "state=" in r.headers["Location"] and "mtr_oauth=" in r.headers["Set-Cookie"]
     assert anon.get("/api/v1/auth/github/callback?state=nope&code=x").headers["Location"].startswith("/login?error=")
     assert anon.get("/api/v1/auth/gitlab/login").status_code == 404  # not set up
 
@@ -115,39 +115,56 @@ def test_changes_are_dry_runs_and_audited(op):
     text = c.post("/api/v1/doctor", json={"repos": ["b"], "fix": True, "dry_run": True}, headers=H).json["text"]
     assert "[dry-run] PATCH /repos/acme/plugin-b" in text
     text = c.post("/api/v1/sync", json={"repos": ["b"], "dry_run": True}, headers=H).json["text"]
-    assert "update LICENSE" in text and "[dry-run] PR on bnb/sync-" in text
+    assert "update LICENSE" in text and "[dry-run] PR on mtr/sync-" in text
     text = c.post("/api/v1/new", json={"repo": "acme/plugin-c", "dry_run": True}, headers=H).json["text"]
     assert "[dry-run] create private acme/plugin-c from the template acme/plugin-tpl" in text
     text = c.post("/api/v1/approve", json={"repo": "acme/api", "id": 5, "dry_run": True}, headers=H).json["text"]
     assert "[dry-run] approve production for acme/api main" in text
+    got = c.get("/api/v1/issues?mine=1").json
+    assert [(i["repo"], i["number"]) for i in got["issues"]] == [("acme/web", 3)] and got["labels"] == ["bug"]
+    assert "I can reproduce it." in c.get("/api/v1/issue?repo=acme/web&number=3").json["text"]
+    text = c.post("/api/v1/issues", json={"repo": "acme/web", "title": "Crash", "labels": ["bug"], "dry_run": True},
+                  headers=H).json["text"]
+    assert "[dry-run] POST /repos/acme/web/issues" in text
+    text = c.post("/api/v1/issue", json={"repo": "acme/web", "number": 3, "action": "close", "dry_run": True},
+                  headers=H).json["text"]
+    assert "[dry-run] PATCH /repos/acme/web/issues/3" in text
+    assert c.post("/api/v1/issues", json={"repo": "acme/web", "title": " "}, headers=H).status_code == 400
+    wf = {w["repo"]: w for w in c.get("/api/v1/workflows").json["workflows"]}
+    assert wf["acme/api"] == {"repo": "acme/api", "workflows": 0, "findings": []}
+    assert {f["kind"] for f in wf["acme/web"]["findings"]} == {"pinned", "permissions", "pull_request_target",
+                                                              "injection"}
+    text = c.post("/api/v1/workflows/pin", json={"repos": ["web"], "dry_run": True}, headers=H).json["text"]
+    assert "[dry-run] PUT /repos/acme/web/contents/.github/workflows/ci.yml" in text
     log = c.get("/api/v1/audit").json
-    assert {"merge", "doctor.fix", "sync", "new", "approve"} <= {a["action"] for a in log}
+    done = {a["action"] for a in log}
+    assert {"merge", "doctor.fix", "sync", "new", "approve", "workflows.pin", "issue.create", "issue.close"} <= done
     assert all(a["dry_run"] for a in log if a["action"] in ("merge", "sync"))
 
 
 def test_console(op):
     _, c = op
-    out = c.post("/api/v1/console", json={"line": "bnb status"}, headers=H).json["text"]
+    out = c.post("/api/v1/console", json={"line": "mtr status"}, headers=H).json["text"]
     assert "acme/api" in out and "v1.10.0" in out
-    assert "draft, left open" in c.post("/api/v1/console", json={"line": "bnb merge --dry-run web#8"},
+    assert "draft, left open" in c.post("/api/v1/console", json={"line": "mtr merge --dry-run web#8"},
                                         headers=H).json["text"]
-    assert c.post("/api/v1/console", json={"line": "bnb init /etc"}, headers=H).status_code == 400
+    assert c.post("/api/v1/console", json={"line": "mtr init /etc"}, headers=H).status_code == 400
     assert c.post("/api/v1/console", json={"line": "rm -rf /"}, headers=H).status_code == 400
-    assert "usage" in c.post("/api/v1/console", json={"line": "bnb status --nope"}, headers=H).json["text"]
+    assert "usage" in c.post("/api/v1/console", json={"line": "mtr status --nope"}, headers=H).json["text"]
 
 
 def test_api_keys_and_device_login(op):
     app, c = op
     r = c.post("/api/v1/keys", json={"name": "laptop", "scope": "read"}, headers=H)
     key = r.json["key"]
-    assert key.startswith("bnbo_") and r.status_code == 201
+    assert key.startswith("mtr_") and r.status_code == 201
     k = app.test_client()
     auth = {"Authorization": f"Bearer {key}"}
     assert k.get("/api/v1/me", headers=auth).json["scope"] == "read"
     assert k.post("/api/v1/merge", json={"targets": ["web#7"]}, headers=auth).status_code == 403  # read key
     assert k.post("/api/v1/merge", json={"targets": ["web#7"], "dry_run": True}, headers=auth).status_code == 200
     assert k.post("/api/v1/keys", json={"name": "x"}, headers=auth).status_code == 403  # keys come from the browser
-    assert k.get("/api/v1/me", headers={"Authorization": "Bearer bnbo_deadbeef_nope"}).status_code == 401
+    assert k.get("/api/v1/me", headers={"Authorization": "Bearer mtr_deadbeef_nope"}).status_code == 401
     c.delete(f"/api/v1/keys/{r.json['id']}", headers=H)
     assert k.get("/api/v1/status", headers=auth).status_code == 401  # revoked
 
@@ -162,7 +179,7 @@ def test_api_keys_and_device_login(op):
         db.query(DeviceGrant).update({"last_poll": None})
         db.commit()
     got = dev.post("/api/v1/device/token", json={"device_code": code["device_code"]}).json
-    assert got["key"].startswith("bnbo_") and got["scope"] == "write"
+    assert got["key"].startswith("mtr_") and got["scope"] == "write"
     assert dev.post("/api/v1/device/token", json={"device_code": code["device_code"]}).json["error"] == \
         "expired_token"  # handed out once
 
@@ -182,9 +199,9 @@ def test_proxy_allowlist():
 def test_defaults_editor(op):
     _, c = op
     d = c.get("/api/v1/defaults").json
-    assert d["repo"] == "acme/defaults" and "bitsandbricks.toml" in d["files"] and d["path"] == "bitsandbricks.toml"
+    assert d["repo"] == "acme/defaults" and d["path"] == "mortar.toml" in d["files"]
     assert d["problems"] == []
-    bad = c.post("/api/v1/defaults/validate", json={"path": "bitsandbricks.toml",
+    bad = c.post("/api/v1/defaults/validate", json={"path": "mortar.toml",
                                                     "text": '[[group]]\nname="a"\nmatch={nope=1}\n'}, headers=H).json
     assert "match doesn't know nope" in bad["problems"][0]
     bad = c.post("/api/v1/defaults/validate", headers=H, json={
@@ -221,13 +238,3 @@ def test_stats(op):
     _, c = op
     m = c.get("/api/v1/metrics?days=30").json
     assert m["days"] == 30 and "merged_by_week" in m["totals"] and m["repos"]
-
-
-def test_old_setting_names(monkeypatch):
-    from mortar.server import settings as S
-
-    monkeypatch.delenv("MORTAR_IDLE_HOURS", raising=False)
-    monkeypatch.setenv("BNB_OPERATOR_IDLE_HOURS", "3")
-    assert S._env("MORTAR_IDLE_HOURS") == "3"
-    monkeypatch.setenv("MORTAR_IDLE_HOURS", "5")
-    assert S._env("MORTAR_IDLE_HOURS") == "5"

@@ -1,9 +1,9 @@
 """Plugins in the web UI (their tabs, checks and actions) and the marketplace.
 
-Plugins are Python packages installed next to the operator (bnb's `mortar.plugins` entry
+Plugins are Python packages installed next to the operator (mtr's `mortar.plugins` entry
 points). Each user can switch a plugin off for themselves; an admin can switch it off for everyone.
 The marketplace lists a signed plugin index; an admin may install from it only when the operator
-runs with MORTAR_PLUGIN_INSTALL=1 (it then needs a restart).
+runs with MTR_PLUGIN_INSTALL=1 (it then needs a restart).
 """
 
 from __future__ import annotations
@@ -197,7 +197,7 @@ def market_list():
 def market_install(name: str):
     op = current_app.config["OP"]
     if not op.plugin_install:
-        abort(403, "installing from the web is off: set MORTAR_PLUGIN_INSTALL=1, or install with "
+        abort(403, "installing from the web is off: set MTR_PLUGIN_INSTALL=1, or install with "
                    "pip next to the operator")
     if g.get("session") is None:
         abort(403, "install plugins in the browser")

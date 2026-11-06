@@ -24,7 +24,7 @@ from mortar.server.models import (
 )
 
 bp = Blueprint("account", __name__, url_prefix="/api/v1")
-STATE_COOKIE = "bnbo_oauth"
+STATE_COOKIE = "mtr_oauth"
 DEVICE_MINUTES = 10
 
 
@@ -284,7 +284,7 @@ def revoke_key(key_id: int):
     return jsonify({"ok": True})
 
 
-# ── device login: `bnb login https://operator` ───────────────────────────────
+# ── device login: `mtr login https://operator` ───────────────────────────────
 
 
 @bp.post("/device/code")
@@ -303,7 +303,7 @@ def device_code():
     while db.query(DeviceGrant).filter_by(user_code=code).first() is not None:
         code = security.user_code()
     db.add(DeviceGrant(device_hash=security.sha256(device), user_code=code, scope=scope,
-                       client_name=str(data.get("client") or "bnb")[:100],
+                       client_name=str(data.get("client") or "mtr")[:100],
                        expires_at=utcnow() + timedelta(minutes=DEVICE_MINUTES)))
     db.commit()
     url = current_app.config["OP"].url

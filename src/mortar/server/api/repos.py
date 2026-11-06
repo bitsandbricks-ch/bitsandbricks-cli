@@ -1,7 +1,7 @@
-"""Every bnb command for GitHub and GitLab, as JSON for the web UI (and anything else with an API key).
+"""Every mtr command for GitHub and GitLab, as JSON for the web UI (and anything else with an API key).
 
 GitHub repos are `owner/name`, GitLab projects `gitlab:group/project`; lists hold both. Reads run
-bnb's own code (repos.py, packages.py, defaults.py) with the user's token; changes are recorded in
+mtr's own code (repos.py, packages.py, defaults.py) with the user's token; changes are recorded in
 the audit log and take `dry_run`.
 """
 
@@ -11,8 +11,10 @@ from flask import Blueprint, abort, g, jsonify, request
 
 from mortar import core, plugins
 from mortar import defaults as D
+from mortar import issues as I
 from mortar import packages as P
 from mortar import repos as R
+from mortar import workflows as W
 from mortar.server import gitlab as GL
 from mortar.server.api.account import body
 from mortar.server.auth import audit, can_write, need
@@ -428,6 +430,138 @@ def security():
             out.append({"repo": repo, "provider": "gitlab" if is_gl(repo) else "github", "alerts": alerts,
                         "unread": unread})
         return jsonify({"security": out})
+
+
+# ── issues ───────────────────────────────────────────────────────────────────
+
+
+@bp.get("/issues")
+@need("read")
+def issues():
+    """Issues across GitHub repos and GitLab projects: state, label (repeatable), assignee, mine=1, stale=DAYS."""
+    state = request.args.get("state", "open")
+    if state not in ("open", "closed", "all"):
+        abort(400, "state is open, closed or all")
+    labels = [x for x in request.args.getlist("label") if x.strip()][:10]
+    assignee = (request.args.get("assignee") or "").strip() or None
+    limit = min(request.args.get("limit", 50, type=int) or 50, 100)
+    with as_user() as (gh, gl):
+        cfg = load_config()
+        gh_r, gl_r, _ = all_repos(cfg, gh, gl, names_arg(), request.args.get("group"))
+        gh_who = gl_who = assignee
+        if request.args.get("mine") == "1":
+            gh_who = I.me() if gh_r else None
+            gl_who = (gl.api("GET", "/user") or {}).get("username") if gl and gl_r else None
+        try:
+            out = [r for rows in core.pmap(lambda r: I.repo_issues(r, state, labels, gh_who, limit), gh_r)
+                   for r in rows]
+            if gl and gl_r:
+                out += [r for rows in core.pmap(lambda r: GL.issues(gl, r, state, labels, gl_who, limit), gl_r)
+                        for r in rows]
+        except core.RateLimited as err:
+            abort(429, str(err))
+    stale = request.args.get("stale", 0, type=int)
+    if stale:
+        out = I.stale(out, stale)
+    out.sort(key=lambda r: r.get("updated") or "", reverse=True)
+    return jsonify({"issues": out, "labels": sorted({lab for r in out for lab in r["labels"]})})
+
+
+@bp.get("/issue")
+@need("read")
+def issue_detail():
+    repo = valid_repo(request.args.get("repo", ""))
+    number = request.args.get("number", type=int)
+    if not number:
+        abort(400, "number: the issue number")
+    with as_user() as (_gh, gl):
+        if is_gl(repo):
+            if gl is None:
+                abort(409, "connect GitLab first")
+            return jsonify({"text": capture_rate(GL.issue_view, gl, repo, number)})
+        return jsonify({"text": capture_rate(I.view, repo, number)})
+
+
+@bp.post("/issues")
+@need("read")
+def issue_create():
+    data = body()
+    repo = valid_repo(str(data.get("repo") or ""))
+    title = str(data.get("title") or "").strip()
+    if not title:
+        abort(400, "an issue needs a title")
+    text = str(data.get("body") or "")[:60000]
+    labels = [str(x) for x in data.get("labels") or [] if str(x).strip()][:20]
+    assignees = [str(x) for x in data.get("assignees") or [] if str(x).strip()][:10]
+    dry = write_allowed(bool(data.get("dry_run")))
+    with as_user(dry) as (_gh, gl):
+        if is_gl(repo):
+            if gl is None:
+                abort(409, "connect GitLab first")
+            out = capture_rate(GL.create_issue, gl, repo, title, text, labels)
+        else:
+            out = capture_rate(I.create, repo, title, text, labels, assignees)
+    audit("issue.create", f"{repo}: {title[:100]}", dry, detail=out)
+    return jsonify({"text": out})
+
+
+@bp.post("/issue")
+@need("read")
+def issue_change():
+    """close, reopen or comment: {repo, number, action, text?, not_planned?}."""
+    data = body()
+    repo = valid_repo(str(data.get("repo") or ""))
+    number = int(data.get("number") or 0)
+    action = data.get("action")
+    if number <= 0 or action not in ("close", "reopen", "comment"):
+        abort(400, "number, and action close, reopen or comment")
+    text = str(data.get("text") or "")[:60000]
+    dry = write_allowed(bool(data.get("dry_run")))
+    with as_user(dry) as (_gh, gl):
+        if is_gl(repo):
+            if gl is None:
+                abort(409, "connect GitLab first")
+            out = (capture_rate(GL.issue_comment, gl, repo, number, text) if action == "comment"
+                   else capture_rate(GL.issue_state, gl, repo, number, action == "close"))
+        else:
+            out = (capture_rate(I.comment, repo, number, text) if action == "comment"
+                   else capture_rate(I.set_state, repo, number, action == "close", bool(data.get("not_planned"))))
+    audit(f"issue.{action}", f"{repo}#{number}", dry, detail=out)
+    return jsonify({"text": out})
+
+
+@bp.get("/workflows")
+@need("read")
+def workflows():
+    """Workflow hardening findings for every GitHub repo (GitLab CI isn't read yet)."""
+    with as_user() as (gh, gl):
+        cfg = load_config()
+        gh_r, _gl_r, _ = all_repos(cfg, gh, gl, names_arg(), request.args.get("group"))
+
+        def one(repo: str) -> dict:
+            want = W.want_of(cfg, repo)
+            files = W.workflow_files(repo)
+            return {"repo": repo, "workflows": len(files), "findings": W.findings(repo, want, files)}
+
+        try:
+            out = core.pmap(one, gh_r)
+        except core.RateLimited as err:
+            abort(429, str(err))
+    return jsonify({"workflows": out})
+
+
+@bp.post("/workflows/pin")
+@need("read")
+def workflows_pin():
+    """A PR per repo that pins its actions to commit SHAs."""
+    data = body()
+    dry = write_allowed(bool(data.get("dry_run")))
+    with as_user(dry) as (gh, gl):
+        cfg = load_config()
+        gh_r, _gl_r, _ = all_repos(cfg, gh, gl, [str(x) for x in data.get("repos") or []], data.get("group"))
+        text = capture_rate(W.workflows, cfg, gh_r, True) if gh_r else "no GitHub repos"
+    audit("workflows.pin", ", ".join(data.get("repos") or []) or "all", dry, detail=text)
+    return jsonify({"text": text})
 
 
 # ── doctor, sync, new ────────────────────────────────────────────────────────

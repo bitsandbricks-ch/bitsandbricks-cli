@@ -1,8 +1,8 @@
-"""How bnb talks to GitHub.
+"""How mtr talks to GitHub.
 
-GhTransport        the gh CLI (the default): bnb never sees a token.
+GhTransport        the gh CLI (the default): mtr never sees a token.
 HttpTransport      a token over HTTPS (stdlib only): the operator uses one per user and request.
-OperatorTransport  an operator's /api/v1/github proxy with an API key (`bnb login <url>`):
+OperatorTransport  an operator's /api/v1/github proxy with an API key (`mtr login <url>`):
                    the CLI and the TUI work without gh or a GitHub token on this machine.
 
 All three answer the same calls; core picks the one of the current context.
@@ -23,7 +23,7 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-CURRENT: contextvars.ContextVar = contextvars.ContextVar("bnb_transport", default=None)
+CURRENT: contextvars.ContextVar = contextvars.ContextVar("mtr_transport", default=None)
 _default = None
 _lock = threading.Lock()
 
@@ -45,7 +45,7 @@ def set_default(t) -> None:
 
 
 def from_environment():
-    """The operator when `bnb login` saved one (or BNB_OPERATOR is set), else gh."""
+    """The operator when `mtr login` saved one (or MTR_SERVER is set), else gh."""
     url, key = operator_login()
     if url and key:
         return OperatorTransport(url, key)
@@ -56,11 +56,8 @@ def from_environment():
 
 
 def config_dir() -> Path:
-    """~/.config/mortar, or ~/.config/bitsandbricks where only that one exists (set up before the rename)."""
-    base = Path(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"))
-    if not (base / "mortar").exists() and (base / "bitsandbricks").exists():
-        return base / "bitsandbricks"
-    return base / "mortar"
+    """~/.config/mortar (or $XDG_CONFIG_HOME/mortar)."""
+    return Path(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")) / "mortar"
 
 
 def key_file() -> Path:
@@ -68,12 +65,12 @@ def key_file() -> Path:
 
 
 def operator_login() -> tuple[str, str]:
-    """(operator URL, API key): BNB_OPERATOR and BNB_OPERATOR_KEY, else what `bnb login` saved."""
-    url = os.environ.get("BNB_OPERATOR", "").strip()
-    key = os.environ.get("BNB_OPERATOR_KEY", "").strip()
+    """(operator URL, API key): MTR_SERVER and MTR_KEY, else what `mtr login` saved."""
+    url = os.environ.get("MTR_SERVER", "").strip()
+    key = os.environ.get("MTR_KEY", "").strip()
     if url and key:
         return url.rstrip("/"), key
-    if os.environ.get("BNB_OPERATOR") == "":  # set but empty: gh, even with a saved login
+    if os.environ.get("MTR_SERVER") == "":  # set but empty: gh, even with a saved login
         return "", ""
     try:
         saved = json.loads(key_file().read_text())

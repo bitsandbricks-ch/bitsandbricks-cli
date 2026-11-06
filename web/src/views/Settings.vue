@@ -93,7 +93,7 @@ onMounted(load)
 
       <div v-if="s" class="box">
         <div class="accent">defaults and repos</div>
-        <p class="dim">The defaults repo holds mortar.toml, like <span class="accent">bnb init</span> sets up. Lists take names separated by commas.</p>
+        <p class="dim">The defaults repo holds mortar.toml, like <span class="accent">mtr init</span> sets up. Lists take names separated by commas.</p>
         <div class="form">
           <label>defaults repo</label><input v-model="s.defaults" placeholder="acme/defaults or gitlab:grp/defaults">
           <label>branch or tag</label><input v-model="s.ref" placeholder="(default branch)">
@@ -108,7 +108,7 @@ onMounted(load)
 
       <div class="box">
         <div class="accent">API keys</div>
-        <p class="dim">For the TUI and scripts: <span class="accent">bnb login {{ origin }}</span> makes one for you, or make one here and pass <span class="accent">--key</span>.</p>
+        <p class="dim">For the TUI and scripts: <span class="accent">mtr login {{ origin }}</span> makes one for you, or make one here and pass <span class="accent">--key</span>.</p>
         <div v-if="fresh" class="box">
           <div class="warn">copy it now: it isn't shown again</div>
           <div class="row"><span class="secret">{{ fresh.key }}</span><button @click="copy(fresh.key)">copy</button><button @click="fresh = null">done</button></div>

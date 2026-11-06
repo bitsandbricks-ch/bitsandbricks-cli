@@ -1,15 +1,17 @@
 # Backlog
 
-Ideas and features for bnb and Mortar (the web app), roughly in the order they'd pay off. Pick one, open a PR,
+Ideas and features for mtr and Mortar (the web app), roughly in the order they'd pay off. Pick one, open a PR,
 move it to "Done" when it ships.
 
 ## Next
 
+- **hubra-cli on the new names.** The old `bitsandbricks` names are gone, so hubra-cli has to `import mortar`
+  and register its plugin under the `mortar.plugins` entry point group before it loads again.
 - **hubra-cli on the operator.** hubra-cli still has its own gh plumbing and token file, so in the
   operator its commands don't run with the signed-in user's token. Port it to `mortar.core`
   (transport-aware `api`/`graphql`), read the Hubra token with `plugins.secret("hubra_token")`, and expose
   `web_secrets()`, `web_actions()` (sign, release, verify) and `web_commands`. Follow-up PR in hubra-cli.
-- **GitLab in the CLI and TUI.** The operator speaks GitLab; `bnb status/prs/runs/doctor` on a laptop still
+- **GitLab in the CLI and TUI.** The operator speaks GitLab; `mtr status/prs/runs/doctor` on a laptop still
   only know GitHub. Move `operator/gitlab.py` behind the transport so the CLI can use a GitLab token or the
   operator.
 - **Signed official plugin index.** Make the project key, sign `plugins/index.json` in CI, ship the public
@@ -18,9 +20,6 @@ move it to "Done" when it ships.
   server-sent events, so lists refresh themselves and the cache can be invalidated precisely.
 - **Scheduled checks.** Run `doctor` nightly per user or group, keep the results, and show drift over time;
   notify on new drift (email, Slack, Discord, a webhook).
-- **Workflow hardening.** Flag actions pinned to a tag instead of a SHA, `pull_request_target` with a
-  checkout of the PR, `permissions: write-all`, and script injection from `${{ github.event.* }}` (zizmor /
-  actionlint findings per repo), with a PR that pins the actions.
 - **Access review.** Who has admin or write on each repo, outside collaborators, deploy keys and webhooks
   (read only), with a periodic "still needed?" review and an export for audits.
 - **Prometheus `/metrics`** for the operator itself (requests, GitHub calls, cache hit rate, rate limit left)
@@ -79,16 +78,18 @@ move it to "Done" when it ships.
 - An agent that proposes fixes as PRs: security alerts, failing workflows, merge conflicts, drift that
   `doctor --fix` can't fix (e.g. missing files that need content).
 - "Explain this failure": summarize a failed run's logs next to the run.
-- Natural-language console (`bnb ask "which repos lack branch protection?"`) that turns into bnb commands,
+- Natural-language console (`mtr ask "which repos lack branch protection?"`) that turns into mtr commands,
   shown before they run.
 
 ## TUI and CLI
 
-- `bnb tui` themes matching the web UI (phosphor, amber, paper).
-- `bnb watch`: a live status line for a set of repos.
+- `mtr tui` themes matching the web UI (phosphor, amber, paper).
+- `mtr watch`: a live status line for a set of repos.
 - Shell completion for repo names and groups.
 
 ## Done
 
+- Workflow hardening: `mtr workflows [--fix]`, doctor's `workflows` check and the web app's Workflows tab.
+- More repo settings in mortar.toml: topics, labels, Actions permissions, required files and `skip`.
 - Mortar, the web app, with GitHub and GitLab OAuth, terminal UI, API keys, device login (this PR).
-- Plugin marketplace with a signed index; `bnb stats`; transport layer with caching.
+- Plugin marketplace with a signed index; `mtr stats`; transport layer with caching.

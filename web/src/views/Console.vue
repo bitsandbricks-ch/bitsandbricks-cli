@@ -1,11 +1,11 @@
 <script setup>
-// The console: type bnb commands as in a terminal. ↑/↓ walk the history; changes ask first.
+// The console: type mtr commands as in a terminal. ↑/↓ walk the history; changes ask first.
 import { nextTick, onMounted, ref } from 'vue'
 import { get, log, post, state } from '../api.js'
 import { ask } from '../ui.js'
 import TextPane from '../components/TextPane.vue'
 
-const HISTORY = 'bnb.console.history'
+const HISTORY = 'mtr.console.history'
 const line = ref('')
 const out = ref([]) // [{line, text}]
 const writes = ref(new Set())
@@ -37,7 +37,7 @@ async function run() {
   remember(l)
   at.value = -1
   line.value = ''
-  const words = l.replace(/^(bnb|mortar|bitsandbricks)\s+/, '').split(/\s+/)
+  const words = l.replace(/^(mtr|mortar)\s+/, '').split(/\s+/)
   if (writes.value.has(words[0]) && !words.includes('--dry-run')) {
     const a = await ask(`Run "${l}"? It can change repos.`)
     if (!a) { out.value.push({ line: l, text: 'cancelled' }); return }
@@ -66,7 +66,7 @@ function key(e) {
   <div class="view" @click.self="input?.focus()">
     <div ref="screen" class="scroll pad console-out">
       <div v-for="(o, i) in out" :key="i" style="margin-bottom: 10px">
-        <div v-if="o.line"><span class="accent">$ bnb</span> {{ o.line.replace(/^(bnb|mortar|bitsandbricks)\s+/, '') }}</div>
+        <div v-if="o.line"><span class="accent">$ mtr</span> {{ o.line.replace(/^(mtr|mortar)\s+/, '') }}</div>
         <TextPane :text="o.text" />
       </div>
       <div v-if="running" class="warn cursor">running </div>
@@ -75,7 +75,7 @@ function key(e) {
       <button v-for="q in QUICK" :key="q" :disabled="running" @click="quick(q)">{{ q }}</button>
     </div>
     <div class="toolbar" style="border-top: 1px solid var(--line); border-bottom: 0">
-      <span class="accent">$ bnb</span>
+      <span class="accent">$ mtr</span>
       <input ref="input" v-model="line" class="grow" :disabled="running" aria-label="command"
              placeholder="status · prs · runs · doctor --group web · stats --days 90 · clear" @keydown.enter="run" @keydown="key">
       <span v-if="state.dryRun" class="warn">dry run</span>

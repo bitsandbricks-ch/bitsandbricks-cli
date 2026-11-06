@@ -1,4 +1,4 @@
-"""Running bnb's code for one user: their GitHub transport, their GitLab client and their settings.
+"""Running mtr's code for one user: their GitHub transport, their GitLab client and their settings.
 
 Everything here is per request (contextvars), so two users' commands never share a token,
 a cache, a dry run setting or output.
@@ -74,7 +74,7 @@ def clean_settings(body: dict) -> dict:
 
 @contextmanager
 def as_user(dry: bool | None = None):
-    """bnb's code runs inside this with the signed-in user's GitHub token and GitLab client."""
+    """mtr's code runs inside this with the signed-in user's GitHub token and GitLab client."""
     user = g.user
     try:
         gh = oauth.github(user) or NoTransport()

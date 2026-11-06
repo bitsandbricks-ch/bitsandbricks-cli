@@ -1,4 +1,4 @@
-"""The web console: type `bnb status`, `bnb doctor --fix web` ... and see what the CLI would print.
+"""The web console: type `mtr status`, `mtr doctor --fix web` ... and see what the CLI would print.
 
 The command runs in the operator with your GitHub token and your settings; commands that only make
 sense on your own machine (init, tui, open, config files) are refused, and so are plugin commands
@@ -18,9 +18,10 @@ from mortar.server.context import as_user, user_settings
 
 bp = Blueprint("console", __name__, url_prefix="/api/v1")
 
-READS = {"status", "prs", "pr", "runs", "releases", "packages", "security", "repos", "plugins", "stats"}
-WRITES = {"merge", "approve", "doctor", "sync", "new", "rerun", "bump", "release"}
-# write unless --dry-run (doctor: unless no --fix; release: unless --list or no names)
+READS = {"status", "prs", "pr", "runs", "releases", "packages", "security", "repos", "plugins", "stats", "workflows",
+         "issues"}
+WRITES = {"merge", "approve", "doctor", "sync", "new", "rerun", "bump", "release", "issue"}
+# write unless --dry-run (doctor, workflows: unless no --fix; release: unless --list or no names; issue: view)
 LOCAL = {"serve", "init", "tui", "open", "config", "login", "logout", "whoami", "market", "key"}
 
 
@@ -35,8 +36,10 @@ def is_write(argv: list[str]) -> bool:
     cmd = argv[0]
     if "--dry-run" in argv:
         return False
-    if cmd == "doctor":
+    if cmd in ("doctor", "workflows"):
         return "--fix" in argv
+    if cmd == "issue":
+        return len(argv) < 2 or argv[1] != "view"
     if cmd == "release":
         return "--list" not in argv and any(not a.startswith("-") for a in argv[1:])
     return cmd in WRITES or cmd in web_commands()
@@ -59,17 +62,17 @@ def run():
         argv = shlex.split(line)
     except ValueError as err:
         abort(400, f"can't read that line: {err}")
-    if argv and argv[0] in ("bnb", "mortar", "bitsandbricks"):
+    if argv and argv[0] in ("mtr", "mortar"):
         argv = argv[1:]
     if not argv:
-        abort(400, "type a command, e.g. bnb status")
+        abort(400, "type a command, e.g. mtr status")
     cmd = argv[0]
     if cmd in ("help", "--help", "-h"):
         return jsonify({"text": core.capture(cli.main, ["--help"]), "write": False})
     if cmd in LOCAL:
-        abort(400, f"`bnb {cmd}` works on your own machine, not in the operator (Settings has the same)")
+        abort(400, f"`mtr {cmd}` works on your own machine, not in the operator (Settings has the same)")
     if cmd not in READS | WRITES | web_commands():
-        abort(400, f"`bnb {cmd}` isn't available in the web console")
+        abort(400, f"`mtr {cmd}` isn't available in the web console")
     write = is_write(argv)
     if write and not can_write():
         abort(403, "this API key is read-only: add --dry-run")

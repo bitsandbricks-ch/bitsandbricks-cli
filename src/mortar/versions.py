@@ -7,10 +7,10 @@ A group of mortar.toml names where its repos keep their version:
     version = "plugin.yaml"                 # plugin.yaml, pyproject.toml, package.json, VERSION, ...
     changelog = ["CHANGELOG.md"]            # optional; Keep a Changelog [Unreleased] or "## 1.2.0" sections
 
-`bnb bump name [major|minor|patch|1.4.0]` opens a PR on bump/v<new> with the new version and a
-changelog section; `bnb release [names]` pushes the tag v<version> on the default branch for every
+`mtr bump name [major|minor|patch|1.4.0]` opens a PR on bump/v<new> with the new version and a
+changelog section; `mtr release [names]` pushes the tag v<version> on the default branch for every
 repo whose version is newer than its latest release. The repo's own workflow does the rest (build,
-approval, publish), which `bnb runs` and the Releases tab follow.
+approval, publish), which `mtr runs` and the Releases tab follow.
 """
 
 from __future__ import annotations
@@ -148,7 +148,7 @@ def bump(cfg: Config, repo: str, level: str, auto: bool = False) -> None:
         raise RuntimeError(f"{new} is not newer than {cur} in {path}")
     last = newest(release_tags(repo))
     if last and version_tuple(cur) > version_tuple(last):
-        say(f"   note: {cur} isn't released yet (latest {last}); `bnb release {core.short(repo)}` would publish it")
+        say(f"   note: {cur} isn't released yet (latest {last}); `mtr release {core.short(repo)}` would publish it")
     notes = [f"- {p['title']} (#{p['number']})" for p in merged_since(repo, base, last)]
     files = {path: (write_version(found[0], path, new), found[1])}
     day = time.strftime("%Y-%m-%d")
@@ -166,7 +166,7 @@ def bump(cfg: Config, repo: str, level: str, auto: bool = False) -> None:
         return
     logs = ", ".join(f"`{c}`" for c in files if c != path)
     body = (f"Sets `{path}` to {new}" + (f" and adds the {new} section to {logs}" if logs else "")
-            + f". Edit the changelog here before merging.\n\nAfter the merge, `bnb release {core.short(repo)}` "
+            + f". Edit the changelog here before merging.\n\nAfter the merge, `mtr release {core.short(repo)}` "
             f"(R in the TUI) pushes the tag v{new}; the repo's release workflow takes it from there.")
     url = open_pr(repo, base, branch, files, f"Release {new}", f"Release {new}", body)
     say(f"   opened {url}")
@@ -194,17 +194,17 @@ def release(cfg: Config, repo: str, yes: bool = True) -> None:
         if run:
             say(f"      release run: {R.run_state(run)}  {run.get('html_url', '')}")
             if run.get("conclusion") in R.FAILED:
-                say(f"      it failed: bnb rerun {core.short(repo)} --run {run['id']}")
+                say(f"      it failed: mtr rerun {core.short(repo)} --run {run['id']}")
         return
     if not st["todo"]:
         say(f"   {st['file']} says {st['version']}, not newer than {st['released']}: "
-            f"bump first (bnb bump {core.short(repo)})")
+            f"bump first (mtr bump {core.short(repo)})")
         return
     changelogs = (source(cfg, repo) or ("", []))[1]
     if changelogs and "-" not in st["version"]:
         text = core.file_on(repo, changelogs[0], st["base"]) or ""
         if not re.search(rf"^##\s*\[?{re.escape(st['version'])}\]?(\s|$)", text, re.M):
-            say(f"   {changelogs[0]} has no {st['version']} section: bump first (bnb bump {core.short(repo)})")
+            say(f"   {changelogs[0]} has no {st['version']} section: bump first (mtr bump {core.short(repo)})")
             return
     if core.dry_run():
         say(f"   [dry-run] push tag {tag} on {st['base']} (latest {st['released'] or 'none'})")
@@ -250,7 +250,7 @@ def release_run(repo: str, tag: str, wait: int = 0) -> dict | None:
 
 
 def summary(cfg: Config, repos: list[str]) -> None:
-    """bnb release --list: the version of every repo against its latest release."""
+    """mtr release --list: the version of every repo against its latest release."""
     rows = []
     for repo in repos:
         st = state(cfg, repo)

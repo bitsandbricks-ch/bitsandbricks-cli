@@ -9,7 +9,6 @@ import { ask } from '../ui.js'
 import TextPane from '../components/TextPane.vue'
 
 const info = ref(null)
-// mortar.toml, or bitsandbricks.toml in a defaults repo from before the rename
 const TOML = computed(() => info.value?.path || 'mortar.toml')
 const missing = ref('')
 const path = ref('')

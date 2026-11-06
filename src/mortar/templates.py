@@ -1,7 +1,7 @@
 """Ready-made building blocks for a defaults repo: group snippets, rulesets and shared files.
 
 The operator's defaults editor offers them; each lands as a file in the defaults repo (through a
-PR by default), where `bnb doctor` and `bnb sync` pick it up like anything written by hand.
+PR by default), where `mtr doctor` and `mtr sync` pick it up like anything written by hand.
 """
 
 from __future__ import annotations

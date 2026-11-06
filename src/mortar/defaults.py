@@ -1,4 +1,4 @@
-"""Keep repos on their defaults: `bnb doctor` (check, --fix) and `bnb sync` (files via PRs).
+"""Keep repos on their defaults: `mtr doctor` (check, --fix) and `mtr sync` (files via PRs).
 
 What a repo should have comes from its group in mortar.toml (see config.py):
 a live reference repo (`from`), explicit settings, a rulesets folder, files. On top
@@ -13,7 +13,7 @@ import json
 import time
 import urllib.parse
 
-from mortar import core, plugins
+from mortar import core, plugins, workflows
 from mortar.config import Config, Group
 from mortar.core import WEB, api, compact, file_on, for_each, get_file, git_blob_sha, open_pr, say, short
 
@@ -126,7 +126,8 @@ def baseline(cfg: Config, group: Group) -> dict:
     texts = cfg.files_of(group)
     want["files"].update({p: git_blob_sha(t) for p, t in texts.items()})
     want["texts"].update(texts)
-    want.update(topics=list(group.topics), labels=dict(group.labels), actions=dict(group.actions),
+    want.update(workflows=workflows.settings(group.workflows), topics=list(group.topics),
+                labels=dict(group.labels), actions=dict(group.actions),
                 required_files=list(group.required_files), branch=group.branch, visibility=group.visibility,
                 description=group.description, skip=set(group.skip))
     return skip(want)
@@ -146,6 +147,8 @@ def skip(want: dict) -> dict:
             want[key] = None
     if "description" in off:
         want["description"] = False
+    if "workflows" in off:
+        want["workflows"] = {}
     return want
 
 
@@ -421,7 +424,7 @@ def reference_check(group: Group, want: dict, fix: bool) -> None:
     if not problems and not req:
         say("   ok")
     elif not fix:
-        say(f"   fix: bnb doctor --fix {ref}  (the reference first, then its repos follow it)")
+        say(f"   fix: mtr doctor --fix {ref}  (the reference first, then its repos follow it)")
     rel = {True: "on", False: "off", None: "?"}[want["immutable_releases"]]
     say(f"   reference of group {group.name}: {len(want['settings'])} settings, {len(want['rulesets'])} rulesets, "
         f"{len(want['files'])} files, release immutability {rel}")
@@ -461,6 +464,9 @@ def doctor(repo: str, ctx: dict) -> None:
     problems = list(fixable)
     if want:
         problems += file_drift(repo, want, branch) + required_drift(repo, want, branch) + checked
+        if want.get("workflows"):
+            problems += [f"workflow {f['path'].rsplit('/', 1)[-1]}:{f['line']} {f['text']}"
+                         for f in workflows.findings(repo, want["workflows"])]
     if not (want and "plugins" in want["skip"]):
         problems += plugins.hook("doctor", repo, group, ctx)
 
@@ -485,10 +491,12 @@ def doctor(repo: str, ctx: dict) -> None:
     for p in problems:
         say(f"   - {p}")
     if any(p in fixable for p in problems):
-        say(f"   fix: bnb doctor --fix {repo}")
+        say(f"   fix: mtr doctor --fix {repo}")
     if want and any(p.endswith(("is missing", f"differs from {want['label']}")) and not p.startswith("ruleset")
                     for p in problems):
-        say(f"   fix: bnb sync {repo}  (PR with the files)")
+        say(f"   fix: mtr sync {repo}  (PR with the files)")
+    if any(p.startswith("workflow ") and "isn't pinned" in p for p in problems):
+        say(f"   fix: mtr workflows --fix {repo}  (PR that pins the actions)")
     for hint in plugins.hook("doctor_hints", repo, group, problems):
         say(f"   fix: {hint}")
 
@@ -527,7 +535,7 @@ def sync(repo: str, ctx: dict) -> None:
     for path, (_, sha) in changed.items():
         say(f"   {'update' if sha else 'add'} {path}")
     stamp = want.get("head") or hashlib.sha1("".join(sorted(want["files"].values())).encode()).hexdigest()
-    branch = f"bnb/sync-{stamp[:7]}"
+    branch = f"mtr/sync-{stamp[:7]}"
     owner = repo.split("/")[0]
     if api("GET", f"/repos/{repo}/pulls?state=open&head={owner}:{branch}"):
         say(f"   PR already open: {WEB}/{repo}/pulls?q=head:{branch}")
@@ -541,7 +549,7 @@ def sync(repo: str, ctx: dict) -> None:
                   f"chore: sync shared files with {want['label']}",
                   f"Sync shared files with {want['label']}",
                   f"Copies these files from {source}:\n\n{lines}\n\n"
-                  "Check the diff for changes this repo made on purpose before merging.\n\nOpened by `bnb sync`.")
+                  "Check the diff for changes this repo made on purpose before merging.\n\nOpened by `mtr sync`.")
     say(f"   PR: {url}")
 
 
@@ -555,7 +563,7 @@ def create_repo(cfg: Config, repo: str, group_name: str | None = None, public: b
     if "/" not in repo:
         raise RuntimeError(f"Name the owner too: {repo} -> <owner>/{repo}")
     if core.exists(repo):
-        raise RuntimeError(f"{repo} exists already (bnb doctor --fix {repo} applies the defaults)")
+        raise RuntimeError(f"{repo} exists already (mtr doctor --fix {repo} applies the defaults)")
     if group_name:
         group = next((g for g in cfg.groups if g.name == group_name), None)
         if not group:
@@ -584,4 +592,4 @@ def create_repo(cfg: Config, repo: str, group_name: str | None = None, public: b
             api("PUT", f"/repos/{repo}/contents/{path}", body)
         say(f"   committed {len(own)} file(s): {', '.join(own)}")
     apply(repo, want)
-    say(f"   check it: bnb doctor {repo}")
+    say(f"   check it: mtr doctor {repo}")

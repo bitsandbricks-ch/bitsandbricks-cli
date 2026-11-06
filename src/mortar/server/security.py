@@ -12,7 +12,7 @@ import secrets
 
 from cryptography.fernet import Fernet, InvalidToken
 
-KEY_PREFIX = "bnbo_"
+KEY_PREFIX = "mtr_"
 
 
 class Vault:
@@ -20,7 +20,7 @@ class Vault:
     operator's secret key. A different secret key makes every stored token unreadable: users sign in again."""
 
     def __init__(self, secret_key: str):
-        raw = hashlib.sha256(b"bnb-operator-vault:" + secret_key.encode()).digest()
+        raw = hashlib.sha256(b"mtr-operator-vault:" + secret_key.encode()).digest()
         self._f = Fernet(base64.urlsafe_b64encode(raw))
 
     def encrypt(self, value: str) -> str:

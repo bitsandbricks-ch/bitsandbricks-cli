@@ -56,7 +56,7 @@ onMounted(load)
             <span v-for="t in p.tabs" :key="t.id"><RouterLink :to="`/plugins/${p.name}/${t.id}`">tab: {{ t.title }}</RouterLink></span>
             <span v-for="c in p.checks" :key="c.key" class="chip">check: {{ c.label }}</span>
             <span v-for="c in p.columns" :key="c" class="chip">column: {{ c }}</span>
-            <span v-for="c in p.commands" :key="c" class="chip">console: bnb {{ c }}</span>
+            <span v-for="c in p.commands" :key="c" class="chip">console: mtr {{ c }}</span>
           </div>
           <div v-for="a in p.actions" :key="a.id" class="row" style="margin-top: 8px">
             <button :class="a.write ? 'primary' : ''" @click="run(p, a)">{{ a.title }}</button>

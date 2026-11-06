@@ -89,7 +89,7 @@ class Session(Base):
 
 
 class ApiKey(Base):
-    """An API key (bnbo_<prefix>_<secret>) for the CLI and TUI; stored as a SHA-256 hash."""
+    """An API key (mtr_<prefix>_<secret>) for the CLI and TUI; stored as a SHA-256 hash."""
     __tablename__ = "api_keys"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
@@ -105,12 +105,12 @@ class ApiKey(Base):
 
 
 class DeviceGrant(Base):
-    """`bnb login <operator>`: the CLI shows a code, the user approves it in the browser, the CLI gets a key."""
+    """`mtr login <operator>`: the CLI shows a code, the user approves it in the browser, the CLI gets a key."""
     __tablename__ = "device_grants"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     device_hash: Mapped[str] = mapped_column(String(64), unique=True)
     user_code: Mapped[str] = mapped_column(String(16), unique=True)
-    client_name: Mapped[str] = mapped_column(String(100), default="bnb")
+    client_name: Mapped[str] = mapped_column(String(100), default="mtr")
     scope: Mapped[str] = mapped_column(String(10), default="write")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     expires_at: Mapped[datetime] = mapped_column(DateTime)

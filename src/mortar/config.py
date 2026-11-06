@@ -1,16 +1,16 @@
-"""Where bnb looks, and what your repos should look like.
+"""Where mtr looks, and what your repos should look like.
 
 Two files:
 
-* Your own config, `~/.config/mortar/config.toml` (`bnb config` shows it):
+* Your own config, `~/.config/mortar/config.toml` (`mtr config` shows it):
 
       defaults = "your-org/your-defaults"   # a GitHub repo, or a local folder
       ref = "main"                          # branch or tag of that repo
       orgs = ["another-org"]                # added to the orgs the defaults name
 
-  BNB_DEFAULTS and BNB_ORGS (comma separated) override it for one run.
+  MTR_DEFAULTS and MTR_ORGS (comma separated) override it for one run.
 
-* `mortar.toml` (or the older `bitsandbricks.toml`) in the defaults repo, shared by everyone who points bnb at it:
+* `mortar.toml` in the defaults repo, shared by everyone who points mtr at it:
 
       orgs = ["your-org"]
       repos = ["someone/one-more-repo"]
@@ -29,12 +29,12 @@ Two files:
       security = { secret_scanning = "enabled" }
       immutable_releases = true
       rulesets = "rulesets/default"         # folder of ruleset JSON in the defaults repo
-      release_assets = ["*.zip"]            # files every release must attach (`bnb releases`)
-      version = "pyproject.toml"            # where the version lives (`bnb bump`, `bnb release`)
-      changelog = ["CHANGELOG.md"]          # changelogs `bnb bump` adds the new section to
+      release_assets = ["*.zip"]            # files every release must attach (`mtr releases`)
+      version = "pyproject.toml"            # where the version lives (`mtr bump`, `mtr release`)
+      changelog = ["CHANGELOG.md"]          # changelogs `mtr bump` adds the new section to
       files = "files/default"               # folder copied into each repo, path for path
 
-  The first group that matches a repo is its group. Keys bnb doesn't know stay on
+  The first group that matches a repo is its group. Keys mtr doesn't know stay on
   the group for plugins (`group.extra`).
 """
 
@@ -58,42 +58,34 @@ else:  # pragma: no cover
     import tomli as tomllib
 
 DEFAULTS_FILE = "mortar.toml"
-# Read in this order: defaults repos made before the rename keep their bitsandbricks.toml.
-DEFAULTS_FILES = (DEFAULTS_FILE, "bitsandbricks.toml")
 
 
 def read_defaults(source: Source) -> tuple[str, str | None]:
-    """The defaults file's name and text in `source` (mortar.toml, else bitsandbricks.toml)."""
-    for name in DEFAULTS_FILES:
-        text = source.read(name)
-        if text is not None:
-            return name, text
-    return DEFAULTS_FILE, None
+    """The defaults file's name and its text in `source` (None when it has none)."""
+    return DEFAULTS_FILE, source.read(DEFAULTS_FILE)
 REPO_NAME = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 GITLAB_NAME = re.compile(r"^gitlab:[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$")
 # The GitLab client of this context (the operator sets it): defaults repos named gitlab:group/project.
-GITLAB: contextvars.ContextVar = contextvars.ContextVar("bnb_gitlab", default=None)
+GITLAB: contextvars.ContextVar = contextvars.ContextVar("mtr_gitlab", default=None)
 # A user's settings in place of the config file (the operator's web console sets it).
-OVERRIDE: contextvars.ContextVar = contextvars.ContextVar("bnb_config_override", default=None)
+OVERRIDE: contextvars.ContextVar = contextvars.ContextVar("mtr_config_override", default=None)
 GROUP_KEYS = {"name", "match", "from", "files", "require", "settings", "security", "immutable_releases",
               "vulnerability_reporting", "rulesets", "release_assets",
               "version", "changelog", "topics", "labels", "actions", "required_files", "branch",
-              "visibility", "description", "skip"}
+              "visibility", "description", "skip", "workflows"}
 # What doctor checks for a group; `skip = [...]` turns checks off.
 CHECKS = ("settings", "security", "vulnerability_reporting", "immutable_releases", "rulesets", "own_rulesets",
-          "files", "required_files", "topics", "labels", "actions", "branch", "visibility", "description", "plugins")
+          "files", "required_files", "topics", "labels", "actions", "branch", "visibility", "description", "workflows",
+          "plugins")
 
 
 def config_dir() -> Path:
-    """~/.config/mortar, or ~/.config/bitsandbricks where only that one exists (set up before the rename)."""
-    base = Path(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"))
-    if not (base / "mortar").exists() and (base / "bitsandbricks").exists():
-        return base / "bitsandbricks"
-    return base / "mortar"
+    """~/.config/mortar (or $XDG_CONFIG_HOME/mortar)."""
+    return Path(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")) / "mortar"
 
 
 def config_file() -> Path:
-    return Path(os.environ.get("BNB_CONFIG") or config_dir() / "config.toml")
+    return Path(os.environ.get("MTR_CONFIG") or config_dir() / "config.toml")
 
 
 def user_config() -> dict:
@@ -200,6 +192,7 @@ class Group:
     visibility: str | None = None  # public, private or internal (checked only)
     description: bool = False  # every repo needs a description (checked only)
     skip: list[str] = field(default_factory=list)  # checks to leave out (CHECKS)
+    workflows: bool | dict | None = None  # workflow hardening in doctor: true, or a table (see workflows.py)
     extra: dict = field(default_factory=dict)
 
     def matches(self, repo: str, topics: list[str] | None = None) -> bool:
@@ -313,6 +306,7 @@ def make_group(raw: dict, i: int) -> Group:
         visibility=raw.get("visibility"),
         description=bool(raw.get("description")),
         skip=_list(raw.get("skip")),
+        workflows=raw.get("workflows"),
         extra={k: v for k, v in raw.items() if k not in GROUP_KEYS},
     )
 
@@ -322,17 +316,17 @@ _loaded = core.Scoped("config")
 
 def load(orgs: list[str] | None = None, mine: dict | None = None, env: bool = True) -> Config:
     """Your config plus the defaults repo's mortar.toml. `orgs` (from --org) narrows the orgs.
-    The operator passes each user's settings as `mine` (env=False: no BNB_* variables, no local folders)."""
+    The operator passes each user's settings as `mine` (env=False: no MTR_* variables, no local folders)."""
     if mine is None and OVERRIDE.get() is not None:
         mine, env = OVERRIDE.get(), False
     server = mine is not None
     if mine is None:
         mine = user_config()
-        if not mine.get("defaults") and not os.environ.get("BNB_DEFAULTS"):
+        if not mine.get("defaults") and not os.environ.get("MTR_DEFAULTS"):
             mine = {**operator_settings(), **mine}
     getenv = os.environ.get if env else (lambda _k, _d=None: None)
-    where = getenv("BNB_DEFAULTS") or mine.get("defaults")
-    ref = getenv("BNB_DEFAULTS_REF") or mine.get("ref")
+    where = getenv("MTR_DEFAULTS") or mine.get("defaults")
+    ref = getenv("MTR_DEFAULTS_REF") or mine.get("ref")
     key = (where, ref, tuple(orgs or ()), tuple(_list(mine.get("orgs"))), tuple(_list(mine.get("repos"))),
            tuple(_list(mine.get("exclude"))))
     if key in _loaded:
@@ -343,9 +337,9 @@ def load(orgs: list[str] | None = None, mine: dict | None = None, env: bool = Tr
         source = Source(where, ref, allow_local=not server)
         name, text = read_defaults(source)
         if text is None:
-            raise RuntimeError(f"No {DEFAULTS_FILE} in {source}. Start one with: mortar init {where}")
+            raise RuntimeError(f"No {DEFAULTS_FILE} in {source}. Start one with: mtr init {where}")
         raw = parse_defaults(text, f"{source}/{name}")
-    env_orgs = [o.strip() for o in (getenv("BNB_ORGS") or "").split(",") if o.strip()]
+    env_orgs = [o.strip() for o in (getenv("MTR_ORGS") or "").split(",") if o.strip()]
     all_orgs = env_orgs or _unique(_list(raw.get("orgs")) + _list(mine.get("orgs")))
     cfg = Config(
         source=source,
@@ -360,7 +354,7 @@ def load(orgs: list[str] | None = None, mine: dict | None = None, env: bool = Tr
 
 
 def operator_settings() -> dict:
-    """With `bnb login <operator>`: the defaults repo and orgs saved on the operator (no local config)."""
+    """With `mtr login <operator>`: the defaults repo and orgs saved on the operator (no local config)."""
     from mortar.transport import OperatorTransport, current
     t = current()
     if not isinstance(t, OperatorTransport):
@@ -391,7 +385,7 @@ def _unique(items: list[str]) -> list[str]:
 
 STARTER = """\
 # Mortar defaults (mortar.toml): what the repos of these orgs should look like.
-# Check: bnb doctor    Fix settings and rulesets: bnb doctor --fix    Files: bnb sync
+# Check: mtr doctor    Fix settings and rulesets: mtr doctor --fix    Files: mtr sync
 orgs = [{orgs}]
 
 # The first group that matches a repo is its group; a group without `match` takes the rest.
@@ -417,6 +411,7 @@ security = {{ secret_scanning = "enabled", secret_scanning_push_protection = "en
 # branch = "main"                        # checked only: the default branch's name
 # visibility = "private"                 # checked only
 # description = true                     # checked only: every repo has one
+# workflows = true                       # flag unpinned actions, write-all tokens, script injection
 # skip = ["labels"]                      # checks to leave out for this group
 # rulesets = "rulesets/default"          # ruleset JSON files (export them from GitHub)
 # files = "files/default"                # files every repo of the group gets

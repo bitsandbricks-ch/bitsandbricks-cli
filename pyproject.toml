@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "mortar-cli"
 dynamic = ["version"]
-description = "Mortar (bnb): one CLI, TUI and web app for your GitHub and GitLab repos: PRs, runs, approvals, security alerts, stats, and repo defaults kept in a defaults repo"
+description = "Mortar (mtr): one CLI, TUI and web app for your GitHub and GitLab repos: PRs, runs, approvals, security alerts, stats, and repo defaults kept in a defaults repo"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.9"
@@ -15,21 +15,19 @@ dependencies = ['tomli>=2; python_version < "3.11"']
 tui = ["textual>=1.0"]
 market = ["cryptography>=42"]
 server = ["flask>=3.0", "sqlalchemy>=2.0", "cryptography>=42", "gunicorn>=22"]
-operator = ["mortar-cli[server]"]  # the name before the rename
 postgres = ["psycopg[binary]>=3.1"]
 dev = ["pytest>=8", "ruff>=0.6", "textual>=1.0", "flask>=3.0", "sqlalchemy>=2.0", "cryptography>=42"]
 
 [project.scripts]
+mtr = "mortar.cli:main"
 mortar = "mortar.cli:main"
-bnb = "mortar.cli:main"
-bitsandbricks = "mortar.cli:main"
 mortar-server = "mortar.server.app:main"
 
 [tool.hatch.version]
 path = "src/mortar/__init__.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/mortar", "src/bitsandbricks"]
+packages = ["src/mortar"]
 artifacts = ["src/mortar/server/static/**"]
 
 [tool.ruff]
@@ -46,4 +44,4 @@ testpaths = ["tests"]
 "src/mortar/templates.py" = ["E501"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["mortar", "bitsandbricks"]
+known-first-party = ["mortar"]

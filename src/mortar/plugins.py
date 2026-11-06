@@ -3,14 +3,14 @@
 A plugin is a Python package with an entry point in the `mortar.plugins` group:
 
     [project.entry-points."mortar.plugins"]
-    hubra = "hubra_cli.bnb:HubraPlugin"
+    hubra = "hubra_cli.mtr:HubraPlugin"
 
 The entry point names a class (or an instance) like `Plugin` below. Every hook is
-optional; override the ones you need. Install a plugin next to bnb:
+optional; override the ones you need. Install a plugin next to mtr:
 
     pipx inject mortar-cli <plugin package>
 
-BNB_PLUGINS=none (or a comma separated list of names) limits which plugins load.
+MTR_PLUGINS=none (or a comma separated list of names) limits which plugins load.
 """
 
 from __future__ import annotations
@@ -21,9 +21,8 @@ import sys
 from typing import Any, Callable, ClassVar
 
 GROUP = "mortar.plugins"
-OLD_GROUPS = ("bitsandbricks.plugins",)  # plugins written before the rename still load
 # The signed-in user's secrets for plugins (the operator sets it per request): plugins.secret("hubra_token").
-SECRETS: contextvars.ContextVar = contextvars.ContextVar("bnb_plugin_secrets", default=None)
+SECRETS: contextvars.ContextVar = contextvars.ContextVar("mtr_plugin_secrets", default=None)
 
 
 def secret(name: str) -> str | None:
@@ -33,11 +32,11 @@ def secret(name: str) -> str | None:
 
 
 class Plugin:
-    """Base class for plugins. `bnb plugins` lists the installed ones."""
+    """Base class for plugins. `mtr plugins` lists the installed ones."""
 
     name: ClassVar[str] = ""
     description: ClassVar[str] = ""
-    # Extra GraphQL fields for each repo node of `bnb status` and the TUI, e.g.
+    # Extra GraphQL fields for each repo node of `mtr status` and the TUI, e.g.
     # 'manifest: object(expression: "HEAD:plugin.yaml") { ... on Blob { text } }'
     graphql_fields: ClassVar[str] = ""
     # Commands of add_commands that are safe in the operator's web console (no local files, no prompts).
@@ -48,7 +47,7 @@ class Plugin:
         return {}
 
     def status_columns(self) -> list[tuple[str, Callable[[str, dict], str]]]:
-        """Extra `bnb status` columns: (header, fn(repo, graphql node) -> cell)."""
+        """Extra `mtr status` columns: (header, fn(repo, graphql node) -> cell)."""
         return []
 
     def doctor(self, repo: str, group, ctx: dict) -> list[str]:
@@ -119,14 +118,14 @@ def load() -> list[Plugin]:
 
     eps = entry_points()
     found, seen = [], set()
-    for group in (GROUP, *OLD_GROUPS):
+    for group in (GROUP,):
         got = eps.select(group=group) if hasattr(eps, "select") else eps.get(group, [])  # 3.9 returns a dict
         for ep in got:
             if ep.name not in seen:
                 seen.add(ep.name)
                 found.append(ep)
     _plugins = []
-    only = os.environ.get("BNB_PLUGINS")  # unset: all; "none": none; "a,b": only these
+    only = os.environ.get("MTR_PLUGINS")  # unset: all; "none": none; "a,b": only these
     allowed = None if only is None else {n.strip() for n in only.split(",") if n.strip()}
     for ep in sorted(found, key=lambda e: e.name):
         if allowed is not None and ep.name not in allowed:
@@ -134,7 +133,7 @@ def load() -> list[Plugin]:
         try:
             obj = ep.load()
             plugin = obj() if isinstance(obj, type) else obj
-        except Exception as err:  # a broken plugin must not break bnb
+        except Exception as err:  # a broken plugin must not break mtr
             errors.append(f"{ep.name}: {err}")
             continue
         if not getattr(plugin, "name", ""):
@@ -144,7 +143,7 @@ def load() -> list[Plugin]:
 
 
 def register(plugin: Plugin) -> None:
-    """Add a plugin by hand (tests, or a script that drives bnb)."""
+    """Add a plugin by hand (tests, or a script that drives mtr)."""
     load().append(plugin)
 
 
