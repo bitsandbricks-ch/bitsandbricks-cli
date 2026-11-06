@@ -14,8 +14,8 @@ import sys
 from flask import Flask, abort, g, jsonify, request, send_from_directory
 from werkzeug.exceptions import HTTPException
 
-from mason import core, transport
-from mason.server import auth, models, security, webui
+from mason import cache, core, transport
+from mason.server import auth, limits, models, retention, security, webui
 from mason.server import settings as S
 from mason.server.context import NoTransport
 
@@ -32,6 +32,7 @@ def create_app(op: S.Settings | None = None) -> Flask:
                       PROBLEMS=problems, JSON_SORT_KEYS=False)
     models.init(op.database)
     core.install_context_stdout()
+    cache.BUDGET.configure(op.cache_size, op.cache_user_size)
     # The operator acts only with each user's own token: never with gh or a token of the server's.
     transport.set_default(NoTransport("sign in first"))
     if op.trusted_proxies:
@@ -41,8 +42,16 @@ def create_app(op: S.Settings | None = None) -> Flask:
 
     @app.before_request
     def _who():
+        retention.housekeeping()  # at most every few minutes
         auth.resolve()
         if request.path.startswith("/api/"):
+            if request.path != "/api/v1/health":
+                # the GitHub proxy for signed-in CLIs makes many reads per command, which spend only the
+                # user's own GitHub quota: it counts just its REST changes
+                proxy = request.path.startswith("/api/v1/github/")
+                limits.api_call(g.user.id if g.get("user") else None, auth.client_ip(),
+                                request.method not in auth.SAFE_METHODS and request.path != "/api/v1/github/graphql",
+                                count=not proxy)
             auth.check_csrf()
 
     @app.teardown_appcontext
@@ -64,6 +73,10 @@ def create_app(op: S.Settings | None = None) -> Flask:
         if request.path.startswith("/api/"):
             return auth.error_json(err)
         return err
+
+    @app.errorhandler(limits.Limited)
+    def _limited(err):
+        return jsonify({"error": str(err), "retry": err.retry}), 429, {"Retry-After": str(err.retry)}
 
     @app.errorhandler(core.RateLimited)
     def _rate(err):

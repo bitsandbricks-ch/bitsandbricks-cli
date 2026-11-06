@@ -30,6 +30,8 @@ def op(env, monkeypatch, tmp_path):
         github=S.Provider("github", "id", "secret", "https://github.com", "https://api.github.com", "repo"),
         gitlab=S.Provider("gitlab", "", "", "https://gitlab.com", "https://gitlab.com/api/v4", "api"),
         allow_users={("github", "mike")}, admins={("github", "mike")}, plugin_index=str(tmp_path / "index.json"))
+    from mason.server import limits
+    limits.reset()
     app = create_app(settings)
     vault = app.config["VAULT"]
     # every GitHub call goes to the fake gh, with the user's token in GH_TOKEN
@@ -454,37 +456,234 @@ def test_release_page_and_create(op):
     assert any(a["action"] == "release.create" for a in c.get("/api/v1/audit").json)
 
 
-def test_caches_expire_and_fresh_skips_them(monkeypatch):
-    from mason import transport as T
-    caches = T.Caches(ttl=60)
-    caches.setdefault("nodes", {})["acme/web"] = 1
-    caches.setdefault("listing", {})["x"] = 1
-    now = T.time.monotonic()
-    monkeypatch.setattr(T.time, "monotonic", lambda: now + 120)
-    assert "nodes" not in caches and "listing" in caches  # the repo list lives ten times as long
-    monkeypatch.setattr(T.time, "monotonic", lambda: now + 700)
-    assert caches.get("listing") is None
-    lru = T.Lru(2)
-    for k in "abc":
-        lru[k] = k
-    assert list(lru) == ["b", "c"]
+def test_proxy_reads_through_the_users_cache_and_writes_make_it_stale(op, monkeypatch):
+    from test_cache import Fake
 
-    t = T.HttpTransport("tok", cache="60s")
-    calls = []
-
-    def fake(method, url, body=None, accept="", headers=None):
-        calls.append(headers)
-        return 200, {"ETag": '"e1"'}, b'{"n": 1}'
-    monkeypatch.setattr(t, "request", fake)
-    t.api("GET", "/repos/acme/web")
-    t.api("GET", "/repos/acme/web")
-    assert len(calls) == 1  # from the cache
-    token = T.FRESH.set(True)
+    from mason.server import oauth
+    from mason.transport import HttpTransport
+    app, client = op
+    api = Fake()
     try:
-        t.api("GET", "/repos/acme/web")
+        t = HttpTransport("ghtoken", api_url=api.url, graphql_url=api.url + "/graphql", cache="60s")
+        monkeypatch.setattr(oauth, "github", lambda user: t)
+        r = client.get("/api/v1/github/rest/repos/acme/web/labels")
+        assert r.status_code == 200 and r.headers.get("ETag")
+        etag = r.headers["ETag"]
+        r = client.get("/api/v1/github/rest/repos/acme/web/labels", headers={"If-None-Match": etag})
+        assert r.status_code == 304
+        assert len(api.hits("/repos/acme/web/labels")) == 1  # the second came from the cache
+        r = client.post("/api/v1/github/rest/repos/acme/web/labels", json={"name": "bug"}, headers=H)
+        assert r.status_code == 200
+        client.get("/api/v1/github/rest/repos/acme/web/labels")
+        got = api.hits("/repos/acme/web/labels")
+        assert len(got) == 3 and got[-1][0] == "GET" and got[-1][2].get("If-None-Match") == etag
     finally:
-        T.FRESH.reset(token)
-    assert len(calls) == 2 and calls[1] == {"If-None-Match": '"e1"'}  # asked again, with the ETag
-    t.caches.setdefault("nodes", {})["acme/web"] = {}
-    t.api("POST", "/repos/acme/web/releases", {})
-    assert "acme/web" not in t.caches["nodes"]  # a write forgets that repo's status
+        api.server.shutdown()
+# ── revoking tokens when a login is disconnected or the account deleted ──────
+
+
+def _add_gitlab(app, monkeypatch):
+    from mason.server.models import Identity, User, db
+    op = app.config["OP"]
+    monkeypatch.setattr(op.gitlab, "client_id", "glid")
+    monkeypatch.setattr(op.gitlab, "client_secret", "glsecret")
+    with app.app_context():
+        user = db.query(User).one()
+        db.add(Identity(user_id=user.id, provider="gitlab", host="gitlab.com", uid="9", login="mike-gl",
+                        access_enc=app.config["VAULT"].encrypt("gltoken")))
+        db.commit()
+        return [i.id for i in db.query(Identity).order_by(Identity.id)]
+
+
+def test_unlink_revokes_with_a_client_secret(op, monkeypatch):
+    app, c = op
+    from mason.server import oauth
+    calls = []
+    monkeypatch.setattr(oauth, "_http", lambda method, url, data=None, **kw: calls.append((method, url, data, kw))
+                        or (204 if method == "DELETE" else 200, {}))
+    gh_id, gl_id = _add_gitlab(app, monkeypatch)
+    r = c.delete(f"/api/v1/me/identities/{gl_id}", headers=H)
+    assert r.json["revoked"] == [{"provider": "gitlab", "login": "mike-gl", "revoked": True, "manual": ""}]
+    assert calls[-1][:2] == ("POST", "https://gitlab.com/oauth/revoke") and calls[-1][2]["token"] == "gltoken"
+    # the last login goes with the account: GitHub's revoke API with the app's ID and secret
+    r = c.delete("/api/v1/me", headers=H)
+    assert r.json["revoked"][0]["revoked"] is True
+    method, url, _, kw = calls[-1]
+    assert (method, url) == ("DELETE", "https://api.github.com/applications/id/token")
+    assert kw["json_body"] == {"access_token": "ghtoken"} and kw["headers"]["Authorization"].startswith("Basic ")
+
+
+def test_device_flow_tokens_cant_be_revoked_and_say_so(op, monkeypatch):
+    app, c = op
+    from mason.server import oauth
+    calls = []
+    monkeypatch.setattr(oauth, "_http", lambda *a, **kw: calls.append(a) or (200, {}))
+    monkeypatch.setattr(app.config["OP"].github, "client_secret", "")  # the built-in sign-in: no secret
+    r = c.delete("/api/v1/me", headers=H)
+    assert r.status_code == 200 and not calls
+    assert r.json["revoked"] == [{"provider": "github", "login": "mike", "revoked": False,
+                                  "manual": "https://github.com/settings/connections/applications/id"}]
+    with app.app_context():
+        from mason.server.models import Audit, Identity, db
+        assert db.query(Identity).count() == 0  # Mason's copy is gone either way
+        row = db.query(Audit).filter_by(action="account.delete").one()
+        assert not row.ok and row.detail == "tokens not revoked by Mason: github" and row.user_id is None
+
+
+def test_failed_revoke_gives_the_link(op, monkeypatch):
+    app, c = op
+    from mason.server import oauth
+    monkeypatch.setattr(oauth, "_http", lambda *a, **kw: (500, {}))
+    _, gl_id = _add_gitlab(app, monkeypatch)
+    got = c.delete(f"/api/v1/me/identities/{gl_id}", headers=H).json["revoked"][0]
+    assert got["revoked"] is False and got["manual"] == "https://gitlab.com/-/user_settings/applications"
+
+
+# ── the audit log stays bounded ──────────────────────────────────────────────
+
+
+def test_audit_hashes_ips_and_cuts_output(op, monkeypatch):
+    app, c = op
+    from mason.server.models import Audit, db
+    op_settings = app.config["OP"]
+    monkeypatch.setattr(op_settings, "audit_output", 50)
+    c.post("/api/v1/doctor", json={"repos": ["b"], "fix": True, "dry_run": True}, headers=H,
+           environ_base={"REMOTE_ADDR": "203.0.113.7"})
+    with app.app_context():
+        row = db.query(Audit).order_by(Audit.id.desc()).first()
+        assert row.ip.startswith("ip:") and "203.0.113" not in row.ip and len(row.ip) == 19
+        assert len(row.detail) < 120 and row.detail.endswith("more characters not kept)")
+    # the same address hashes the same way, so users still see "same place as before"
+    c.put("/api/v1/settings", json={"orgs": ["acme"]}, headers=H, environ_base={"REMOTE_ADDR": "203.0.113.7"})
+    with app.app_context():
+        a, b = db.query(Audit).order_by(Audit.id.desc()).limit(2)
+        assert a.ip == b.ip
+    monkeypatch.setattr(op_settings, "audit_ips", "none")
+    c.put("/api/v1/settings", json={"orgs": ["acme"]}, headers=H)
+    with app.app_context():
+        assert db.query(Audit).order_by(Audit.id.desc()).first().ip == ""
+
+
+def test_audit_keeps_the_newest_rows_and_purges_old_ones(op, monkeypatch):
+    app, c = op
+    from datetime import timedelta
+
+    from mason.server import retention
+    from mason.server.models import ApiKey, Audit, Session, User, db, utcnow
+    monkeypatch.setattr(app.config["OP"], "audit_rows", 3)
+    for n in range(5):
+        c.put("/api/v1/settings", json={"orgs": [f"org{n}"]}, headers=H)
+    with app.app_context():
+        rows = db.query(Audit).filter(Audit.user_id.isnot(None)).order_by(Audit.id).all()
+        assert len(rows) == 3
+        uid = db.query(User).one().id
+        old = utcnow() - timedelta(days=400)
+        db.add(Audit(user_id=uid, action="ancient", at=old))
+        db.add(Session(id="s" * 64, user_id=uid, csrf="x", created_at=old, seen_at=old))
+        db.add(ApiKey(user_id=uid, name="gone", prefix="deadbeef", hash="h", revoked_at=old))
+        db.add(ApiKey(user_id=uid, name="live", prefix="cafecafe", hash="h"))
+        db.commit()
+        assert retention.housekeeping(force=True)
+        assert not db.query(Audit).filter_by(action="ancient").count()
+        assert db.get(Session, "s" * 64) is None
+        assert [k.name for k in db.query(ApiKey)] == ["live"]
+        assert db.query(Session).count() == 1  # the test's own session is fresh
+
+
+def test_deleting_the_account_deletes_its_audit_rows(op, monkeypatch):
+    app, c = op
+    from mason.server import oauth
+    from mason.server.models import Audit, db
+    monkeypatch.setattr(oauth, "_http", lambda *a, **kw: (204, {}))
+    c.put("/api/v1/settings", json={"orgs": ["acme"]}, headers=H)
+    assert c.delete("/api/v1/me", headers=H).status_code == 200
+    with app.app_context():
+        rows = db.query(Audit).all()
+        assert [(r.action, r.user_id, r.ip, r.ok) for r in rows] == [("account.delete", None, "", True)]
+        assert "Mike" not in rows[0].detail + rows[0].target
+
+
+# ── rate limits and storage caps ─────────────────────────────────────────────
+
+
+def test_api_rate_limits(op, monkeypatch):
+    app, c = op
+    s = app.config["OP"]
+    monkeypatch.setattr(s, "rate_writes", 2)
+    assert [c.put("/api/v1/settings", json={"orgs": ["a"]}, headers=H).status_code for _ in range(3)] == [200, 200, 429]
+    r = c.put("/api/v1/settings", json={"orgs": ["a"]}, headers=H)
+    assert r.status_code == 429 and int(r.headers["Retry-After"]) >= 1 and "wait" in r.json["error"]
+    assert c.get("/api/v1/me").status_code == 200  # reads have their own, larger budget
+    monkeypatch.setattr(s, "rate_anon", 2)
+    anon = app.test_client()
+    assert [anon.get("/api/v1/me").status_code for _ in range(3)] == [200, 200, 429]
+    assert anon.get("/api/v1/health").status_code == 200  # health checks are never limited
+
+
+def _sign_in_as(app, login, uid):
+    from mason.server import oauth
+    with app.test_request_context("/api/v1/auth/github/device/poll", environ_base={"REMOTE_ADDR": "198.51.100.1"}):
+        oauth.profile = lambda name, token: {"uid": uid, "login": login, "name": login, "avatar_url": ""}
+        return oauth.sign_in("github", {"access_token": f"t-{login}"}, None)
+
+
+def test_new_accounts_are_limited(op, monkeypatch):
+    app, _ = op
+    from mason.server import oauth
+    monkeypatch.setattr(oauth, "profile", oauth.profile)  # restored after the test
+    s = app.config["OP"]
+    monkeypatch.setattr(s, "allow_users", set())  # open sign-in
+    monkeypatch.setattr(s, "max_users", 2)
+    assert _sign_in_as(app, "ann", "2").name == "ann"
+    with pytest.raises(PermissionError, match="as many accounts"):
+        _sign_in_as(app, "bob", "3")
+    assert _sign_in_as(app, "ann", "2").name == "ann"  # existing accounts still sign in
+    monkeypatch.setattr(s, "admins", {("github", "mike"), ("github", "root")})
+    assert _sign_in_as(app, "root", "4").name == "root"  # admins always get in
+    monkeypatch.setattr(s, "max_users", 0)
+    monkeypatch.setattr(s, "signups_per_ip", 1)
+    from mason.server import limits
+    limits.reset()
+    assert _sign_in_as(app, "cid", "5").name == "cid"
+    with pytest.raises(PermissionError, match="from this address"):
+        _sign_in_as(app, "dan", "6")
+
+
+def test_key_and_session_caps(op, monkeypatch):
+    app, c = op
+    from mason.server import auth
+    from mason.server.models import ApiKey, Session, User, db
+    monkeypatch.setattr(app.config["OP"], "max_keys", 2)
+    made = [c.post("/api/v1/keys", json={"name": f"k{n}"}, headers=H) for n in range(3)]
+    assert [r.status_code for r in made] == [201, 201, 409] and "revoke one first" in made[2].json["error"]
+    for _ in range(6):  # revoked keys don't count, and only a few of them are kept
+        assert c.delete(f"/api/v1/keys/{made[0].json['id']}", headers=H).status_code == 200
+        made[0] = c.post("/api/v1/keys", json={"name": "again"}, headers=H)
+        assert made[0].status_code == 201
+    with app.app_context():
+        assert db.query(ApiKey).count() <= 4
+    assert c.post("/api/v1/keys", json={"days": True}, headers=H).status_code == 400
+    monkeypatch.setattr(app.config["OP"], "max_sessions", 2)
+    with app.test_request_context("/"):
+        user = db.query(User).one()
+        for _ in range(3):
+            auth.start_session(app.make_response("x"), user)
+        assert db.query(Session).filter_by(user_id=user.id).count() == 2
+
+
+def test_settings_size_and_device_lookups(op):
+    app, c = op
+    big = [f"org-{n:03d}-" + "x" * 180 for n in range(200)]
+    r = c.put("/api/v1/settings", json={"orgs": big, "repos": big}, headers=H)
+    assert r.status_code == 413 and "KB" in r.json["error"]
+    codes = [c.get("/api/v1/device/info?code=BCDF-GHJK").status_code for _ in range(11)]
+    assert codes[:10] == [404] * 10 and codes[10] == 429
+    assert c.post("/api/v1/device/approve", json={"user_code": "X", "days": 99999}, headers=H).status_code == 429
+
+
+def test_proxy_reads_dont_count(op, monkeypatch):
+    app, c = op
+    monkeypatch.setattr(app.config["OP"], "rate_api", 2)
+    codes = [c.get("/api/v1/github/rest/repos/acme/web").status_code for _ in range(4)]
+    assert 429 not in codes
+    assert [c.get("/api/v1/me").status_code for _ in range(3)] == [200, 200, 429]

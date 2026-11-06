@@ -80,6 +80,10 @@ def start_session(resp, user: User) -> Session:
                 user_agent=(request.headers.get("User-Agent") or "")[:300])
     db.add(s)
     user.last_login = utcnow()
+    db.flush()
+    keep = current_app.config["OP"].max_sessions  # the oldest sessions end first
+    for old in db.query(Session).filter_by(user_id=user.id).order_by(Session.seen_at.desc()).offset(keep):
+        db.delete(old)
     db.commit()
     set_session_cookie(resp, raw)
     return s
@@ -186,9 +190,13 @@ def can_write() -> bool:
 
 
 def audit(action: str, target: str = "", dry_run: bool = False, ok: bool = True, detail: str = "") -> None:
-    db.add(Audit(user_id=g.user.id if g.get("user") else None, via=g.get("via") or "", ip=client_ip(),
-                 action=action, target=target[:300], dry_run=dry_run, ok=ok, detail=detail[:4000]))
+    """One audit row, bounded as retention.py says: hashed address, output cut, oldest rows dropped."""
+    from mason.server import retention
+    user_id = g.user.id if g.get("user") else None
+    db.add(Audit(user_id=user_id, via=g.get("via") or "", ip=retention.audit_ip(client_ip()),
+                 action=action, target=target[:300], dry_run=dry_run, ok=ok, detail=retention.cut(detail)))
     db.commit()
+    retention.trim(user_id)
 
 
 def error_json(err):

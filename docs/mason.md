@@ -163,13 +163,40 @@ GitLab: set `GITLAB_URL`.
 | `MASON_ALLOW_ORGS` | optional: only members of these GitHub orgs or GitLab groups may sign in |
 | `MASON_ADMINS` | the admins (may always sign in): everyone's audit log, plugins for everyone, installs |
 | `MASON_IDLE_HOURS`, `MASON_SESSION_DAYS` | session idle timeout (12) and lifetime (7) |
-| `MASON_CACHE` | how long GET answers are cached per user (`60s`; the repo list ten times as long); ETags make refreshes cheap, `r` in the UI skips the cache |
+| `MASON_CACHE` | the base time GitHub and GitLab answers are kept per user (`60s`, `0` to always ask); see [Caching](#caching) |
+| `MASON_CACHE_SIZE`, `MASON_CACHE_USER_SIZE` | memory for cached answers, all users together (`256MB`) and one user's share (`32MB`) |
 | `MASON_PLUGIN_INDEX`, `MASON_PLUGIN_INDEX_KEYS` | the plugin index (URL or file; default: `plugins/index.json` on this repo's main branch) and extra public keys (base64, comma separated) it may be signed with |
 | `MASON_PLUGIN_INSTALL` | `1` lets admins install plugins from the marketplace page |
 | `MASON_TRUSTED_PROXIES` | how many proxies in front set `X-Forwarded-*` (0) |
+| `MASON_AUDIT_DAYS`, `MASON_AUDIT_ROWS`, `MASON_AUDIT_OUTPUT` | audit rows go after 90 days; each user keeps the newest 1000; command output is cut to 1000 characters |
+| `MASON_RATE_API`, `MASON_RATE_WRITES`, `MASON_RATE_ANON` | API calls per minute: per user (600), changes per user (60), signed-out calls per address (120); 0 switches one off. Reads through the GitHub proxy for the CLI aren't counted (they spend only your own GitHub quota) |
+| `MASON_SIGNUPS_PER_HOUR`, `MASON_SIGNUPS_PER_IP`, `MASON_MAX_USERS` | new accounts per hour in all (60) and per address (5), and the most accounts this Mason takes (1000; 0 = no cap); admins from `MASON_ADMINS` always get in |
+| `MASON_MAX_KEYS`, `MASON_MAX_SESSIONS` | working API keys (50) and browser sessions (20) per user |
+| `MASON_AUDIT_IPS` | what the audit log keeps of the caller's address: `hash` (default: an HMAC with the secret key, so "same address" shows without the address), `none`, or `full` |
 
 Over http the session cookie loses its `__Host-` prefix. Mason refuses to start when no login is
 configured (GitHub Enterprise without `GITHUB_CLIENT_ID`, say) or the URL is plain http on a public name.
+
+## Caching
+
+Mason keeps GitHub and GitLab answers in memory only, never on disk, and each user's in their own
+cache: nothing one user fetched is ever looked up for another.
+
+- **Per resource**: PRs, merge requests, issues, CI runs, checks and pipelines (and GraphQL) are kept 30s
+  at most; files, labels, rulesets and other repo settings for `MASON_CACHE`; the account, its orgs and
+  repo metadata 5x as long. `/rate_limit` and job logs are never served from the cache.
+- **Conditional requests**: an answer past its time is asked for again with its `ETag` (or `Last-Modified`).
+  An unchanged answer comes back as 304, which costs no rate limit on GitHub.
+- **Writes**: a change made through Mason (the web app, the console, or the CLI through the operator's
+  proxy) makes that repo's answers stale at once, and a GraphQL mutation all GraphQL answers. A change to a
+  repo itself drops the repo lists, a file change the loaded `mason.toml`.
+- **Rate limits**: Mason reads GitHub's `X-RateLimit-*` (per bucket: REST, GraphQL, search) and GitLab's
+  `RateLimit-*` headers. Under 5% left, answers are kept 4x as long. At 0, or after a `Retry-After`,
+  Mason answers from the cache, even stale, and refuses new calls until the reset without asking.
+- **Reload**: `r` in the web UI (`?fresh=1` on any read) marks your answers stale, so they are asked for
+  again with their ETags; the browser also reuses a tab's last answer for a minute when you switch back.
+- **Bounded**: the least recently used answers go first when a user's share or the total is full.
+  `/api/v1/rate` shows each user's hits, 304s, entries and bytes; `POST /api/v1/cache/clear` empties it.
 
 ## Security model
 
@@ -179,8 +206,14 @@ configured (GitHub Enterprise without `GITHUB_CLIENT_ID`, say) or the URL is pla
   decision is made at every sign-in, not once.
 - **The user's own token, always.** Every GitHub and GitLab call is made with the signed-in user's token, so
   nobody sees or changes more than their account may. The server never falls back to a token or gh login of
-  its own. Tokens are encrypted at rest (Fernet), refreshed when they expire (GitLab), and revoked at the
-  provider when someone disconnects a login or deletes their account.
+  its own. Tokens are encrypted at rest (Fernet) and refreshed when they expire (GitLab).
+- **Revoking tokens.** When someone disconnects a login or deletes their account, Mason deletes its copy of
+  the token and asks the provider to revoke it. Both GitHub's and GitLab's revoke APIs need the OAuth app's
+  client secret, so this works only with `GITHUB_CLIENT_SECRET` (GitHub) and always for GitLab, which
+  needs its secret anyway. With the built-in GitHub sign-in (device flow, no secret) Mason **cannot**
+  revoke the token: the UI then shows the link to the app's page at GitHub
+  (`https://github.com/settings/connections/applications/<client id>`), where one click revokes it, and the
+  audit log records that it wasn't revoked. A failed revoke call is handled the same way.
 - **Sessions** are random cookies (`__Host-` prefixed, `Secure`, `HttpOnly`, `SameSite=Lax`); the database
   keeps only their SHA-256. Idle and absolute timeouts; users see and end their other sessions.
 - **CSRF**: every change needs the session's `X-CSRF-Token` header and a matching `Origin`.
@@ -191,10 +224,30 @@ configured (GitHub Enterprise without `GITHUB_CLIENT_ID`, say) or the URL is pla
   the scope; the terminal gets a key. Codes expire after 10 minutes and polling is rate limited.
 - **The GitHub proxy** for signed-in CLIs passes on only the reads mason makes and the writes mason and its plugins
   make; deleting repos, changing access, keys, hooks and account settings are never passed on.
-- **Audit log**: sign-ins, keys, every change (with its output) and every dry run, with who, how and from where.
+- **Audit log**: sign-ins, keys, every change (with its output) and every dry run, with who and how. It stays
+  bounded: the caller's address is kept only as a keyed hash (`MASON_AUDIT_IPS`), output is cut to
+  `MASON_AUDIT_OUTPUT` characters, each user keeps at most `MASON_AUDIT_ROWS` rows, rows go after
+  `MASON_AUDIT_DAYS`, and deleting an account deletes its rows (one row without name or address records the
+  deletion). Expired sessions, sign-in states, device codes and keys revoked or expired over 30 days ago are
+  deleted every few minutes.
 - **Browser hardening**: a strict CSP (`self` only, no inline scripts or styles, no `data:` fonts), no
   `v-html` anywhere in the UI, `X-Frame-Options: DENY`, `no-referrer`, HSTS, `Cache-Control: no-store` on the API.
-- **Throttling** on sign-in, device codes and key use.
+- **Throttling and caps** so open sign-in can't fill the disk: sign-ins, device codes, code lookups and bad
+  keys are throttled per address; API calls per user (and per address when signed out); new accounts per
+  hour, per address and in all (`MASON_MAX_USERS`); and what each user stores is capped (below). Admins from
+  `MASON_ADMINS` always get an account. Counters live in memory, so they start over on restart, and each
+  server process counts on its own (the image runs one).
+
+  | Per user | Cap |
+  |---|---|
+  | API keys | `MASON_MAX_KEYS` (50) working keys; revoked or expired ones are deleted after 30 days or beyond twice that number |
+  | sessions | `MASON_MAX_SESSIONS` (20); the oldest ends when a new one starts |
+  | settings | 32 KB |
+  | secrets | one per name a plugin declares, 4000 characters each |
+  | audit log | `MASON_AUDIT_ROWS` (1000) rows of at most ~1.5 KB |
+
+  So one account takes at most about 2 MB, and the database at most about `MASON_MAX_USERS` × 2 MB (2 GB with
+  the defaults) plus one shared audit budget for failed sign-ins.
 
 ## The CLI and TUI through Mason
 

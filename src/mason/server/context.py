@@ -12,8 +12,8 @@ from contextlib import contextmanager
 from flask import abort, g, request
 
 from mason import config, core
+from mason.cache import Spaces
 from mason.server import oauth
-from mason.transport import FRESH, Caches
 
 REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 GITLAB_REPO = re.compile(r"^gitlab:[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$")
@@ -29,7 +29,7 @@ class NoTransport:
 
     def __init__(self, why: str = "connect GitHub first (Settings › Accounts)"):
         self.why = why
-        self.caches: Caches = Caches()
+        self.caches = Spaces()
 
     def __getattr__(self, name):
         def refuse(*_a, **_kw):
@@ -83,10 +83,11 @@ def as_user(dry: bool | None = None):
     except RuntimeError as err:
         abort(409, str(err))
     gtoken = config.GITLAB.set(gl)
-    fresh = request.args.get("fresh") == "1"
-    ftoken = FRESH.set(fresh)
-    if fresh:  # r in the web app: read again, past every cache (ETags still spare the rate limit)
+    if request.args.get("fresh") == "1":  # r in the web app: ask again, revalidating with ETags (cheap)
         for t in (gh, gl):
+            store = getattr(t, "store", None)
+            if store is not None:
+                store.stale()
             if t is not None:
                 for name in ("nodes", "gl_nodes"):
                     t.caches.pop(name, None)
@@ -94,7 +95,6 @@ def as_user(dry: bool | None = None):
         with core.using(gh, dry):
             yield gh, gl
     finally:
-        FRESH.reset(ftoken)
         config.GITLAB.reset(gtoken)
 
 
@@ -116,7 +116,7 @@ def gitlab_projects(gl, cfg) -> dict:
     groups = s.get("gitlab_groups") or list((cfg.raw or {}).get("gitlab_groups") or [])
     extra = s.get("gitlab_repos") or []
     key = ("gl_projects", tuple(groups), tuple(extra), tuple(cfg.exclude))
-    cache = gl.caches.setdefault("gl_listing", {})
+    cache = gl.caches.space("gl_listing")
     if key not in cache:
         cache[key] = GL.projects(gl, groups, extra, cfg.exclude)
     return cache[key]

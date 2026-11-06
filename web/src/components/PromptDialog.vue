@@ -8,6 +8,7 @@ const box = ref(null)
 const text = ref('')
 watch(() => prompt.open, (open) => { if (open) { text.value = ''; nextTick(() => box.value?.focus()) } })
 function key(e) {
+  if (prompt.notice) { if (['Enter', 'Escape', 'y', 'n'].includes(e.key)) answer('ok'); return }
   if (e.target.tagName === 'INPUT') { if (e.key === 'Enter') answer(text.value || null); if (e.key === 'Escape') answer(null); return }
   if (e.key === 'y' || e.key === 'Enter') answer(state.dryRun ? 'dry' : 'yes')
   else if (e.key === 'd' && prompt.allowDry) answer('dry')
@@ -20,12 +21,18 @@ function key(e) {
     <div ref="box" class="dialog" tabindex="0" role="dialog" aria-modal="true" @keydown="key">
       <div class="q">{{ prompt.question }}</div>
       <pre v-if="prompt.detail" class="text dim" style="margin-top: 8px">{{ prompt.detail }}</pre>
+      <div v-for="l in prompt.links" :key="l.href" style="margin-top: 6px">
+        <a class="accent" :href="l.href" target="_blank" rel="noopener">{{ l.label }}</a>
+      </div>
       <div v-if="prompt.input" style="margin-top: 10px">
         <input v-model="text" :type="prompt.input.password ? 'password' : 'text'" :placeholder="prompt.input.placeholder"
                style="width: 100%" autofocus>
       </div>
       <div class="row" style="margin-top: 12px">
-        <template v-if="prompt.input">
+        <template v-if="prompt.notice">
+          <button class="primary" @click="answer('ok')">ok</button>
+        </template>
+        <template v-else-if="prompt.input">
           <button class="primary" @click="answer(text || null)">ok</button>
           <button @click="answer(null)">cancel</button>
         </template>

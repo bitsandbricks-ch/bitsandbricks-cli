@@ -12,10 +12,12 @@ Not everything is passed on:
 
 from __future__ import annotations
 
+import json
 import re
 
 from flask import Blueprint, Response, abort, g, request
 
+from mason import core
 from mason.server import oauth
 from mason.server.auth import audit, can_write, need
 from mason.transport import HttpError
@@ -79,26 +81,44 @@ def rest(path: str):
     if not allowed(request.method, path):
         abort(403, f"the operator doesn't pass {request.method} {path} on")
     t = transport()
-    url = t.api_url + path + (("?" + request.query_string.decode()) if request.query_string else "")
+    query = request.query_string.decode()
+    full = path + (("?" + query) if query else "")
     accept = request.headers.get("Accept") or "application/vnd.github+json"
     if accept not in ("application/vnd.github+json", "application/json", "application/octet-stream",
                       "application/vnd.github.diff"):
         accept = "application/vnd.github+json"
     data = request.get_data() if request.method in ("POST", "PUT", "PATCH", "DELETE") else None
     try:
-        status, headers, raw = t.request(request.method, url, data or None, accept=accept)
+        if request.method == "GET":  # through this user's own cache, revalidated with ETags
+            status, headers, raw = t.get_raw(full, accept=accept)
+        else:
+            try:
+                status, headers, raw = t.request(request.method, t.api_url + full, data or None, accept=accept)
+            finally:  # the operator's own pages must not show what this write changed as it was
+                t.forget(path)
     except HttpError as err:
         return Response(err.body or b"{}", status=err.status, content_type="application/json")
+    except core.RateLimited as err:
+        return Response(json.dumps({"message": str(err)}), status=429, content_type="application/json",
+                        headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": str(err.reset or 0)})
     except RuntimeError as err:
         abort(502, str(err))
     if request.method != "GET":
         audit(f"proxy.{request.method.lower()}", path)
-    ctype = headers.get("Content-Type") or headers.get("content-type") or "application/json"
-    resp = Response(raw, status=status, content_type=ctype)
-    for h in ("X-RateLimit-Remaining", "X-RateLimit-Limit", "X-RateLimit-Reset"):
-        v = headers.get(h) or headers.get(h.lower())
+    low = {k.lower(): v for k, v in headers.items()}
+    etag = low.get("etag")
+    if request.method == "GET" and etag and etag in request.headers.get("If-None-Match", ""):
+        resp = Response(status=304)
+    else:
+        resp = Response(raw, status=status, content_type=low.get("content-type") or "application/json")
+    for h in ("X-RateLimit-Remaining", "X-RateLimit-Limit", "X-RateLimit-Reset", "ETag", "Last-Modified"):
+        v = low.get(h.lower())
         if v:
             resp.headers[h] = v
+    if request.method == "GET" and not low.get("x-ratelimit-remaining") and t.last_rate:
+        resp.headers["X-RateLimit-Remaining"] = str(t.last_rate["remaining"])
+        resp.headers["X-RateLimit-Limit"] = str(t.last_rate["limit"])
+        resp.headers["X-RateLimit-Reset"] = str(t.last_rate["reset"])
     return resp
 
 
@@ -123,10 +143,10 @@ def graphql():
     if not isinstance(variables, dict):
         abort(400, "variables must be an object")
     t = transport()
-    import json
     try:
-        status, _, raw = t.request("POST", t.graphql_url, json.dumps({"query": query, "variables": variables}).encode(),
-                                   accept="application/json")
+        status, raw = t.graphql_raw(query, variables)
+    except core.RateLimited as err:
+        return Response(json.dumps({"message": str(err)}), status=429, content_type="application/json")
     except HttpError as err:
         return Response(err.body or b"{}", status=err.status, content_type="application/json")
     except RuntimeError as err:
