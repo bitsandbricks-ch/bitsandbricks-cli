@@ -1,7 +1,6 @@
 <script setup>
 // Stats: what moved over the last N days, for all repos, per group and per repo.
 import { computed, ref } from 'vue'
-import { get } from '../api.js'
 import { useLoad } from '../load.js'
 import { useKeys } from '../keys.js'
 import { loadGroups, scope } from '../scope.js'
@@ -10,7 +9,7 @@ import DataTable from '../components/DataTable.vue'
 import Scope from '../components/Scope.vue'
 
 const days = ref(30)
-const { data, loading, load } = useLoad((q) => get(`/metrics${q}${q ? '&' : '?'}days=${days.value}`))
+const { data, loading, load } = useLoad((q) => `/metrics${q}${q ? '&' : '?'}days=${days.value}`)
 loadGroups()
 const sel = ref(null)
 const t = computed(() => data.value?.totals)

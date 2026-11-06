@@ -17,7 +17,7 @@ function issuesUrl(q) {
   const extra = qs({ state: f.state, mine: f.mine, label: f.label, stale: f.stale || '' }).slice(1)
   return `/issues${q || (extra ? '?' : '')}${q && extra ? '&' : ''}${extra}`
 }
-const { data, loading, load } = useLoad((q) => get(issuesUrl(q)))
+const { data, loading, load } = useLoad((q) => issuesUrl(q))
 watch(f, () => load())
 loadGroups()
 const sel = ref(null)

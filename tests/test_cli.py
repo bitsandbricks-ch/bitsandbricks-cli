@@ -374,3 +374,34 @@ def test_issues(env):
     out = mason(env, "issue", "comment", "web#3", "ok", "--dry-run")
     assert "[dry-run] POST /repos/acme/web/issues/3/comments" in out
     assert "Name the issue" in mason(env, "issue", "close", "web")
+
+
+def test_release_new_and_view(env, tmp_path):
+    log = tmp_path / "calls.log"
+    e = {**env, "FAKE_GH_LOG": str(log)}
+    out = mason(e, "release", "new", "api", "v1.11.0", "--title", "Search", "--notes", "- New", "--draft", "--yes")
+    assert "created the draft release v1.11.0 of acme/api from a new tag on main" in out
+    assert "https://github.com/acme/api/releases/tag/v1.11.0" in out
+    assert "api -X POST /repos/acme/api/releases" in log.read_text()
+    assert "left as it is" in mason(env, "release", "new", "api", "v1.11.0")  # asks; no answer leaves it
+    out = mason(env, "release", "new", "api", "v1.10.0", "--yes")
+    assert "has a release v1.10.0 already" in out
+    assert "not a tag name" in mason(env, "release", "new", "api", "bad tag", "--yes")
+    out = mason(env, "release", "new", "web", "v0.1.0", "--prerelease", "--dry-run")
+    assert "[dry-run] create the prerelease release v0.1.0 (v0.1.0) of acme/web" in out
+    out = mason(env, "release", "view", "api")
+    assert "v1.10.0 · published" in out and "by mike" in out and "Release v1.10.0" in out
+    assert "- Faster startup" in out and "other releases" in out and "v1.2.0" in out and "prerelease" in out
+    out = mason(env, "release", "view", "api", "v1.2.0")
+    assert out.splitlines()[2].startswith("v1.2.0 · prerelease")
+    assert "no release v9.9.9 in acme/api" in mason(env, "release", "view", "api", "v9.9.9")
+
+
+def test_release_suggestion():
+    from mason import releases as REL
+    assert REL.suggest_from([]) == "v0.1.0"
+    assert REL.suggest_from([{"tag_name": "v1.2.9"}, {"tag_name": "v1.10.0"}, {"tag_name": "v2.0.0", "draft": True}]) \
+        == "v1.10.1"
+    import pytest
+    with pytest.raises(RuntimeError):
+        REL.valid_tag("v1..2")

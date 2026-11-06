@@ -42,6 +42,15 @@ stats, defaults, console, plugins, market, settings and audit, plus tabs that pl
 one-key shortcut (`1` to `9` for the first ones, `I` issues, `W` workflows, `D` defaults, `:` console,
 `P` plugins, `K` market, `S` settings, `L` audit).
 
+- **Enter opens a page.** On repos it opens the repo's own page: its whole detail on the right and what
+  you can do with it on the left (check, fix, sync, merge, create a release, its releases), with the output
+  below. On releases it opens the repo's releases: every recent release on the left, the picked one in full
+  (notes, assets, the runs of its tag) on the right. `Esc` goes back.
+- **Releases** creates releases: **n** opens a form with the tag (the next patch is suggested on a repo's
+  release page), title, notes, target branch, draft, pre-release, and notes GitHub writes from the merged
+  PRs. GitLab projects get the same form without draft and pre-release, which GitLab doesn't have.
+- **Caching:** a tab you go back to shows its last answer at once and asks again after a minute; `r` and
+  every change ask again right away.
 - **Issues** lists issues across GitHub repos and GitLab projects, filtered by state, label, mine and age.
   It closes, reopens and comments on them, and **n** opens a new issue in any repo.
 - **Workflows** shows what `mason workflows` finds; **p** opens a PR that pins the selected repo's actions
@@ -186,6 +195,8 @@ cache: nothing one user fetched is ever looked up for another.
 - **Rate limits**: Mason reads GitHub's `X-RateLimit-*` (per bucket: REST, GraphQL, search) and GitLab's
   `RateLimit-*` headers. Under 5% left, answers are kept 4x as long. At 0, or after a `Retry-After`,
   Mason answers from the cache, even stale, and refuses new calls until the reset without asking.
+- **Reload**: `r` in the web UI (`?fresh=1` on any read) marks your answers stale, so they are asked for
+  again with their ETags; the browser also reuses a tab's last answer for a minute when you switch back.
 - **Bounded**: the least recently used answers go first when a user's share or the total is full.
   `/api/v1/rate` shows each user's hits, 304s, entries and bytes; `POST /api/v1/cache/clear` empties it.
 
@@ -299,7 +310,7 @@ An installed plugin runs inside Mason for every user, so plugins are installed w
 Everything the UI does is JSON under `/api/v1` and works with an API key (`Authorization: Bearer mason_…`):
 
 `/me`, `/config`, `/repos`, `/repo`, `/status`, `/prs`, `/pr`, `/merge`, `/ready`, `/issues`, `/issue`,
-`/runs`, `/approvals`, `/approve`, `/releases`, `/releases/jobs`, `/packages`, `/security`, `/doctor`, `/sync`,
+`/runs`, `/approvals`, `/approve`, `/releases` (GET lists, POST creates), `/release?repo=&tag=`, `/releases/jobs`, `/packages`, `/security`, `/doctor`, `/sync`,
 `/workflows`, `/workflows/pin`, `/new`, `/metrics?days=`, `/console`, `/defaults…`, `/plugins…`, `/market…`,
 `/settings`, `/keys`, `/sessions`, `/secrets`, `/audit`, `/rate` and `/cache/clear`, each only ever about
 the caller. `/api/v1/health` needs no sign-in. Changes take `"dry_run": true`.

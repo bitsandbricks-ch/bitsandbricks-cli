@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from contextlib import contextmanager
 
-from flask import abort, g
+from flask import abort, g, request
 
 from mason import config, core
 from mason.cache import Spaces
@@ -83,6 +83,14 @@ def as_user(dry: bool | None = None):
     except RuntimeError as err:
         abort(409, str(err))
     gtoken = config.GITLAB.set(gl)
+    if request.args.get("fresh") == "1":  # r in the web app: ask again, revalidating with ETags (cheap)
+        for t in (gh, gl):
+            store = getattr(t, "store", None)
+            if store is not None:
+                store.stale()
+            if t is not None:
+                for name in ("nodes", "gl_nodes"):
+                    t.caches.pop(name, None)
     try:
         with core.using(gh, dry):
             yield gh, gl

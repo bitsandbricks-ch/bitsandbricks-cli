@@ -101,6 +101,26 @@ def test_tui_flow(env, monkeypatch):
             await pilot.pause(0.3)
             await pilot.press("y")
             await pilot.pause(1)
+            releases.move_cursor(row=releases.get_row_index("acme/plugin-b"))
+            await pilot.pause(0.2)
+            await pilot.press("enter")  # the release page
+            await until(pilot, lambda: "Release v0.3.0" in str(app.screen.query_one("#page-detail").render()))
+            assert "- Faster startup" in str(app.screen.query_one("#page-detail").render())
+            await pilot.press("escape")
+            await pilot.pause(0.3)
+            await pilot.press("N")
+            await until(pilot, lambda: "New release of acme/plugin-b" in str(app.screen.query_one("Label").render()))
+            assert app.screen.query_one("Input").value == "v0.3.1"
+            await pilot.press("enter")
+            await pilot.pause(0.3)
+            await pilot.press("enter")  # the title stays the tag
+            await pilot.pause(0.3)
+            await pilot.press("enter")  # no notes: GitHub writes them
+            await pilot.pause(0.3)
+            await pilot.press("down", "down", "enter")  # draft
+            await pilot.pause(0.3)
+            await pilot.press("y")
+            await pilot.pause(1)
             await pilot.press("5")
             images = app.query_one("#packages-table")
             await until(pilot, lambda: images.row_count)
@@ -126,6 +146,7 @@ def test_tui_flow(env, monkeypatch):
             assert any("[dry-run] update the branch of acme/web#7" in line for line in log), log
             assert any("[dry-run] comment on acme/web#7: thanks" in line for line in log), log
             assert any("[dry-run] branch bump/v0.5.0" in line for line in log), log
+            assert any("[dry-run] create the draft release v0.3.1 (v0.3.1)" in line for line in log), log
 
     asyncio.run(run())
 

@@ -1,14 +1,13 @@
 <script setup>
 // Open alerts: Dependabot, secret scanning and code scanning on GitHub, vulnerabilities on GitLab.
 import { computed, ref } from 'vue'
-import { get } from '../api.js'
 import { useLoad } from '../load.js'
 import { useKeys } from '../keys.js'
 import { loadGroups, scope } from '../scope.js'
 import DataTable from '../components/DataTable.vue'
 import Scope from '../components/Scope.vue'
 
-const { data, loading, load } = useLoad((q) => get(`/security${q}`))
+const { data, loading, load } = useLoad((q) => `/security${q}`)
 loadGroups()
 const sel = ref(null)
 const rows = computed(() => (data.value?.security || []).flatMap((s) => s.alerts.map((a, i) => ({ ...a, repo: s.repo, provider: s.provider, key: `${s.repo}|${i}` }))))

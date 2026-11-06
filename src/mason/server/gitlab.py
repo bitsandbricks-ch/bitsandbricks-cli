@@ -705,3 +705,82 @@ def stats(gl: GitLab, repos: list[str], days: int = 30) -> list[dict]:
             [S.when(m.get("created_at")) for m in opened], [S.when(m.get("created_at")) for m in open_now], runs,
             [(r.get("tag_name"), S.when(r.get("released_at") or r.get("created_at"))) for r in rels], since, now)
     return core.pmap(one, repos)
+
+
+# ── creating releases, and a project's releases in detail ────────────────────
+
+
+def release_shape(r: dict) -> dict:
+    """A GitLab release in the shape GitHub's REST API gives (what releases.py reads)."""
+    links = (r.get("assets") or {}).get("links") or []
+    return {"tag_name": r.get("tag_name"), "name": r.get("name") or "", "body": r.get("description") or "",
+            "published_at": r.get("released_at") or r.get("created_at"), "created_at": r.get("created_at"),
+            "html_url": (r.get("_links") or {}).get("self", ""), "draft": False,
+            "prerelease": bool(r.get("upcoming_release")), "author": {"login": (r.get("author") or {}).get("username")},
+            "target_commitish": (r.get("commit") or {}).get("short_id") or "",
+            "assets": [{"name": a.get("name"), "url": a.get("url")} for a in links]}
+
+
+def release_page(gl: GitLab, cfg, repo: str, tag: str | None = None) -> dict:
+    """What a release page shows for a GitLab project (the same shape as releases.page)."""
+    from mason import releases as REL
+    rels = [release_shape(r) for r in gl.api("GET", f"{gl.project(repo)}/releases?per_page={REL.RECENT}") or []]
+    try:
+        pipes = gl.api("GET", f"{gl.project(repo)}/pipelines?per_page=30&scope=tags") or []
+    except core.RateLimited:
+        raise
+    except RuntimeError:
+        pipes = []
+    runs = [{"name": f"pipeline #{p['id']}",
+             "conclusion": "failure" if p.get("status") == "failed" else p.get("status"),
+             "head_branch": p.get("ref"), "created_at": p.get("created_at"), "html_url": p.get("web_url")}
+            for p in pipes]
+    rel = REL.find(rels, tag)
+    if tag and rel is None:
+        raise RuntimeError(f"no release {tag} in {repo}")
+    url = (rel or {}).get("html_url") or f"{gl.web}/{path_of(repo)}/-/releases"
+    return {"repo": repo, "provider": "gitlab", "releases": [REL.row(r) for r in rels],
+            "selected": (rel or {}).get("tag_name") or "", "url": url,
+            "text": REL.detail_text(cfg, repo, rel, runs, rels), "suggest": REL.suggest_from(rels)}
+
+
+def create_release(gl: GitLab, repo: str, tag: str, title: str = "", notes: str = "", draft: bool = False,
+                   prerelease: bool = False, target: str = "", generate: bool = False) -> str:
+    """Create a GitLab release (and its tag on `target` or the default branch when the tag is new).
+    GitLab has no draft or pre-release flag, so those are refused rather than quietly published."""
+    from mason import releases as REL
+    tag = REL.valid_tag(tag)
+    if draft or prerelease:
+        raise RuntimeError("GitLab releases have no draft or pre-release state: leave those off for GitLab")
+    title = (title or "").strip()[:200] or tag
+    p = gl.project(repo)
+    q = urllib.parse.quote(tag, safe="")
+    try:
+        gl.api("GET", f"{p}/releases/{q}")
+        raise RuntimeError(f"{repo} has a release {tag} already")
+    except HttpError as err:
+        if err.status != 404:
+            raise
+    try:
+        gl.api("GET", f"{p}/repository/tags/{q}")
+        new_tag = False
+    except HttpError as err:
+        if err.status != 404:
+            raise
+        new_tag = True
+    data = {"tag_name": tag, "name": title, "description": notes or ""}
+    ref = (target or "").strip()
+    if new_tag:
+        ref = ref or (gl.api("GET", p) or {}).get("default_branch") or "main"
+        data["ref"] = ref
+    if generate and not notes:
+        say("   GitLab doesn't write release notes itself: the release has none")
+    where = f"a new tag on {ref}" if new_tag else "the existing tag"
+    got = gl.write("POST", f"{p}/releases", data) or {}
+    if core.dry_run():
+        say(f"   [dry-run] create the release {tag} ({title}) of {repo} from {where}")
+        return ""
+    url = (got.get("_links") or {}).get("self") or f"{gl.web}/{path_of(repo)}/-/releases/{q}"
+    say(f"   created the release {tag} of {repo} from {where}")
+    say(f"      {url}")
+    return url

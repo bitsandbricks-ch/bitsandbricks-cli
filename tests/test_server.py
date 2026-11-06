@@ -449,6 +449,25 @@ def test_redirect_sign_in_github_and_gitlab(op, monkeypatch):
     assert "is_admin" not in me["user"]
 
 
+def test_release_page_and_create(op):
+    _, c = op
+    page = c.get("/api/v1/release?repo=acme/api").json
+    assert [r["tag"] for r in page["releases"]] == ["v1.10.0", "v1.2.0"] and page["selected"] == "v1.10.0"
+    assert "- Faster startup" in page["text"] and page["suggest"] == "v1.10.1"
+    page = c.get("/api/v1/release?repo=acme/api&tag=v1.2.0").json
+    assert page["selected"] == "v1.2.0" and "prerelease" in page["text"]
+    assert c.get("/api/v1/release?repo=acme/api&tag=v9.9.9").status_code == 404
+    body = {"repo": "acme/api", "tag": "v1.11.0", "title": "Search", "notes": "- New", "draft": True, "dry_run": True}
+    got = c.post("/api/v1/releases", json=body, headers=H).json
+    assert "[dry-run] POST /repos/acme/api/releases" in got["text"] and "draft release v1.11.0" in got["text"]
+    got = c.post("/api/v1/releases", json={**body, "dry_run": False}, headers=H).json
+    assert got["ok"] and "created the draft release v1.11.0 of acme/api" in got["text"]
+    got = c.post("/api/v1/releases", json={**body, "tag": "v1.10.0"}, headers=H).json
+    assert not got["ok"] and "has a release v1.10.0 already" in got["text"]
+    assert c.post("/api/v1/releases", json={**body, "tag": "no spaces"}, headers=H).status_code == 400
+    assert any(a["action"] == "release.create" for a in c.get("/api/v1/audit").json)
+
+
 def test_proxy_reads_through_the_users_cache_and_writes_make_it_stale(op, monkeypatch):
     from test_cache import Fake
 

@@ -54,7 +54,7 @@ window.addEventListener('keydown', (e) => {
   if (tab) { router.push(tab.path); e.preventDefault(); return }
   if (e.key === 't') { theme.value = themes[(themes.indexOf(theme.value) + 1) % themes.length] }
   else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
-    const i = TABS.findIndex((t) => t.name === route.name)
+    const i = TABS.findIndex((t) => t.name === route.name || t.name === route.meta.tab)
     if (i >= 0) { router.push(TABS[(i + (e.key === 'ArrowRight' ? 1 : TABS.length - 1)) % TABS.length].path); e.preventDefault() }
   } else if (e.key === '?') { router.push('/console'); log('keys: 1-9 tabs · ←→ next tab · ↑↓/jk move · Enter act · / filter · r reload · t theme · : console') }
 })
@@ -77,7 +77,7 @@ window.addEventListener('keydown', (e) => {
       <button @click="logout"><span class="hide-xs">logout</span><span class="show-xs">exit</span></button>
     </header>
     <nav class="tabs" aria-label="views">
-      <router-link v-for="t in TABS" :key="t.name" :to="t.path" :class="{ active: route.name === t.name }">
+      <router-link v-for="t in TABS" :key="t.name" :to="t.path" :class="{ active: route.name === t.name || route.meta.tab === t.name }">
         <span class="k">{{ t.key }}</span>{{ t.label }}
       </router-link>
       <router-link v-for="p in plugins" :key="p.name" :to="`/plugins/${p.name}/${p.tabs[0].id}`"
@@ -90,7 +90,7 @@ window.addEventListener('keydown', (e) => {
       <span v-if="last" class="last" :class="last.kind === 'error' ? 'bad' : last.kind === 'ok' ? 'ok' : 'dim'"
             :title="last.text">[{{ last.at }}] {{ last.text }}</span>
       <span v-else class="last dim">ready</span>
-      <span class="keys"><b>1-9</b> tabs <b>↑↓</b> move <b>⏎</b> act <b>/</b> filter <b>r</b> reload <b>t</b> theme <b>:</b> console <b>?</b> help</span>
+      <span class="keys"><b>1-9</b> tabs <b>↑↓</b> move <b>⏎</b> open <b>/</b> filter <b>r</b> reload <b>t</b> theme <b>:</b> console <b>?</b> help</span>
     </footer>
   </div>
   <PromptDialog />

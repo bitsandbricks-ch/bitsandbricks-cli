@@ -13,6 +13,7 @@ from mason import core, plugins
 from mason import defaults as D
 from mason import issues as I
 from mason import packages as P
+from mason import releases as REL
 from mason import repos as R
 from mason import workflows as W
 from mason.server import gitlab as GL
@@ -125,10 +126,6 @@ def status():
     with as_user() as (gh, gl):
         cfg = load_config()
         gh_r, gl_r, _ = all_repos(cfg, gh, gl, names_arg(), request.args.get("group"))
-        if request.args.get("fresh") == "1":
-            R._nodes.clear()
-            if gl:
-                gl.caches.pop("gl_nodes", None)
         try:
             head = R.status_head()
             rows = [{"repo": r[0], "provider": "github", "cells": r[1:]} for r in R.status_rows(cfg, gh_r)]
@@ -381,6 +378,52 @@ def releases():
                         "assets": row[2], "run": row[3], "problems": bad, "text": R.release_text(i),
                         "url": (i["release"] or {}).get("html_url", "")})
         return jsonify({"releases": out})
+
+
+@bp.get("/release")
+@need("read")
+def release_page():
+    """One repo's releases: {releases: [rows], selected, text, url, suggest} for the release page."""
+    repo = valid_repo(request.args.get("repo", ""))
+    tag = (request.args.get("tag") or "").strip() or None
+    with as_user() as (_gh, gl):
+        cfg = load_config()
+        try:
+            if is_gl(repo):
+                if gl is None:
+                    abort(409, "connect GitLab first")
+                return jsonify(GL.release_page(gl, cfg, repo, tag))
+            return jsonify(REL.page(cfg, repo, tag))
+        except core.RateLimited as err:
+            abort(429, str(err))
+        except RuntimeError as err:
+            abort(404 if "no release" in str(err) else 502, str(err))
+
+
+@bp.post("/releases")
+@need("read")
+def release_create():
+    """Create a release: {repo, tag, title?, notes?, draft?, prerelease?, target?, generate_notes?, dry_run?}."""
+    data = body()
+    repo = valid_repo(str(data.get("repo") or ""))
+    tag = str(data.get("tag") or "").strip()
+    try:
+        REL.valid_tag(tag)
+    except RuntimeError as err:
+        abort(400, str(err))
+    args = (repo, tag, str(data.get("title") or "")[:200], str(data.get("notes") or "")[:120000],
+            bool(data.get("draft")), bool(data.get("prerelease")), str(data.get("target") or "")[:250],
+            bool(data.get("generate_notes")))
+    dry = write_allowed(bool(data.get("dry_run")))
+    with as_user(dry) as (_gh, gl):
+        if is_gl(repo):
+            if gl is None:
+                abort(409, "connect GitLab first")
+            text = capture_rate(GL.create_release, gl, *args)
+        else:
+            text = capture_rate(REL.create, *args)
+    audit("release.create", f"{repo} {tag}", dry, detail=text)
+    return jsonify({"text": text, "ok": not text.lstrip().startswith("error")})
 
 
 @bp.get("/releases/jobs")

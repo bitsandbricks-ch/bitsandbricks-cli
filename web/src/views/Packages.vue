@@ -1,7 +1,6 @@
 <script setup>
 // Container images (GHCR and the GitLab registry): newest tags, the release's image, image builds.
 import { computed, ref } from 'vue'
-import { get } from '../api.js'
 import { useLoad } from '../load.js'
 import { useKeys } from '../keys.js'
 import { loadGroups, scope } from '../scope.js'
@@ -9,7 +8,7 @@ import DataTable from '../components/DataTable.vue'
 import Scope from '../components/Scope.vue'
 import TextPane from '../components/TextPane.vue'
 
-const { data, loading, load } = useLoad((q) => get(`/packages${q}`))
+const { data, loading, load } = useLoad((q) => `/packages${q}`)
 loadGroups()
 const sel = ref(null)
 const rows = computed(() => (data.value?.packages || []).map((p) => ({

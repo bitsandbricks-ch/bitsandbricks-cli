@@ -9,7 +9,7 @@ import DataTable from '../components/DataTable.vue'
 import Scope from '../components/Scope.vue'
 import TextPane from '../components/TextPane.vue'
 
-const { data, loading, load } = useLoad((q) => get(`/prs${q}`))
+const { data, loading, load } = useLoad((q) => `/prs${q}`)
 loadGroups()
 const filter = ref('all')
 const sel = ref(null)

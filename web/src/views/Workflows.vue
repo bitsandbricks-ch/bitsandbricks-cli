@@ -2,7 +2,6 @@
 // Workflow hardening: unpinned actions, write-all tokens, pull_request_target checkouts and script
 // injection in .github/workflows. p opens a PR that pins the selected repo's actions to commit SHAs.
 import { computed, ref } from 'vue'
-import { get } from '../api.js'
 import { act, useLoad } from '../load.js'
 import { useKeys } from '../keys.js'
 import { loadGroups, scope } from '../scope.js'
@@ -12,7 +11,7 @@ import TextPane from '../components/TextPane.vue'
 
 const KIND = { pinned: 'unpinned', permissions: 'token', pull_request_target: 'pr target', injection: 'injection' }
 const BAD = new Set(['pull_request_target', 'injection'])
-const { data, loading, load } = useLoad((q) => get(`/workflows${q}`))
+const { data, loading, load } = useLoad((q) => `/workflows${q}`)
 loadGroups()
 const sel = ref(null)
 const output = ref('')
