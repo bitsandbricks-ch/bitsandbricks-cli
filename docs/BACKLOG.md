@@ -18,6 +18,11 @@ move it to "Done" when it ships.
   server-sent events, so lists refresh themselves and the cache can be invalidated precisely.
 - **Scheduled checks.** Run `doctor` nightly per user or group, keep the results, and show drift over time;
   notify on new drift (email, Slack, Discord, a webhook).
+- **Workflow hardening.** Flag actions pinned to a tag instead of a SHA, `pull_request_target` with a
+  checkout of the PR, `permissions: write-all`, and script injection from `${{ github.event.* }}` (zizmor /
+  actionlint findings per repo), with a PR that pins the actions.
+- **Access review.** Who has admin or write on each repo, outside collaborators, deploy keys and webhooks
+  (read only), with a periodic "still needed?" review and an export for audits.
 - **Prometheus `/metrics`** for the operator itself (requests, GitHub calls, cache hit rate, rate limit left)
   and an optional exporter for repo stats.
 
@@ -28,6 +33,10 @@ move it to "Done" when it ships.
 - Visual ruleset editor next to the JSON one; diff live ruleset vs defaults before applying.
 - Org-level settings (default repo permissions, Actions policies, required workflows) in `[org]` tables.
 - CODEOWNERS and branch naming rules checked by doctor.
+- Environments in mortar.toml: required reviewers, wait timers, which branches may deploy.
+- Secrets and variables by name only: which repos lack a secret the group needs, and which are unused.
+- The new repo keys (topics, labels, required files) for GitLab groups too.
+- Terraform / OpenTofu export of the defaults, for teams that manage GitHub as code.
 - Exceptions with an expiry ("repo X may skip rule Y until 2027-01-01, because …").
 - Template repos as a first-class concept: "new repo from template" wizard with variables.
 
@@ -38,10 +47,15 @@ move it to "Done" when it ships.
 - Flaky workflow detection (same commit, different outcome) and slowest jobs.
 - Long-term history kept in the database so charts go back further than the APIs do.
 - CSV/JSON export and a shareable read-only dashboard link.
+- Actions cost: minutes, cache and artifact storage per repo and workflow, and the biggest savings.
+- Supply chain per release: SBOM, signed provenance (`gh attestation`), and which releases lack them.
 
 ## Mortar
 
 - Teams and shared workspaces: a team's defaults, repo lists and saved views, with roles.
+- A daily digest (email or chat): PRs waiting for you, failed runs, new alerts, new drift.
+- A command palette (Ctrl+K) in the web UI that searches repos, PRs and commands at once.
+- Repo ownership: an owner per repo (from CODEOWNERS or a topic), last activity, and archive candidates.
 - Saved views and filters (e.g. "my PRs needing review across both providers").
 - Bulk actions with a preview: rerun failed runs, update a file in N repos, archive stale repos.
 - OIDC / SAML sign-in for the operator itself in companies, next to GitHub and GitLab.
