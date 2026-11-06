@@ -82,6 +82,7 @@ ref = "main"                          # optional branch or tag
 orgs = ["another-org"]                # added to the orgs the defaults name
 repos = ["someone/their-repo"]        # added to the defaults' repos
 exclude = ["another-org/archive-*"]   # added to the defaults' exclude
+org_defaults = true                   # read each org's .mason repo (the default; false turns it off)
 ```
 
 It lives in `$XDG_CONFIG_HOME/mason` when that is set, and `MASON_CONFIG` points mason at another file. `MASON_DEFAULTS`, `MASON_DEFAULTS_REF` and `MASON_ORGS` (comma separated, replacing the orgs) override it for one run.
@@ -91,6 +92,7 @@ It lives in `$XDG_CONFIG_HOME/mason` when that is set, and `MASON_CONFIG` points
 | `MASON_CONFIG` | Your config file, instead of `~/.config/mason/config.toml`. |
 | `MASON_DEFAULTS`, `MASON_DEFAULTS_REF` | The defaults repo (or folder) and its branch or tag. |
 | `MASON_ORGS` | The orgs to look at, comma separated. |
+| `MASON_ORG_DEFAULTS` | `0` (or `off`) leaves each org's `.mason` repo out for one run. |
 | `MASON_SERVER`, `MASON_KEY` | Go through Mason with this URL and API key (for CI). `MASON_SERVER=` (set but empty) uses gh even after `mason login`. |
 | `MASON_OPEN` | How `mason open` opens links: `browser`, `copy` or `print`. |
 | `MASON_PLUGINS` | `none`, or a comma separated list of the plugins to load. |
@@ -145,6 +147,46 @@ A ruleset from the defaults folder only has to be covered: a repo may set more t
 `workflows` makes doctor check the group's workflow files like `mason workflows` does. It takes `true` or a table: `pinned`, `permissions`, `pull_request_target` and `injection` turn single checks off with `false`, and `allow_unpinned = ["actions/*", "your-org/*"]` lets actions of owners you trust stay on a tag. `mason workflows --fix` keeps the tag as a comment (`uses: actions/checkout@<sha> # v4`), so Dependabot and Renovate keep updating the pins.
 
 Unknown keys on a group stay there for plugins (`group.extra`).
+
+### An org's own defaults: the `.mason` repo
+
+Like the `.github` repo, an org (or a GitLab group) can keep the defaults of its own repos in a repo
+named `.mason`, with a `mason.toml` in it. Everyone who works on the org's repos gets them, without
+pointing mason anywhere:
+
+```toml
+# your-org/.mason/mason.toml
+[[group]]
+name = "services"
+match = { prefix = "svc-" }
+rulesets = "rulesets/services"   # folders are read from the .mason repo itself
+files = "files/services"
+
+[[group]]
+name = "default"                 # the rest of the org's repos
+settings = { delete_branch_on_merge = true }
+security = { secret_scanning = "enabled" }
+```
+
+Only its `[[group]]` tables count, and only for repos of that org: `orgs`, `repos` and `exclude` in it
+are ignored, so an org's file can't change which repos you look at. Its groups are named `org:name`
+(`your-org:services`, for `--group`). On GitLab the nearest group's `.mason` comes first, then its
+parents' (`grp/sub/.mason`, then `grp/.mason`).
+
+Which group a repo gets, first hit wins:
+
+1. a group of your own defaults whose `match` takes the repo,
+2. a group of the repo's org's `.mason`,
+3. a group of your own defaults without `match` (your catch-all).
+
+So the org's `.mason` replaces your catch-all for its repos, and a group you wrote for some of its repos
+on purpose still wins. Groups are never merged key by key: one group decides, as before.
+
+mason reads the `.mason` repo with your own login (gh, your token, or your Mason account), so a private
+`.mason` only counts for people who can read it, and each user's answer is cached in their own cache
+(5 minutes; a file written through mason drops it). `mason config` shows which `.mason` repos it found.
+`org_defaults = false` in your config, `MASON_ORG_DEFAULTS=0`, or the switch in the web app's Settings
+turns it off.
 
 ## Plugins
 

@@ -82,6 +82,9 @@ def test_me_csrf_settings(op):
     assert r.status_code == 403
     assert c.put("/api/v1/settings", json={"defaults": "/etc"}, headers=H).status_code == 400  # no server folders
     assert c.put("/api/v1/settings", json={"orgs": "acme, mike"}, headers=H).json["orgs"] == ["acme", "mike"]
+    assert c.get("/api/v1/settings").json["org_defaults"] is True  # each org's .mason: on unless turned off
+    assert c.put("/api/v1/settings", json={"org_defaults": "no"}, headers=H).status_code == 400
+    assert c.put("/api/v1/settings", json={"org_defaults": False}, headers=H).json["org_defaults"] is False
 
 
 

@@ -105,9 +105,9 @@ def pick_repos(cfg: Config, names: list[str], group: str | None = None) -> tuple
             if number:
                 pick.setdefault(repo, []).append(number)
     if group:
-        repos = [r for r in repos if (g := group_of(cfg, r)) and g.name == group]
+        repos_all, repos = repos, [r for r in repos if (g := group_of(cfg, r)) and g.name == group]
         if not repos:
-            groups = ", ".join(g.name for g in cfg.groups) or "none"
+            groups = ", ".join(g.name for g in cfg.groups_for(repos_all)) or "none"
             raise RuntimeError(f"No repos in group {group!r}. Groups: {groups}")
     return repos, pick
 

@@ -98,7 +98,8 @@ def blob_shas(repo: str, ref: str = "HEAD") -> dict[str, str]:
 def baseline(cfg: Config, group: Group) -> dict:
     """A group's wanted state: the reference repo's live state, then the explicit values on top."""
     want: dict = {"settings": {}, "security": {}, "vulnerability_reporting": None, "immutable_releases": None,
-                  "rulesets": {}, "files": {}, "texts": {}, "label": "defaults", "reference": group.reference,
+                  "rulesets": {}, "files": {}, "texts": {}, "label": group.origin or "defaults",
+                  "reference": group.reference,
                   "group": group.name}
     if group.reference:
         ref = repo_state(group.reference)
@@ -389,7 +390,7 @@ def doctor_ctx(cfg: Config, repos: list[str], fix: bool = False) -> dict:
 
     groups = {r: group_of(cfg, r) for r in repos}
     used = {g.name: g for g in groups.values() if g}
-    refs = {g.name: g for g in cfg.groups if g.reference and (g.name in used or g.reference in repos)}
+    refs = {g.name: g for g in cfg.groups_for(repos) if g.reference and (g.name in used or g.reference in repos)}
     wants = {}
     for g in {**used, **refs}.values():
         wants[g.name] = baseline(cfg, g)
@@ -544,7 +545,9 @@ def sync(repo: str, ctx: dict) -> None:
         say(f"   [dry-run] PR on {branch} with {len(changed)} file(s)")
         return
     lines = "\n".join(f"- `{p}`" for p in changed)
-    source = f"{want['reference']}@{stamp[:7]}" if want.get("reference") else f"the defaults ({ctx['cfg'].source})"
+    group = ctx["groups"].get(repo)
+    where = group.origin if group and group.origin else ctx["cfg"].source
+    source = f"{want['reference']}@{stamp[:7]}" if want.get("reference") else f"the defaults ({where})"
     url = open_pr(repo, branch_base, branch, changed,
                   f"chore: sync shared files with {want['label']}",
                   f"Sync shared files with {want['label']}",
@@ -565,9 +568,10 @@ def create_repo(cfg: Config, repo: str, group_name: str | None = None, public: b
     if core.exists(repo):
         raise RuntimeError(f"{repo} exists already (mason doctor --fix {repo} applies the defaults)")
     if group_name:
-        group = next((g for g in cfg.groups if g.name == group_name), None)
+        group = cfg.find_group(group_name, repo)
         if not group:
-            raise RuntimeError(f"No group {group_name!r}. Groups: {', '.join(g.name for g in cfg.groups) or 'none'}")
+            names = ", ".join(g.name for g in cfg.groups_for([repo])) or "none"
+            raise RuntimeError(f"No group {group_name!r}. Groups: {names}")
     else:
         group = cfg.group_of(repo)
     want = baseline(cfg, group) if group else None

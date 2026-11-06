@@ -1589,11 +1589,14 @@ class MasonTui(App):
                               f"your own:          {', '.join(mine) or 'none'}", "",
                               "Enter: set your own orgs (added to the defaults' orgs)."])
         if key == "groups":
-            out = [f"{len(cfg.groups)} group(s), first match wins:", ""]
-            for g in cfg.groups:
+            groups = cfg.groups_for(self.repos)
+            out = [f"{len(groups)} group(s), first match wins (an org's .mason before your catch-all):", ""]
+            for g in groups:
                 count = sum(1 for r in self.repos if (x := R.group_of(cfg, r)) and x.name == g.name)
                 out.append(f"{g.name}  ({count} repos)")
                 out.append(f"  match     {g.match or 'the rest'}")
+                if g.origin:
+                    out.append(f"  from org  {g.origin}")
                 if g.reference:
                     out.append(f"  from      {g.reference}  {core.WEB}/{g.reference}")
                 for label, value in (("settings", g.settings), ("security", g.security), ("require", g.require),
@@ -1775,7 +1778,7 @@ class MasonTui(App):
                 return
             match = self.cfg.group_of(repo)
             options = [("@match", f"by match: {match.name if match else 'no group'}")] + [
-                (g.name, g.name) for g in self.cfg.groups if not match or g.name != match.name]
+                (g.name, g.name) for g in self.cfg.groups_for([repo]) if not match or g.name != match.name]
             self.push_screen(Pick(f"Group for {repo}", options), lambda g: grouped(repo, g, match))
 
         def grouped(repo: str, group: str | None, match) -> None:

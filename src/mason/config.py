@@ -36,6 +36,20 @@ Two files:
 
   The first group that matches a repo is its group. Keys mason doesn't know stay on
   the group for plugins (`group.extra`).
+
+* `mason.toml` in a repo named `.mason` in an org (GitHub) or group (GitLab): that org's
+  defaults for its own repos, like the `.github` repo. Only its `[[group]]` tables count, and
+  only for repos of that org; its `rulesets` and `files` folders are read from the `.mason`
+  repo. Which group a repo gets, first hit wins:
+
+      1. a group of your defaults that names the repo with `match`
+      2. a group of the org's `.mason` (GitLab: the nearest group's, then its parents')
+      3. a group of your defaults without `match` (the rest)
+
+  So the org's `.mason` replaces your catch-all for its repos, and your own explicit groups
+  still win. Org groups are named `org:name` (`acme:default`). It is read with your own login,
+  so you see what your token may read, and cached per user. `org_defaults = false` in your
+  config (MASON_ORG_DEFAULTS=0, or the operator's settings) turns it off.
 """
 
 from __future__ import annotations
@@ -58,6 +72,7 @@ else:  # pragma: no cover
     import tomli as tomllib
 
 DEFAULTS_FILE = "mason.toml"
+ORG_REPO = ".mason"  # an org's (or GitLab group's) own defaults: <org>/.mason/mason.toml
 
 
 def read_defaults(source: Source) -> tuple[str, str | None]:
@@ -194,6 +209,8 @@ class Group:
     skip: list[str] = field(default_factory=list)  # checks to leave out (CHECKS)
     workflows: bool | dict | None = None  # workflow hardening in doctor: true, or a table (see workflows.py)
     extra: dict = field(default_factory=dict)
+    source: Source | None = None  # where its rulesets and files folders live (None: the config's defaults)
+    origin: str = ""  # "" for your defaults; "acme/.mason" for a group of an org's .mason repo
 
     def matches(self, repo: str, topics: list[str] | None = None) -> bool:
         m = self.match
@@ -245,35 +262,68 @@ class Config:
     exclude: list[str]
     groups: list[Group]
     raw: dict = field(default_factory=dict)
+    org_defaults: bool = True  # look for each org's .mason repo
 
     def group_of(self, repo: str, topics: list[str] | None = None) -> Group | None:
-        return next((g for g in self.groups if g.matches(repo, topics)), None)
+        """The repo's group: your explicit group, else its org's .mason group, else your catch-all."""
+        mine = next((g for g in self.groups if g.matches(repo, topics)), None)
+        if mine and mine.match:
+            return mine
+        if self.org_defaults:
+            for org in org_defaults_of(repo):
+                if org.error:
+                    raise RuntimeError(org.error)
+                got = next((g for g in org.groups if g.matches(repo, topics)), None)
+                if got:
+                    return got
+        return mine
+
+    def find_group(self, name: str, repo: str | None = None) -> Group | None:
+        """A group by name: yours, or (`org:name`) one of `repo`'s org's .mason."""
+        mine = next((g for g in self.groups if g.name == name), None)
+        if mine or not (repo and self.org_defaults):
+            return mine
+        return next((g for org in org_defaults_of(repo) for g in org.groups if g.name == name), None)
+
+    def groups_for(self, repos: list[str]) -> list[Group]:
+        """Your groups plus the .mason groups of the orgs of `repos` (each once)."""
+        out = list(self.groups)
+        if self.org_defaults:
+            seen: set[str] = set()
+            for repo in repos:
+                for org in org_defaults_of(repo):
+                    if org.where not in seen:
+                        seen.add(org.where)
+                        out += org.groups
+        return out
 
     def excluded(self, repo: str) -> bool:
         return any(_glob(repo, p) for p in self.exclude)
 
     def rulesets_of(self, group: Group) -> dict[str, dict]:
         """The ruleset JSON files of a group's `rulesets` folder in the defaults repo, by ruleset name."""
-        if not group.rulesets or not self.source:
+        source = group.source or self.source
+        if not group.rulesets or not source:
             return {}
         out = {}
-        for f in self.source.tree(group.rulesets):
+        for f in source.tree(group.rulesets):
             if not f.endswith(".json"):
                 continue
-            text = self.source.read(f"{group.rulesets.strip('/')}/{f}")
+            text = source.read(f"{group.rulesets.strip('/')}/{f}")
             try:
                 rs = json.loads(text or "")
             except ValueError as err:
-                raise RuntimeError(f"{self.source}: {group.rulesets}/{f} isn't valid JSON") from err
+                raise RuntimeError(f"{source}: {group.rulesets}/{f} isn't valid JSON") from err
             out[rs.get("name") or f[:-5]] = rs
         return out
 
     def files_of(self, group: Group) -> dict[str, str]:
         """A group's `files` folder in the defaults repo: {path in the repo: text}."""
-        if not isinstance(group.files, str) or not self.source:
+        source = group.source or self.source
+        if not isinstance(group.files, str) or not source:
             return {}
         root = group.files.strip("/")
-        return {f: self.source.read(f"{root}/{f}") or "" for f in self.source.tree(root)}
+        return {f: source.read(f"{root}/{f}") or "" for f in source.tree(root)}
 
 
 def parse_defaults(text: str, where: str = DEFAULTS_FILE) -> dict:
@@ -327,8 +377,9 @@ def load(orgs: list[str] | None = None, mine: dict | None = None, env: bool = Tr
     getenv = os.environ.get if env else (lambda _k, _d=None: None)
     where = getenv("MASON_DEFAULTS") or mine.get("defaults")
     ref = getenv("MASON_DEFAULTS_REF") or mine.get("ref")
+    org_on = _on(getenv("MASON_ORG_DEFAULTS"), mine.get("org_defaults", True))
     key = (where, ref, tuple(orgs or ()), tuple(_list(mine.get("orgs"))), tuple(_list(mine.get("repos"))),
-           tuple(_list(mine.get("exclude"))))
+           tuple(_list(mine.get("exclude"))), org_on)
     if key in _loaded:
         return _loaded[key]
     raw: dict = {}
@@ -348,9 +399,104 @@ def load(orgs: list[str] | None = None, mine: dict | None = None, env: bool = Tr
         exclude=_list(raw.get("exclude")) + _list(mine.get("exclude")),
         groups=[make_group(g, i) for i, g in enumerate(raw.get("group") or [])],
         raw=raw,
+        org_defaults=org_on,
     )
     _loaded[key] = cfg
     return cfg
+
+
+def _on(env: str | None, setting) -> bool:
+    """MASON_ORG_DEFAULTS (0/off/false/no) wins over the setting (true unless false or "off")."""
+    if env is not None and env.strip():
+        return env.strip().lower() not in ("0", "off", "false", "no")
+    if isinstance(setting, str):
+        return setting.strip().lower() not in ("0", "off", "false", "no")
+    return setting is not False
+
+
+# ── an org's own defaults: <org>/.mason ─────────────────────────────────────
+
+
+@dataclass
+class OrgDefaults:
+    where: str  # acme/.mason or gitlab:grp/.mason
+    groups: list[Group]
+    error: str = ""  # a broken mason.toml: doctor says so for that org's repos instead of guessing
+
+
+_org_loaded = core.Scoped("org_defaults")  # per transport, so per user and token
+
+
+def org_candidates(repo: str) -> list[str]:
+    """Where an org's .mason may be for `repo`, nearest first: acme/.mason, gitlab:a/b/.mason, gitlab:a/.mason."""
+    if repo.startswith("gitlab:"):
+        parts = repo[len("gitlab:"):].split("/")[:-1]
+        return [f"gitlab:{'/'.join(parts[:i])}/{ORG_REPO}" for i in range(len(parts), 0, -1)]
+    owner, _, name = repo.partition("/")
+    return [f"{owner}/{ORG_REPO}"] if owner and name else []
+
+
+def org_defaults_of(repo: str) -> list[OrgDefaults]:
+    """The .mason defaults that apply to `repo` (nearest first), read with the current user's login."""
+    out = []
+    for where in org_candidates(repo):
+        if where == repo:  # the .mason repo itself is no org's member for this purpose
+            continue
+        got = org_defaults(where)
+        if got:
+            out.append(got)
+    return out
+
+
+def defaults_of_orgs(orgs: list[str]) -> list[OrgDefaults]:
+    """The .mason defaults of these orgs (GitLab groups as gitlab:grp), the ones that have one."""
+    found = (org_defaults(f"{o}/{ORG_REPO}") for o in _unique(orgs))
+    return [o for o in found if o]
+
+
+def org_defaults(where: str) -> OrgDefaults | None:
+    """`where`'s mason.toml as an org's defaults, or None when there is none (or no way to read it).
+
+    The answer is cached in the current transport's own caches (GitLab: the GitLab client's), so
+    one user's lookup is never served to another, and a repo you can't read is simply absent."""
+    gitlab = where.startswith("gitlab:")
+    if gitlab:
+        gl = GITLAB.get()
+        if gl is None:
+            return None
+        cache = gl.caches.space("org_defaults") if hasattr(gl.caches, "space") else gl.caches.setdefault(
+            "org_defaults", {})
+    else:
+        cache = _org_loaded
+    if where in cache:
+        return cache[where]
+    source = Source(where, None, allow_local=False)
+    try:
+        if gitlab:
+            text = source.read(DEFAULTS_FILE)  # None on a 404
+        else:
+            got = core.get_file(where, DEFAULTS_FILE)  # None on a 404 (no repo, no file, or no access)
+            text = got[0] if got else None
+    except (RuntimeError, KeyError, TypeError):
+        return None  # a rate limit or an outage: try again next time, cache nothing
+    found = None
+    if text is not None:
+        org = where.rsplit("/", 1)[0]
+        org = org[len("gitlab:"):] if gitlab else org
+        try:
+            raw = parse_defaults(text, f"{where}/{DEFAULTS_FILE}")
+            groups = []
+            for i, g in enumerate(raw.get("group") or []):
+                grp = make_group(g, i)
+                grp.name = f"{org}:{grp.name}"
+                grp.source = source
+                grp.origin = where
+                groups.append(grp)
+            found = OrgDefaults(where, groups)
+        except RuntimeError as err:
+            found = OrgDefaults(where, [], str(err))
+    cache[where] = found
+    return found
 
 
 def operator_settings() -> dict:
@@ -363,7 +509,10 @@ def operator_settings() -> dict:
         got = t.get_json("/settings") or {}
     except RuntimeError:
         return {}
-    return {k: got[k] for k in ("defaults", "ref", "orgs", "repos", "exclude") if got.get(k)}
+    out = {k: got[k] for k in ("defaults", "ref", "orgs", "repos", "exclude") if got.get(k)}
+    if got.get("org_defaults") is False:
+        out["org_defaults"] = False
+    return out
 
 
 def _labels(raw) -> dict:
