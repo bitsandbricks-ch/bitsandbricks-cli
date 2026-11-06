@@ -14,7 +14,7 @@ import sys
 from flask import Flask, abort, g, jsonify, request, send_from_directory
 from werkzeug.exceptions import HTTPException
 
-from mason import core, transport
+from mason import cache, core, transport
 from mason.server import auth, limits, models, retention, security, webui
 from mason.server import settings as S
 from mason.server.context import NoTransport
@@ -32,6 +32,7 @@ def create_app(op: S.Settings | None = None) -> Flask:
                       PROBLEMS=problems, JSON_SORT_KEYS=False)
     models.init(op.database)
     core.install_context_stdout()
+    cache.BUDGET.configure(op.cache_size, op.cache_user_size)
     # The operator acts only with each user's own token: never with gh or a token of the server's.
     transport.set_default(NoTransport("sign in first"))
     if op.trusted_proxies:

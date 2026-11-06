@@ -51,11 +51,22 @@ class GitLab(HttpTransport):
     """GitLab's REST (v4) and GraphQL APIs with a token."""
 
     name = "gitlab"
+    label = "GitLab"
+    RATE_HEADERS = ("ratelimit-remaining", "ratelimit-limit", "ratelimit-reset")
 
     def __init__(self, token: str, api_url: str = "https://gitlab.com/api/v4", web: str = "https://gitlab.com",
                  cache: str | None = None):
         super().__init__(token, api_url=api_url, web=web, graphql_url=f"{web.rstrip('/')}/api/graphql",
                          cache=cache, user_agent="mason-server")
+
+    def resource(self, url: str) -> str:
+        return "graphql" if url == self.graphql_url else "core"
+
+    def _scope(self, path: str) -> tuple[str, str]:
+        parts = path.split("?", 1)[0].split("/")
+        if path.startswith("/projects/") and len(parts) >= 3 and parts[2]:
+            return "/".join(parts[:3]), full(urllib.parse.unquote(parts[2]))
+        return "", ""
 
     def project(self, repo: str) -> str:
         return "/projects/" + urllib.parse.quote(path_of(repo), safe="")
@@ -149,7 +160,7 @@ FIELDS = """
 
 
 def nodes(gl: GitLab, repos: list[str]) -> dict[str, dict | None]:
-    cache = gl.caches.setdefault("gl_nodes", {})
+    cache = gl.caches.space("gl_nodes")
     todo = [r for r in repos if r not in cache]
 
     def one(batch: list[str]) -> dict:

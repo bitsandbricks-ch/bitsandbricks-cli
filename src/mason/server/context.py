@@ -12,6 +12,7 @@ from contextlib import contextmanager
 from flask import abort, g
 
 from mason import config, core
+from mason.cache import Spaces
 from mason.server import oauth
 
 REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
@@ -28,7 +29,7 @@ class NoTransport:
 
     def __init__(self, why: str = "connect GitHub first (Settings › Accounts)"):
         self.why = why
-        self.caches: dict = {}
+        self.caches = Spaces()
 
     def __getattr__(self, name):
         def refuse(*_a, **_kw):
@@ -107,7 +108,7 @@ def gitlab_projects(gl, cfg) -> dict:
     groups = s.get("gitlab_groups") or list((cfg.raw or {}).get("gitlab_groups") or [])
     extra = s.get("gitlab_repos") or []
     key = ("gl_projects", tuple(groups), tuple(extra), tuple(cfg.exclude))
-    cache = gl.caches.setdefault("gl_listing", {})
+    cache = gl.caches.space("gl_listing")
     if key not in cache:
         cache[key] = GL.projects(gl, groups, extra, cfg.exclude)
     return cache[key]

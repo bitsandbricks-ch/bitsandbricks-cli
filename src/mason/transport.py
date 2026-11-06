@@ -23,6 +23,8 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
+from mason.cache import Spaces, Store, graphql_ttl, ttl_for
+
 CURRENT: contextvars.ContextVar = contextvars.ContextVar("mason_transport", default=None)
 _default = None
 _lock = threading.Lock()
@@ -106,10 +108,10 @@ def ttl_seconds(cache: str | None) -> int:
     return int(digits) * unit if digits.isdigit() else 0
 
 
-def _rate_error(reset: int | None):
+def _rate_error(reset: int | None, label: str = "GitHub"):
     from mason.core import RateLimited
     when = datetime.fromtimestamp(reset).strftime("%H:%M") if reset else "soon"
-    return RateLimited(f"GitHub rate limit reached, it resets at {when}", reset)
+    return RateLimited(f"{label} rate limit reached, it resets at {when}", reset)
 
 
 # ── gh ───────────────────────────────────────────────────────────────────────
@@ -128,7 +130,7 @@ class GhTransport:
 
     def __init__(self, token: str | None = None):
         self.token = token
-        self.caches: dict = {}
+        self.caches = Spaces()
 
     def _env(self):
         if not self.token:
@@ -285,9 +287,17 @@ class HttpError(RuntimeError):
 
 
 class HttpTransport:
-    """GitHub's REST and GraphQL APIs with a token (stdlib only)."""
+    """GitHub's REST and GraphQL APIs with a token (stdlib only).
+
+    Answers are cached in memory for this transport only (mason.cache): each resource has its own
+    time to live, stale answers are revalidated with ETag / Last-Modified, writes made through
+    this transport mark what they touch as stale, and the rate limit is watched so mason slows
+    down (or answers from the cache) before GitHub says no.
+    """
 
     name = "token"
+    label = "GitHub"
+    RATE_HEADERS = ("x-ratelimit-remaining", "x-ratelimit-limit", "x-ratelimit-reset")
 
     def __init__(self, token: str, api_url: str = "https://api.github.com", web: str = "https://github.com",
                  graphql_url: str | None = None, cache: str | None = None, timeout: int = 30,
@@ -299,11 +309,12 @@ class HttpTransport:
         self.cache_ttl = ttl_seconds(cache)
         self.timeout = timeout
         self.user_agent = user_agent
-        self.caches: dict = {}
-        self._get_cache: dict[str, tuple[float, object]] = {}
-        self._etags: dict[str, tuple[str, object]] = {}  # url: (ETag, answer); a 304 costs no rate limit
+        self.caches = Spaces()
+        self.store = Store()
         self.last_rate: dict = {}
-        self.stats = {"requests": 0, "cache_hits": 0, "not_modified": 0}
+        self.rates: dict[str, dict] = {}  # resource ("core", "graphql", "search"): remaining, limit, reset
+        self.blocked: dict[str, float] = {}  # resource: time.time() until which Retry-After said wait
+        self.stats = {"requests": 0, "cache_hits": 0, "not_modified": 0, "stale_served": 0, "invalidated": 0}
 
     def gh(self, *args: str, stdin: str | None = None, check: bool = True) -> str:
         raise RuntimeError(f"gh {' '.join(args[:3])}: not available here (no gh CLI with this login)")
@@ -318,6 +329,14 @@ class HttpTransport:
             raise RuntimeError("absolute URLs aren't allowed")
         return self.api_url + ("" if path.startswith("/") else "/") + path
 
+    def _path(self, url: str) -> str:
+        return url[len(self.api_url):] if url.startswith(self.api_url) else url
+
+    def resource(self, url: str) -> str:
+        if url == self.graphql_url:
+            return "graphql"
+        return "search" if self._path(url).startswith("/search/") else "core"
+
     def request(self, method: str, url: str, body: bytes | None = None, accept: str = "application/vnd.github+json",
                 headers: dict | None = None) -> tuple[int, dict, bytes]:
         req = urllib.request.Request(url, data=body, method=method)
@@ -329,94 +348,220 @@ class HttpTransport:
         if body is not None:
             req.add_header("Content-Type", "application/json")
         self.stats["requests"] += 1
+        res = self.resource(url)
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:  # noqa: S310 (https only, see _url)
                 data = resp.read()
-                self._note_rate(resp.headers)
+                self._note_rate(resp.headers, res)
                 return resp.status, dict(resp.headers), data
         except urllib.error.HTTPError as err:
+            self._note_rate(err.headers, res)
             if err.code == 304:
                 return 304, dict(err.headers or {}), b""
             data = err.read() or b""
-            self._note_rate(err.headers)
-            remaining = err.headers.get("x-ratelimit-remaining") if err.headers else None
-            if err.code in (403, 429) and (remaining == "0" or b"rate limit" in data.lower()):
-                reset = err.headers.get("x-ratelimit-reset")
-                raise _rate_error(int(reset) if reset and reset.isdigit() else None) from err
+            hdr = err.headers.get if err.headers else (lambda _k, _d=None: None)
+            remaining = hdr(self.RATE_HEADERS[0])
+            retry = hdr("retry-after")
+            if err.code == 429 or (err.code == 403 and (remaining == "0" or retry or b"rate limit" in data.lower())):
+                reset = hdr(self.RATE_HEADERS[2])
+                when = int(reset) if reset and reset.isdigit() else None
+                if retry and retry.isdigit():  # a secondary limit: wait that long before this kind of call again
+                    self.blocked[res] = time.time() + int(retry)
+                    when = int(time.time()) + int(retry)
+                raise _rate_error(when, self.label) from err
             try:
                 msg = json.loads(data).get("message") or ""
             except (ValueError, AttributeError):
                 msg = data.decode(errors="replace")[:200]
+            if isinstance(msg, (list, dict)):
+                msg = json.dumps(msg)[:200]
             reason = {401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 422: "Unprocessable"}.get(err.code, "")
-            path = url[len(self.api_url):] if url.startswith(self.api_url) else url
-            raise HttpError(f"{method} {path}: {msg or reason} (HTTP {err.code})", err.code, data) from err
+            raise HttpError(f"{method} {self._path(url)}: {msg or reason} (HTTP {err.code})", err.code, data) from err
         except urllib.error.URLError as err:
             raise RuntimeError(f"{method} {url}: {err.reason}") from err
 
-    def _note_rate(self, headers) -> None:
+    def _note_rate(self, headers, res: str = "core") -> None:
         if not headers:
             return
-        rem, lim, reset = (headers.get(h) for h in ("x-ratelimit-remaining", "x-ratelimit-limit", "x-ratelimit-reset"))
-        if rem and lim:
-            self.last_rate = {"remaining": int(rem), "limit": int(lim), "reset": int(reset or 0)}
+        rem, lim, reset = (headers.get(h) for h in self.RATE_HEADERS)
+        if not (rem and lim and rem.isdigit() and lim.isdigit()):
+            return
+        res = headers.get("x-ratelimit-resource") or res
+        rate = {"remaining": int(rem), "limit": int(lim), "reset": int(reset) if reset and reset.isdigit() else 0}
+        self.rates[res] = rate
+        if res == "core":
+            self.last_rate = rate
+
+    def limited(self, res: str = "core") -> int | None:
+        """When this kind of call can't be made now: the time it can again (else None)."""
+        now = time.time()
+        if self.blocked.get(res, 0) > now:
+            return int(self.blocked[res])
+        r = self.rates.get(res)
+        if r and r["remaining"] <= 0 and r["reset"] > now:
+            return r["reset"]
+        return None
+
+    def pressure(self, res: str = "core") -> int:
+        """How much longer cached answers are kept: 4x when under 5% of the limit is left."""
+        r = self.rates.get(res)
+        if r and r["limit"] and r["reset"] > time.time() and r["remaining"] < max(50, r["limit"] // 20):
+            return 4
+        return 1
+
+    # the cache
+
+    def _cached_get(self, url: str, accept: str, ttl: int, variant: str = "json"):
+        """(status, headers, raw, entry) of a GET, from the cache when it is fresh (entry set on a hit)."""
+        key = (url, variant, accept)
+        e = self.store.get(key)
+        res = self.resource(url)
+        if e is not None and e.fresh():
+            self.stats["cache_hits"] += 1
+            return 200, e.extra, None, e
+        blocked = self.limited(res)
+        if blocked is not None:
+            if e is not None:  # out of requests: an older answer beats none
+                self.stats["stale_served"] += 1
+                return 200, e.extra, None, e
+            raise _rate_error(blocked, self.label)
+        cond = {}
+        if e is not None and e.etag:
+            cond["If-None-Match"] = e.etag
+        elif e is not None and e.modified:
+            cond["If-Modified-Since"] = e.modified
+        status, headers, raw = self.request("GET", url, accept=accept, headers=cond or None)
+        ttl *= self.pressure(res)
+        if status == 304 and e is not None:
+            self.stats["not_modified"] += 1
+            self.store.refresh(key, ttl)
+            return 200, e.extra, None, e
+        return status, headers, raw, None
+
+    def _keep(self, url: str, variant: str, accept: str, value, raw: bytes, headers: dict, ttl: int) -> None:
+        low = {k.lower(): v for k, v in headers.items()}
+        cc = low.get("cache-control", "")
+        if "no-store" in cc:
+            return
+        extra = {k: low[k.lower()] for k in ("Content-Type", "ETag", "Last-Modified") if k.lower() in low}
+        self.store.put((url, variant, accept), value, len(raw), ttl * self.pressure(self.resource(url)),
+                       etag=low.get("etag", ""), modified=low.get("last-modified", ""), extra=extra)
+
+    def get_raw(self, path: str, accept: str = "application/vnd.github+json") -> tuple[int, dict, bytes]:
+        """A GET's raw answer through the cache (the operator's GitHub proxy uses this)."""
+        url = self._url(path)
+        ttl = ttl_for(path, self.cache_ttl)
+        status, headers, raw, hit = self._cached_get(url, accept, ttl, "raw")
+        if hit is not None:
+            return 200, dict(hit.extra), hit.value
+        if 200 <= status < 300:
+            self._keep(url, "raw", accept, raw, raw, headers, ttl)
+        return status, headers, raw
+
+    def forget(self, path: str = "") -> None:
+        """A write went to `path`: mark what it can have changed as stale (all when it isn't about one repo)."""
+        scope, repo = self._scope(path)
+        if not scope:
+            self.stats["invalidated"] += self.store.stale()
+            self.caches.clear()
+            return
+        prefix = self._url(scope)
+        graphql = self.graphql_url
+        self.stats["invalidated"] += self.store.stale(prefix, also=lambda u: u == graphql)
+        bare = path.split("?", 1)[0]
+        self.caches.forget_repo(repo, repo_level=self._repo_level(bare, scope))
+        if "/contents/" in bare or "/repository/" in bare or "/git/" in bare:
+            self.caches.forget_files()
+
+    def _scope(self, path: str) -> tuple[str, str]:
+        """(the API path all of one repo's answers start with, the repo's name) of `path`."""
+        parts = path.split("?", 1)[0].split("/")
+        if path.startswith("/repos/") and len(parts) >= 4 and parts[2] and parts[3]:
+            return "/".join(parts[:4]), f"{parts[2]}/{parts[3]}"
+        return "", ""
+
+    @staticmethod
+    def _repo_level(bare: str, scope: str) -> bool:
+        return bare == scope or bare.endswith(("/topics", "/generate", "/transfer"))
+
+    def forget_graphql(self) -> None:
+        """A mutation: every GraphQL answer and every status node may be out of date."""
+        graphql = self.graphql_url
+        self.stats["invalidated"] += self.store.stale(graphql, also=None)
+        for name in ("nodes", "gl_nodes"):
+            self.caches.pop(name, None)
+
+    def graphql_raw(self, query: str, variables: dict) -> tuple[int, bytes]:
+        """A GraphQL call's raw answer, queries through the cache (the operator's GitHub proxy uses this)."""
+        body = json.dumps({"query": query, "variables": variables}).encode()
+        mutation = query.lstrip().startswith("mutation")
+        key = (self.graphql_url, "graphql-raw", body.decode())
+        if not mutation:
+            e = self.store.get(key)
+            if e is not None and (e.fresh() or self.limited("graphql") is not None):
+                self.stats["cache_hits" if e.fresh() else "stale_served"] += 1
+                return 200, e.value
+        try:
+            status, _, raw = self.request("POST", self.graphql_url, body, accept="application/json")
+        finally:
+            if mutation:
+                self.forget_graphql()
+        if not mutation and status == 200 and b'"errors"' not in raw:
+            self.store.put(key, raw, len(raw), graphql_ttl(self.cache_ttl) * self.pressure("graphql"))
+        return status, raw
+
+    def cache_info(self) -> dict:
+        return {**self.stats, "entries": len(self.store), "bytes": self.store.bytes,
+                "evictions": self.store.evictions}
 
     # the calls
 
     def api(self, method: str, path: str, body: dict | None = None):
         url = self._url(path)
-        if method == "GET" and self.cache_ttl:
-            hit = self._get_cache.get(url)
-            if hit and hit[0] > time.monotonic():
-                self.stats["cache_hits"] += 1
-                return hit[1]
-        tagged = self._etags.get(url) if method == "GET" else None
-        status, headers, data = self.request(method, url, json.dumps(body).encode() if body is not None else None,
-                                             headers={"If-None-Match": tagged[0]} if tagged else None)
-        if status == 304 and tagged:
-            self.stats["not_modified"] += 1
-            value = tagged[1]
-        else:
-            value = json.loads(data) if data.strip() else None
-            etag = {k.lower(): v for k, v in headers.items()}.get("etag")
-            if method == "GET" and etag:
-                if len(self._etags) > 5000:
-                    self._etags.clear()
-                self._etags[url] = (etag, value)
-        if method != "GET":  # a write makes cached answers about this repo stale
+        if method == "GET":
+            ttl = ttl_for(path, self.cache_ttl)
+            status, headers, raw, hit = self._cached_get(url, "application/vnd.github+json", ttl)
+            if hit is not None:
+                return hit.value
+            value = json.loads(raw) if raw.strip() else None
+            if 200 <= status < 300:
+                self._keep(url, "json", "application/vnd.github+json", value, raw, headers, ttl)
+            return value
+        blocked = self.limited(self.resource(url))
+        if blocked is not None:
+            raise _rate_error(blocked, self.label)
+        try:
+            _, _, data = self.request(method, url, json.dumps(body).encode() if body is not None else None)
+        finally:  # even a failed write may have changed something
             self.forget(path)
-        if method == "GET" and self.cache_ttl:
-            if len(self._get_cache) > 5000:
-                self._get_cache.clear()
-            self._get_cache[url] = (time.monotonic() + self.cache_ttl, value)
-        return value
-
-    def forget(self, path: str = "") -> None:
-        """Drop cached answers (all, or those under the repo of `path`)."""
-        parts = path.split("/")
-        prefix = self._url("/".join(parts[:4])) if path.startswith("/repos/") and len(parts) >= 4 else ""
-        if not prefix:
-            self._get_cache.clear()
-            return
-        for k in [k for k in self._get_cache if k.startswith(prefix) or not k.startswith("http")]:
-            self._get_cache.pop(k, None)
+        return json.loads(data) if data.strip() else None
 
     def graphql(self, query: str, variables: dict) -> dict:
         body = json.dumps({"query": query, "variables": variables}).encode()
-        key = body.decode()
         mutation = query.lstrip().startswith("mutation")
-        if mutation:
-            self._get_cache.clear()
-        if self.cache_ttl and not mutation:
-            hit = self._get_cache.get(key)
-            if hit and hit[0] > time.monotonic():
+        key = (self.graphql_url, "graphql", body.decode())
+        ttl = graphql_ttl(self.cache_ttl) * self.pressure("graphql")
+        if not mutation:
+            e = self.store.get(key)
+            if e is not None and e.fresh():
                 self.stats["cache_hits"] += 1
-                return hit[1]
-        _, _, raw = self.request("POST", self.graphql_url, body, accept="application/json")
+                return e.value
+            blocked = self.limited("graphql")
+            if blocked is not None:
+                if e is not None:
+                    self.stats["stale_served"] += 1
+                    return e.value
+                raise _rate_error(blocked, self.label)
+        try:
+            _, _, raw = self.request("POST", self.graphql_url, body, accept="application/json")
+        finally:
+            if mutation:
+                self.forget_graphql()
         data = json.loads(raw)
         if data.get("errors"):
             raise RuntimeError("; ".join(e.get("message", "?") for e in data["errors"])[:300])
-        if self.cache_ttl and not mutation:
-            self._get_cache[key] = (time.monotonic() + self.cache_ttl, data["data"])
+        if not mutation:
+            self.store.put(key, data["data"], len(raw), ttl)
         return data["data"]
 
     def download(self, path: str) -> bytes:

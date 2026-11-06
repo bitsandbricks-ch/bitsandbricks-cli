@@ -157,7 +157,8 @@ GitLab: set `GITLAB_URL`.
 | `MASON_ALLOW_USERS` | optional: only these may sign in: `github:mike, gitlab:ann`, or a bare login for either |
 | `MASON_ALLOW_ORGS` | optional: only members of these GitHub orgs or GitLab groups may sign in |
 | `MASON_IDLE_HOURS`, `MASON_SESSION_DAYS` | session idle timeout (12) and lifetime (7) |
-| `MASON_CACHE` | how long GET answers are cached per user (`60s`); ETags make refreshes cheap |
+| `MASON_CACHE` | the base time GitHub and GitLab answers are kept per user (`60s`, `0` to always ask); see [Caching](#caching) |
+| `MASON_CACHE_SIZE`, `MASON_CACHE_USER_SIZE` | memory for cached answers, all users together (`256MB`) and one user's share (`32MB`) |
 | `MASON_PLUGIN_INDEX`, `MASON_PLUGIN_INDEX_KEYS` | the plugin index (URL or file; default: `plugins/index.json` on this repo's main branch) and extra public keys (base64, comma separated) it may be signed with |
 | `MASON_TRUSTED_PROXIES` | how many proxies in front set `X-Forwarded-*` (0) |
 | `MASON_AUDIT_DAYS`, `MASON_AUDIT_ROWS`, `MASON_AUDIT_OUTPUT` | audit rows go after 90 days; each user keeps the newest 1000; command output is cut to 1000 characters |
@@ -168,6 +169,25 @@ GitLab: set `GITLAB_URL`.
 
 Over http the session cookie loses its `__Host-` prefix. Mason refuses to start when no login is
 configured (GitHub Enterprise without `GITHUB_CLIENT_ID`, say) or the URL is plain http on a public name.
+
+## Caching
+
+Mason keeps GitHub and GitLab answers in memory only, never on disk, and each user's in their own
+cache: nothing one user fetched is ever looked up for another.
+
+- **Per resource**: PRs, merge requests, issues, CI runs, checks and pipelines (and GraphQL) are kept 30s
+  at most; files, labels, rulesets and other repo settings for `MASON_CACHE`; the account, its orgs and
+  repo metadata 5x as long. `/rate_limit` and job logs are never served from the cache.
+- **Conditional requests**: an answer past its time is asked for again with its `ETag` (or `Last-Modified`).
+  An unchanged answer comes back as 304, which costs no rate limit on GitHub.
+- **Writes**: a change made through Mason (the web app, the console, or the CLI through the operator's
+  proxy) makes that repo's answers stale at once, and a GraphQL mutation all GraphQL answers. A change to a
+  repo itself drops the repo lists, a file change the loaded `mason.toml`.
+- **Rate limits**: Mason reads GitHub's `X-RateLimit-*` (per bucket: REST, GraphQL, search) and GitLab's
+  `RateLimit-*` headers. Under 5% left, answers are kept 4x as long. At 0, or after a `Retry-After`,
+  Mason answers from the cache, even stale, and refuses new calls until the reset without asking.
+- **Bounded**: the least recently used answers go first when a user's share or the total is full.
+  `/api/v1/rate` shows each user's hits, 304s, entries and bytes; `POST /api/v1/cache/clear` empties it.
 
 ## Security model
 

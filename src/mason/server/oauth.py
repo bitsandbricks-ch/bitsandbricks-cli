@@ -327,4 +327,3 @@ def gitlab(user: User):
     op = current_app.config["OP"]
     return _kept(("gitlab", user.id, security.sha256(token)),
                  lambda: GitLab(token, api_url=op.gitlab.api, web=op.gitlab.web, cache=op.cache))
-
