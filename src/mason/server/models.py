@@ -36,7 +36,6 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(200), default="")
     avatar_url: Mapped[str] = mapped_column(String(500), default="")
-    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     last_login: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     settings_json: Mapped[str] = mapped_column(Text, default="{}")
@@ -174,13 +173,6 @@ class Audit(Base):
     detail: Mapped[str] = mapped_column(Text, default="")
 
 
-class Setting(Base):
-    """Instance settings an admin changes at runtime (plugins switched off for everyone, ...)."""
-    __tablename__ = "instance_settings"
-    key: Mapped[str] = mapped_column(String(100), primary_key=True)
-    value: Mapped[str] = mapped_column(Text, default="")
-
-
 db = scoped_session(sessionmaker(expire_on_commit=False))
 
 
@@ -196,4 +188,17 @@ def init(url: str):
             cur.close()
     db.configure(bind=engine)
     Base.metadata.create_all(engine)
+    forget_admins(engine)
     return engine
+
+
+def forget_admins(engine) -> None:
+    """Databases from before Mason dropped admins: remove users.is_admin and the instance-wide settings
+    table (it held only plugins switched off for everyone). Everything left belongs to one user."""
+    from sqlalchemy import inspect, text
+    have = inspect(engine)
+    with engine.begin() as conn:
+        if "is_admin" in {c["name"] for c in have.get_columns("users")}:
+            conn.execute(text("ALTER TABLE users DROP COLUMN is_admin"))
+        if have.has_table("instance_settings"):
+            conn.execute(text("DROP TABLE instance_settings"))

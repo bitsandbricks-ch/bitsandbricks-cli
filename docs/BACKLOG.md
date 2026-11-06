@@ -59,7 +59,7 @@ move it to "Done" when it ships.
 - Bulk actions with a preview: rerun failed runs, update a file in N repos, archive stale repos.
 - OIDC / SAML sign-in for the operator itself in companies, next to GitHub and GitLab.
 - GitHub App mode (installation tokens, fine-grained permissions) as an alternative to OAuth apps.
-- Passkeys as a second factor for admin actions.
+- Passkeys as a second factor for risky actions (deleting the account, new API keys).
 - Per-user rate limit budget and a queue for big jobs, with progress in the UI.
 - Redis-backed cache and sessions to run several operator processes.
 - Helm chart and a k8s manifest next to the docker-compose example.

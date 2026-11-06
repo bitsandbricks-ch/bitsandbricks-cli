@@ -25,7 +25,7 @@ from mason.server import security
 from mason.server.models import ApiKey, Audit, Session, User, db, utcnow
 
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
-SCOPES = {"read": 0, "write": 1, "admin": 2}
+SCOPES = {"read": 0, "write": 1}
 
 # ── throttling (device codes, logins, bad keys) ─────────────────────────────
 _failures: dict[str, list[float]] = defaultdict(list)
@@ -115,12 +115,10 @@ def _from_session() -> bool:
     user = db.get(User, s.user_id)
     if user is None:
         return False
-    from mason.server.oauth import admin_of
-    admin = admin_of(user)  # MASON_ADMINS decides, also for sessions started before it changed
-    if now - s.seen_at > timedelta(minutes=1) or user.is_admin != admin:
-        s.seen_at, user.is_admin = now, admin
+    if now - s.seen_at > timedelta(minutes=1):
+        s.seen_at = now
         db.commit()
-    g.user, g.session, g.via, g.scope = user, s, "web", "admin" if user.is_admin else "write"
+    g.user, g.session, g.via, g.scope = user, s, "web", "write"
     return True
 
 
@@ -177,8 +175,6 @@ def need(scope: str = "read"):
             if g.get("user") is None:
                 abort(401, "sign in first")
             if SCOPES.get(g.scope, -1) < SCOPES[scope]:
-                if scope == "admin":
-                    abort(403, "only admins may do this")
                 abort(403, f"this API key is {g.scope}-only; this needs a {scope} key")
             return fn(*a, **kw)
         return inner

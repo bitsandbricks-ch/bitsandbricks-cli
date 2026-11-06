@@ -1,8 +1,8 @@
 <script setup>
-// Plugins: switch them on or off for yourself (admins: for everyone), run their actions, open their tabs.
+// Plugins: switch them on or off for yourself (only yours: nobody switches them for anyone else), run their actions, open their tabs.
 import { onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
-import { get, log, post, put, state } from '../api.js'
+import { get, log, post, put } from '../api.js'
 import { ask } from '../ui.js'
 import TextPane from '../components/TextPane.vue'
 
@@ -48,10 +48,8 @@ onMounted(load)
           <div class="row">
             <span :class="p.on ? 'accent' : 'dim'">{{ p.name }}</span>
             <span class="dim grow">{{ p.description }}</span>
-            <label class="check"><input type="checkbox" :checked="p.on" :disabled="p.off_for_all" @change="toggle(p, { on: $event.target.checked })"> on for me</label>
-            <label v-if="state.me?.user?.is_admin" class="check"><input type="checkbox" :checked="!p.off_for_all" @change="toggle(p, { everyone: $event.target.checked })"> for everyone</label>
+            <label class="check"><input type="checkbox" :checked="p.on" @change="toggle(p, { on: $event.target.checked })"> on for me</label>
           </div>
-          <div v-if="p.off_for_all" class="warn">an admin switched this plugin off</div>
           <div v-if="p.on" class="row dim" style="margin-top: 6px">
             <span v-for="t in p.tabs" :key="t.id"><RouterLink :to="`/plugins/${p.name}/${t.id}`">tab: {{ t.title }}</RouterLink></span>
             <span v-for="c in p.checks" :key="c.key" class="chip">check: {{ c.label }}</span>

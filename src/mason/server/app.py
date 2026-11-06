@@ -87,8 +87,8 @@ def create_app(op: S.Settings | None = None) -> Flask:
 
     @app.get("/api/v1/health")
     def _health():
-        return jsonify({"ok": True, "version": _version(), "problems": problems if g.get("user") and
-                        g.user.is_admin else len(problems)})
+        # only how many: `mason serve --check` lists them where Mason runs
+        return jsonify({"ok": True, "version": _version(), "problems": len(problems)})
 
     @app.get("/api/<path:_rest>")
     def _no_api(_rest):
@@ -138,8 +138,8 @@ def main(argv: list[str] | None = None) -> None:
             print(f"{p.name:<13}{how} ({p.web})")
         who = ("anyone with an account" if op.open_sign_in
                else f"users {sorted(op.allow_users) or '-'}, orgs {sorted(op.allow_orgs) or '-'}")
-        print(f"sign-in      {who}; admins {sorted(op.admins) or '-'}")
-        print(f"plugins      index {op.plugin_index}, install from the web {'on' if op.plugin_install else 'off'}")
+        print(f"sign-in      {who}")
+        print(f"plugins      index {op.plugin_index} (install with pip next to Mason)")
         print(f"web ui       {'built' if webui.built(STATIC) else 'NOT BUILT: cd web && npm ci && npm run build'}")
         for problem in op.problems():
             print(f"PROBLEM      {problem}")

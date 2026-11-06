@@ -178,7 +178,6 @@ From a clone, for development:
 ```sh
 docker compose -f deploy/docker-compose.yml up -d   # after filling in deploy/.env (see docs/mason.md)
 pip install -e ".[server]" && (cd web && npm ci && npm run build)
-export MASON_ADMINS=github:you                         # optional: GitHub sign-in works as is
 mason serve --check && mason serve                       # http://localhost:8080
 ```
 

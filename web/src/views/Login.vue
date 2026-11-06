@@ -66,7 +66,7 @@ const BANNER = [
           <a v-else class="btn primary" :href="`/api/v1/auth/${p}/login?next=${next}`">
             [ sign in with {{ p === 'github' ? 'GitHub' : 'GitLab' }} ]</a>
         </template>
-        <span v-if="!providers.length" class="bad">No sign-in is set up: the admin sets GITHUB_CLIENT_ID or GITLAB_CLIENT_ID.</span>
+        <span v-if="!providers.length" class="bad">No sign-in is set up: whoever runs Mason sets GITHUB_CLIENT_ID or GITLAB_CLIENT_ID.</span>
       </div>
       <p class="dim">The CLI: <span class="accent">mason login {{ origin }}</span> then <span class="accent">mason tui</span>.</p>
     </div>

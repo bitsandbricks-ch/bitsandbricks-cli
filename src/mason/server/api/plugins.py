@@ -1,15 +1,14 @@
 """Plugins in the web UI (their tabs, checks and actions) and the marketplace.
 
 Plugins are Python packages installed next to the operator (mason's `mason.plugins` entry
-points). Each user can switch a plugin off for themselves; an admin can switch it off for everyone.
-The marketplace lists a signed plugin index; an admin may install from it only when the operator
-runs with MASON_PLUGIN_INSTALL=1 (it then needs a restart).
+points). Each user switches plugins on or off for themselves only: there is no setting that changes
+another user's plugins. The marketplace lists a signed plugin index; installing one changes the whole
+server, so it happens where Mason runs (pip install, or `mason market install NAME`), not from the web.
 """
 
 from __future__ import annotations
 
 import contextlib
-import json
 
 from flask import Blueprint, abort, current_app, g, jsonify, request
 
@@ -17,21 +16,13 @@ from mason import core, market, plugins
 from mason.server.api.account import body, secret_names, secret_of
 from mason.server.auth import audit, can_write, need
 from mason.server.context import as_user, load_config, user_settings, valid_repo
-from mason.server.models import Setting, db
+from mason.server.models import db
 
 bp = Blueprint("plugins", __name__, url_prefix="/api/v1")
 
 
-def off_for_all() -> set[str]:
-    row = db.get(Setting, "plugins_off")
-    try:
-        return set(json.loads(row.value)) if row else set()
-    except ValueError:
-        return set()
-
-
 def active() -> list:
-    off = off_for_all() | set(user_settings(g.user).get("plugins_off") or [])
+    off = set(user_settings(g.user).get("plugins_off") or [])
     return [p for p in plugins.load() if p.name not in off]
 
 
@@ -80,9 +71,7 @@ def describe(p, on: bool) -> dict:
 @need("read")
 def plugins_list():
     names = {p.name for p in active()}
-    everyone_off = off_for_all()
-    return jsonify({"plugins": [dict(describe(p, p.name in names), off_for_all=p.name in everyone_off)
-                                for p in plugins.load()],
+    return jsonify({"plugins": [describe(p, p.name in names) for p in plugins.load()],
                     "broken": plugins.errors})
 
 
@@ -92,16 +81,6 @@ def plugin_toggle(name: str):
     if name not in {p.name for p in plugins.load()}:
         abort(404)
     data = body()
-    if "everyone" in data:
-        if not g.user.is_admin or g.get("session") is None:
-            abort(403, "only admins (in the browser) switch plugins for everyone")
-        off = off_for_all()
-        off = off - {name} if data["everyone"] else off | {name}
-        row = db.get(Setting, "plugins_off") or Setting(key="plugins_off")
-        row.value = json.dumps(sorted(off))
-        db.add(row)
-        db.commit()
-        audit("plugin.everyone", f"{name} {'on' if data['everyone'] else 'off'}")
     if "on" in data:
         s = g.user.settings
         off = set(s.get("plugins_off") or [])
@@ -187,24 +166,6 @@ def market_list():
     loaded = {p.name for p in plugins.load()}
     for p in got["plugins"]:
         p["loaded"] = p["name"] in loaded
-    got["can_install"] = bool(op.plugin_install and g.user.is_admin)
     got["index"] = op.plugin_index
     return jsonify(got)
 
-
-@bp.post("/market/<name>/install")
-@need("admin")
-def market_install(name: str):
-    op = current_app.config["OP"]
-    if not op.plugin_install:
-        abort(403, "installing from the web is off: set MASON_PLUGIN_INSTALL=1, or install with "
-                   "pip next to the operator")
-    if g.get("session") is None:
-        abort(403, "install plugins in the browser")
-    try:
-        text = market.install(name, op.plugin_index, op.plugin_index_keys)
-    except (RuntimeError, OSError) as err:
-        audit("market.install", name, ok=False, detail=str(err))
-        abort(400, str(err))
-    audit("market.install", name, detail=text)
-    return jsonify({"text": text, "restart": True})

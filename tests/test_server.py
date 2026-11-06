@@ -29,7 +29,7 @@ def op(env, monkeypatch, tmp_path):
         url="http://localhost:8080", data=tmp_path, database=f"sqlite:///{tmp_path / 'op.db'}", secret_key="k" * 40,
         github=S.Provider("github", "id", "secret", "https://github.com", "https://api.github.com", "repo"),
         gitlab=S.Provider("gitlab", "", "", "https://gitlab.com", "https://gitlab.com/api/v4", "api"),
-        allow_users={("github", "mike")}, admins={("github", "mike")}, plugin_index=str(tmp_path / "index.json"))
+        allow_users={("github", "mike")}, plugin_index=str(tmp_path / "index.json"))
     from mason.server import limits
     limits.reset()
     app = create_app(settings)
@@ -38,7 +38,7 @@ def op(env, monkeypatch, tmp_path):
     monkeypatch.setattr(oauth, "github", lambda user: transport.GhTransport("ghtoken") if user.identity("github")
                         else None)
     with app.app_context():
-        user = User(name="Mike", is_admin=True)
+        user = User(name="Mike")
         db.add(user)
         db.flush()
         db.add(Identity(user_id=user.id, provider="github", host="github.com", uid="1", login="mike",
@@ -226,14 +226,14 @@ def test_market(op, tmp_path):
                                         "source": "git+https://example.org/demo@v1"}]}
     (tmp_path / "index.json").write_text(json.dumps(doc))
     got = c.get("/api/v1/market").json
-    assert got["status"] == "unverified" and got["plugins"][0]["name"] == "demo" and not got["can_install"]
+    assert got["status"] == "unverified" and got["plugins"][0]["name"] == "demo" and "can_install" not in got
     (tmp_path / "index.json").write_text(json.dumps(market.sign(doc, pem)))
     app.config["OP"].plugin_index_keys = [pub]
     assert c.get("/api/v1/market").json["status"] == "verified"
     tampered = market.sign(doc, pem)
     tampered["plugins"][0]["source"] = "git+https://evil.example/x"
     assert market.verify(tampered, market.trusted_keys([pub]))[0] == "unverified"
-    assert c.post("/api/v1/market/demo/install", headers=H).status_code == 403  # installing from the web is off
+    assert c.post("/api/v1/market/demo/install", headers=H).status_code in (404, 405)  # never from the web
 
 
 def test_stats(op):
@@ -242,13 +242,13 @@ def test_stats(op):
     assert m["days"] == 30 and "merged_by_week" in m["totals"] and m["repos"]
 
 
-# ── sign-in: settings, open sign-in, GitHub's device flow, admins ────────────
+# ── sign-in: settings, open sign-in, GitHub's device flow ───────────────────
 
 
 def test_settings_defaults(monkeypatch, tmp_path):
     from mason.server import settings as S
     for k in ("MASON_URL", "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "GITHUB_URL", "GITLAB_CLIENT_ID",
-              "GITLAB_CLIENT_SECRET", "MASON_ALLOW_USERS", "MASON_ALLOW_ORGS", "MASON_ADMINS"):
+              "GITLAB_CLIENT_SECRET", "MASON_ALLOW_USERS", "MASON_ALLOW_ORGS"):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("MASON_DATA", str(tmp_path))
     op = S.load()
@@ -356,19 +356,35 @@ def test_device_sign_in_is_open_to_anyone(op, monkeypatch):
     assert any("mason_session=" in h for h in got.headers.getlist("Set-Cookie"))
     assert fake.calls[-2][2]["grant_type"] == oauth.DEVICE_GRANT and "client_secret" not in fake.calls[-2][2]
     me = ann.get("/api/v1/me").json
-    assert me["user"]["name"] == "Ann" and not me["user"]["is_admin"] and me["identities"][0]["login"] == "ann"
+    assert me["user"]["name"] == "Ann" and "is_admin" not in me["user"] and me["identities"][0]["login"] == "ann"
     # each user sees only their own keys, sessions and audit log
     mike.post("/api/v1/keys", json={"name": "mike-key"}, headers=H)
     assert ann.get("/api/v1/keys").json == []
     assert len(ann.get("/api/v1/sessions").json) == 1
     assert {a["action"] for a in ann.get("/api/v1/audit").json} == {"login.github"}
-    assert ann.get("/api/v1/admin/users").status_code == 403  # only admins
+    assert {a["action"] for a in ann.get("/api/v1/audit?all=1").json} == {"login.github"}  # no "everyone"
+    assert mike.get("/api/v1/admin/users").status_code == 404  # no admins, so no list of users
+    assert mike.get("/api/v1/me").json["scope"] == "write"
+    # plugins are switched per user: Ann's choice never reaches Mike, and there is no "for everyone"
+    from mason import plugins
+
+    class Demo:
+        name = "demo"
+        def tui_tabs(self): return []  # noqa: E301,E704
+        def tui_checks(self): return []  # noqa: E301,E704
+        def status_columns(self): return []  # noqa: E301,E704
+    monkeypatch.setattr(plugins, "load", lambda: [Demo()])
+    ah = {"X-CSRF-Token": me["csrf"]}
+    assert ann.put("/api/v1/plugins/demo", json={"on": False, "everyone": False}, headers=ah).status_code == 200
+    assert not next(p for p in ann.get("/api/v1/plugins").json["plugins"] if p["name"] == "demo")["on"]
+    mine = next(p for p in mike.get("/api/v1/plugins").json["plugins"] if p["name"] == "demo")
+    assert mine["on"] and "off_for_all" not in mine
     assert _poll(app, ann).status_code == 403  # signed in now: writes need the CSRF token
     r = ann.post("/api/v1/auth/github/device/poll", json={}, headers={"X-CSRF-Token": me["csrf"]})
     assert r.json["status"] == "expired"  # the cookie was for one sign-in
 
 
-def test_device_sign_in_respects_allow_lists_and_admins(op, monkeypatch):
+def test_device_sign_in_respects_allow_lists(op, monkeypatch):
     app, mike = op
     from mason.server import oauth
     fake = FakeGitHub(login="eve", uid="66")
@@ -382,11 +398,7 @@ def test_device_sign_in_respects_allow_lists_and_admins(op, monkeypatch):
     eve.post("/api/v1/auth/github/device", json={})
     fake.answers = [(200, {"error": "access_denied"})]
     assert _poll(app, eve).json == {"status": "failed", "error": "you cancelled the sign-in at GitHub"}
-    # admins come only from MASON_ADMINS, also for an existing session
-    assert mike.get("/api/v1/me").json["user"]["is_admin"]
-    app.config["OP"].admins = set()
-    assert not mike.get("/api/v1/me").json["user"]["is_admin"]
-    assert mike.get("/api/v1/admin/users").status_code == 403
+    assert mike.get("/api/v1/me").json["user"]["name"] == "Mike"  # listed users still get in
 
 
 def test_device_only_github(op, monkeypatch):
@@ -434,7 +446,7 @@ def test_redirect_sign_in_github_and_gitlab(op, monkeypatch):
     assert r.status_code == 302 and r.headers["Location"] == "/runs"
     me = anon.get("/api/v1/me").json
     assert me["identities"][0]["provider"] == "gitlab" and me["identities"][0]["login"] == "gil"
-    assert not me["user"]["is_admin"]
+    assert "is_admin" not in me["user"]
 
 
 # ── revoking tokens when a login is disconnected or the account deleted ──────
@@ -596,8 +608,8 @@ def test_new_accounts_are_limited(op, monkeypatch):
     with pytest.raises(PermissionError, match="as many accounts"):
         _sign_in_as(app, "bob", "3")
     assert _sign_in_as(app, "ann", "2").name == "ann"  # existing accounts still sign in
-    monkeypatch.setattr(s, "admins", {("github", "mike"), ("github", "root")})
-    assert _sign_in_as(app, "root", "4").name == "root"  # admins always get in
+    with pytest.raises(PermissionError, match="as many accounts"):
+        _sign_in_as(app, "root", "4")  # nobody is exempt: there are no admins
     monkeypatch.setattr(s, "max_users", 0)
     monkeypatch.setattr(s, "signups_per_ip", 1)
     from mason.server import limits
@@ -645,3 +657,26 @@ def test_proxy_reads_dont_count(op, monkeypatch):
     codes = [c.get("/api/v1/github/rest/repos/acme/web").status_code for _ in range(4)]
     assert 429 not in codes
     assert [c.get("/api/v1/me").status_code for _ in range(3)] == [200, 200, 429]
+
+
+def test_old_databases_lose_admins(tmp_path):
+    import sqlite3
+
+    from mason.server import models
+    path = tmp_path / "old.db"
+    con = sqlite3.connect(path)
+    con.executescript("CREATE TABLE users (id INTEGER PRIMARY KEY, name VARCHAR(200), avatar_url VARCHAR(500), "
+                      "created_at DATETIME, last_login DATETIME, settings_json TEXT, is_admin BOOLEAN NOT NULL);"
+                      "INSERT INTO users VALUES (1, 'Mike', '', NULL, NULL, '{}', 1);"
+                      "CREATE TABLE instance_settings (key VARCHAR(100) PRIMARY KEY, value TEXT);")
+    con.close()
+    engine = models.init(f"sqlite:///{path}")
+    from sqlalchemy import inspect
+    have = inspect(engine)
+    assert "is_admin" not in {c["name"] for c in have.get_columns("users")}
+    assert not have.has_table("instance_settings")
+    models.db.add(models.User(name="Ann"))  # would fail on the old NOT NULL is_admin
+    models.db.commit()
+    assert [u.name for u in models.db.query(models.User).order_by(models.User.id)] == ["Mike", "Ann"]
+    models.db.remove()
+    engine.dispose()
