@@ -66,6 +66,12 @@ mtr serve                                    # http://localhost:8080 (Flask's de
 mtr serve --host 0.0.0.0 --port 9000         # somewhere else
 ```
 
+`--port` sets the port Mortar listens on (default 8080). Without `MTR_URL`, Mortar's URL follows it, so
+`mtr serve --port 9000` is `http://localhost:9000`. Set `MTR_URL` yourself when people reach Mortar any
+other way, and keep its port the same as in the OAuth apps' callback URLs
+(`{MTR_URL}/api/v1/auth/{github|gitlab}/callback`): a GitHub or GitLab app registered for
+`http://localhost:8080/...` won't send you back to `:9000`.
+
 UI development: `cd web && npm run dev` serves the UI on :5173 and passes `/api` to Mortar on :8080.
 
 ## Run it with Docker
@@ -135,7 +141,7 @@ GitLab: set `GITLAB_URL`.
 
 | variable | meaning |
 | --- | --- |
-| `MTR_URL` | where people reach it (default `http://localhost:8080`); plain `http://` only for localhost, private addresses and `.local`, `.lan` or `.home.arpa` names, `https://` everywhere else |
+| `MTR_URL` | where people reach it (default `http://localhost:8080`, or the port from `mtr serve --port`); it must match the OAuth apps' callback URLs, port included; plain `http://` only for localhost, private addresses and `.local`, `.lan` or `.home.arpa` names, `https://` everywhere else |
 | `MTR_SECRET_KEY` | encrypts stored tokens and secrets; made once in the data folder when unset |
 | `MTR_DATA` | data folder (default `./data`, `/data` in the image) |
 | `DATABASE_URL` | SQLAlchemy URL; SQLite in the data folder by default, `postgresql+psycopg://…` with `[postgres]` |

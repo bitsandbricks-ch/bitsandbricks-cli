@@ -218,7 +218,8 @@ def main(argv: list[str] | None = None) -> None:
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] == ["serve"]:  # the web app: mtr serve [--host H] [--port P], mtr serve --check
         from mortar.server.app import main as server
-        server(["check"] if "--check" in argv else ["serve", *argv[1:]])
+        rest = argv[1:]
+        server(["check", *(a for a in rest if a != "--check")] if "--check" in rest else ["serve", *rest])
         return
     parser, handlers = build_parser()
     args, extra = parser.parse_known_args(argv)

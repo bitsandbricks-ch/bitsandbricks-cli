@@ -110,10 +110,13 @@ def main(argv: list[str] | None = None) -> None:
     sub = p.add_subparsers(dest="cmd", required=True)
     sp = sub.add_parser("serve", help="run the operator (development server; use gunicorn in production)")
     sp.add_argument("--host", default="127.0.0.1")
-    sp.add_argument("--port", type=int, default=8080)
-    sub.add_parser("check", help="what the settings allow, and what is missing")
+    sp.add_argument("--port", type=int, default=S.DEFAULT_PORT,
+                    help="port to listen on (default 8080); without MTR_URL, Mortar's URL is http://localhost:PORT")
+    cp = sub.add_parser("check", help="what the settings allow, and what is missing")
+    cp.add_argument("--port", type=int, default=S.DEFAULT_PORT, help="the port `serve` will use")
+    cp.add_argument("--host", help=argparse.SUPPRESS)  # so `mtr serve --check` takes serve's options
     args = p.parse_args(argv)
-    op = S.load()
+    op = S.load(args.port)
     if args.cmd == "check":
         print(f"url          {op.url or '(MTR_URL is not set)'}")
         print(f"data         {op.data}")
