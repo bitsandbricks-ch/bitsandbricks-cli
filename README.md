@@ -66,9 +66,35 @@ Security alerts need the `security_events` scope and packages the `read:packages
 - **Repos** show the version file against the latest release, CI on the default branch, alerts and missing release assets. **Releases** show the version, the release notes and what failed in the last release run.
 - **Repos and Releases:** **b** bumps the selected repo's version (pick patch, minor or major; opens the PR), **R** pushes its release tag once the bump is merged, **N** creates a release by hand (tag, title, one line of notes or GitHub's own, published, pre-release or draft), **T** pushes only a tag so the repo's own workflow makes the release.
 - **Enter** on a row opens it as a full page: what you can do with it on the left (Enter or the key in brackets runs it), its whole detail on the right, and what the actions printed at the bottom. On Releases the page lists the repo's recent releases with the newest one's whole notes. **Esc** goes back to the list. On Checks and Settings, Enter opens a short menu instead.
-- **The footer** only shows the keys that work on the current tab.
+- **The footer** starts with the function keys, as htop's does, then the keys that work on the current tab.
 - **n** creates a new repo.
-- **ctrl+p** lists every command.
+- **ctrl+p** (or **F2**) lists every command, **F1** (or **?**) every key.
+
+### Keyboard only
+
+Everything works without a mouse, and **Tab** alone gets you everywhere:
+
+- **Tab / Shift+Tab** move between the panels: the tab bar, the list, its detail, the search line (when it is open) and the log. The panel with the focus has a coloured edge. On a row's page, Tab goes from the actions to the detail to the log.
+- **← →** switch tabs from the list or the tab bar (**1**-**9** jump to one). In the detail they scroll sideways, in a search or an answer they move the cursor.
+- **↑ ↓ PgUp PgDn Home End** move in the list, or scroll the detail and the log once Tab has put the focus there.
+- **Dialogs:** Tab, Shift+Tab and the arrows move between Yes and No, Enter presses the one with the focus. In a list of choices (bump level, filters, sort) Tab and Shift+Tab go through the choices.
+
+### Search, filter and sort (F-keys)
+
+The lists use htop's and Midnight Commander's function keys. Each one also has a letter, because some terminals keep F-keys for themselves (GNOME Terminal opens its help on F1 and its menu on F10; on a Mac the F-keys need fn).
+
+| Key | Letter | What it does |
+|---|---|---|
+| F1 | `?` | Every key, and the selected row's own keys. |
+| F2 | ctrl+p | Every command. |
+| F3 | `/` | Search: only the rows with this text stay, as you type. Enter keeps it, Esc clears it. Each tab keeps its own. |
+| F4 | `v` | Filter. F4 picks one, `v` goes to the next. Repos: with open PRs, CI failing. Pull requests: auto-merge, recently merged, drafts. Runs: waiting, failed, running. Releases and Packages: with problems. Security: with alerts. |
+| F5 | `r` | Refresh the tab you are on. |
+| F6 | `>` | Sort by a column. The same column again reverses it, "as loaded" goes back to mason's own order (what needs you first). Ages ("3h ago") and numbers sort by value. |
+| F9 | Enter | The selected row as a page. |
+| F10 | `q` | Quit. |
+
+The line over the log says what the list shows: `3 of 12 rows · F4 filter: failed · F3 search: 'api' · F6 sort: when ↑`.
 - **Loading:** nothing reloads by itself. The repo and PR list loads at start, with one GraphQL query per 20 repos. Runs, Releases, Packages and Security load the first time you open their tab. **r** reloads the tab you are on.
 - **Rate limit:** the header shows how many API calls are left. Answers are cached for 60 seconds; **r** reads past the cache. If GitHub's rate limit is reached, the TUI says when it resets instead of failing.
 
@@ -100,6 +126,7 @@ ref = "main"                          # optional branch or tag
 orgs = ["another-org"]                # added to the orgs the defaults name
 repos = ["someone/their-repo"]        # added to the defaults' repos
 exclude = ["another-org/archive-*"]   # added to the defaults' exclude
+org_defaults = true                   # read each org's .mason repo (the default; false turns it off)
 ```
 
 It lives in `$XDG_CONFIG_HOME/mason` when that is set, and `MASON_CONFIG` points mason at another file. `MASON_DEFAULTS`, `MASON_DEFAULTS_REF` and `MASON_ORGS` (comma separated, replacing the orgs) override it for one run.
@@ -109,6 +136,7 @@ It lives in `$XDG_CONFIG_HOME/mason` when that is set, and `MASON_CONFIG` points
 | `MASON_CONFIG` | Your config file, instead of `~/.config/mason/config.toml`. |
 | `MASON_DEFAULTS`, `MASON_DEFAULTS_REF` | The defaults repo (or folder) and its branch or tag. |
 | `MASON_ORGS` | The orgs to look at, comma separated. |
+| `MASON_ORG_DEFAULTS` | `0` (or `off`) leaves each org's `.mason` repo out for one run. |
 | `MASON_SERVER`, `MASON_KEY` | Go through Mason with this URL and API key (for CI). `MASON_SERVER=` (set but empty) uses gh even after `mason login`. |
 | `MASON_OPEN` | How `mason open` opens links: `browser`, `copy` or `print`. |
 | `MASON_PLUGINS` | `none`, or a comma separated list of the plugins to load. |
@@ -163,6 +191,46 @@ A ruleset from the defaults folder only has to be covered: a repo may set more t
 `workflows` makes doctor check the group's workflow files like `mason workflows` does. It takes `true` or a table: `pinned`, `permissions`, `pull_request_target` and `injection` turn single checks off with `false`, and `allow_unpinned = ["actions/*", "your-org/*"]` lets actions of owners you trust stay on a tag. `mason workflows --fix` keeps the tag as a comment (`uses: actions/checkout@<sha> # v4`), so Dependabot and Renovate keep updating the pins.
 
 Unknown keys on a group stay there for plugins (`group.extra`).
+
+### An org's own defaults: the `.mason` repo
+
+Like the `.github` repo, an org (or a GitLab group) can keep the defaults of its own repos in a repo
+named `.mason`, with a `mason.toml` in it. Everyone who works on the org's repos gets them, without
+pointing mason anywhere:
+
+```toml
+# your-org/.mason/mason.toml
+[[group]]
+name = "services"
+match = { prefix = "svc-" }
+rulesets = "rulesets/services"   # folders are read from the .mason repo itself
+files = "files/services"
+
+[[group]]
+name = "default"                 # the rest of the org's repos
+settings = { delete_branch_on_merge = true }
+security = { secret_scanning = "enabled" }
+```
+
+Only its `[[group]]` tables count, and only for repos of that org: `orgs`, `repos` and `exclude` in it
+are ignored, so an org's file can't change which repos you look at. Its groups are named `org:name`
+(`your-org:services`, for `--group`). On GitLab the nearest group's `.mason` comes first, then its
+parents' (`grp/sub/.mason`, then `grp/.mason`).
+
+Which group a repo gets, first hit wins:
+
+1. a group of your own defaults whose `match` takes the repo,
+2. a group of the repo's org's `.mason`,
+3. a group of your own defaults without `match` (your catch-all).
+
+So the org's `.mason` replaces your catch-all for its repos, and a group you wrote for some of its repos
+on purpose still wins. Groups are never merged key by key: one group decides, as before.
+
+mason reads the `.mason` repo with your own login (gh, your token, or your Mason account), so a private
+`.mason` only counts for people who can read it, and each user's answer is cached in their own cache
+(5 minutes; a file written through mason drops it). `mason config` shows which `.mason` repos it found.
+`org_defaults = false` in your config, `MASON_ORG_DEFAULTS=0`, or the switch in the web app's Settings
+turns it off.
 
 ## Plugins
 

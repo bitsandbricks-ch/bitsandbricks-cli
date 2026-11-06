@@ -3,7 +3,7 @@
 
 acme: web, api, plugin-tpl (the plugins' reference), plugin-a (in line), plugin-b (drifted),
       legacy (excluded by the defaults), old (archived), defaults (a defaults repo).
-mike: dotfiles (a user, not an org: /orgs/mike/repos is a 404).
+mike: dotfiles (a user, not an org: /orgs/mike/repos is a 404), .mason (defaults for mike's repos, with FAKE_GH_MASON=1).
 FAKE_GH_LOG names a file that gets one line per call.
 """
 import base64
@@ -141,6 +141,15 @@ DEFAULTS_MAIN = {"name": "main", "target": "branch", "enforcement": "active",
 REPOS["acme/defaults"] = ({}, {}, {"mason.toml": DEFAULTS_TOML,
                                    "rulesets/default/main.json": json.dumps(DEFAULTS_MAIN),
                                    "files/default/SECURITY.md": SECURITY_MD}, False)
+# mike's own .mason: the defaults of mike's repos (like an org's .github repo); only with FAKE_GH_MASON=1
+MIKE_MASON_TOML = """\
+[[group]]
+name = "personal"
+settings = { has_wiki = true }
+files = "files"
+"""
+if os.environ.get("FAKE_GH_MASON") == "1":
+    REPOS["mike/.mason"] = ({}, {}, {"mason.toml": MIKE_MASON_TOML, "files/CONTRIBUTING.md": "Open a PR.\n"}, False)
 RS_IDS = {}
 for repo, (_, rsets, _, _) in REPOS.items():
     for i, name in enumerate(rsets):

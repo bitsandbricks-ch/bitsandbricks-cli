@@ -407,6 +407,23 @@ def test_release_suggestion():
         REL.valid_tag("v1..2")
 
 
+def test_org_defaults_repo(env, tmp_path):
+    """mike/.mason holds the defaults of mike's repos: it takes over from the catch-all group."""
+    e = {**env, "FAKE_GH_MASON": "1"}
+    assert "mike/dotfiles                                 mike:personal" in mason(e, "repos")
+    out = mason(e, "doctor", "dotfiles")
+    assert "(group mike:personal)" in out and "has_wiki is false, mike/.mason has true" in out
+    assert "CONTRIBUTING.md is missing" in out  # from the files folder of mike/.mason
+    assert "add CONTRIBUTING.md" in mason(e, "sync", "--dry-run", "dotfiles")
+    assert "acme/web                                      default" in mason(e, "repos")  # acme has no .mason
+    assert "org defaults mike/.mason" in mason(e, "config")
+    # turned off: back to the defaults' catch-all
+    assert "mike/dotfiles                                 default" in mason({**e, "MASON_ORG_DEFAULTS": "0"}, "repos")
+    # no defaults repo of your own at all: the org's .mason still applies
+    bare = {**e, "MASON_DEFAULTS": "", "MASON_ORGS": "mike", "XDG_CONFIG_HOME": str(tmp_path / "cfg")}
+    assert "(group mike:personal)" in mason(bare, "doctor", "dotfiles")
+
+
 def test_release_tag_only_pushes_the_tag(env, tmp_path):
     log = tmp_path / "calls.log"
     out = mason({**env, "FAKE_GH_LOG": str(log)}, "release", "tag", "b", "v0.4.0", "--yes")

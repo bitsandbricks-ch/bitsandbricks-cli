@@ -30,6 +30,8 @@ scripts (key)        ─┘      │                  └─> GitLab REST/GraphQ
 ![audit](screenshots/12-audit.png)
 ![theme amber](screenshots/13-theme-amber.png)
 ![theme paper](screenshots/14-theme-paper.png)
+![theme grey](screenshots/15-theme-grey.png)
+![theme grey, pull requests](screenshots/16-theme-grey-prs.png)
 
 On a phone (the layout adapts below 700px; it can be added to the home screen):
 
@@ -64,7 +66,8 @@ one-key shortcut (`1` to `9` for the first ones, `I` issues, `W` workflows, `D` 
 - **Settings** holds the defaults repo, orgs, extra and left-out repos, GitLab groups and projects,
   connected accounts, API keys, sessions and plugin secrets.
 - **Keys:** arrows or `j`/`k` move, Enter acts, `/` filters, `r` reloads, `t` switches the theme
-  (phosphor, amber, paper), `?` lists the keys.
+  (phosphor, amber, grey, paper) and saves your choice to your account, so every browser you sign in
+  with uses it; `?` lists the keys.
 
 ## Run it
 
@@ -223,7 +226,7 @@ cache: nothing one user fetched is ever looked up for another.
   An unchanged answer comes back as 304, which costs no rate limit on GitHub.
 - **Writes**: a change made through Mason (the web app, the console, or the CLI through the operator's
   proxy) makes that repo's answers stale at once, and a GraphQL mutation all GraphQL answers. A change to a
-  repo itself drops the repo lists, a file change the loaded `mason.toml`.
+  repo itself drops the repo lists, a file change the loaded `mason.toml` (and any org `.mason` read).
 - **Rate limits**: Mason reads GitHub's `X-RateLimit-*` (per bucket: REST, GraphQL, search) and GitLab's
   `RateLimit-*` headers. Under 5% left, answers are kept 4x as long. At 0, or after a `Retry-After`,
   Mason answers from the cache, even stale, and refuses new calls until the reset without asking.
@@ -320,6 +323,12 @@ approvals_before_merge = 1
 ```
 
 GitLab projects are named `gitlab:group/sub/project`. List them in Settings (`GitLab groups`, `GitLab projects`).
+
+Each org (or GitLab group) can also keep its own defaults in a repo named `.mason` (see the README):
+its groups apply to that org's repos ahead of your catch-all group, and your own groups with a `match`
+still win. Mason reads it with the signed-in user's own token, so a user who can't read an org's
+`.mason` doesn't get it, and caches it in that user's cache only. `GET /api/v1/config` lists the
+`.mason` repos found for your orgs; `org defaults` in Settings turns them off for you.
 
 ## Plugins and the marketplace
 

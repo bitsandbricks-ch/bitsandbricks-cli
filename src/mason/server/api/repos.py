@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from flask import Blueprint, abort, g, jsonify, request
 
-from mason import core, plugins
+from mason import config, core, plugins
 from mason import defaults as D
 from mason import issues as I
 from mason import packages as P
@@ -116,7 +116,8 @@ def repos_list():
                         "url": projects.get(r, {}).get("url", ""),
                         "alias": grp.alias(r) if grp else r.rsplit("/", 1)[-1],
                         "topics": projects.get(r, {}).get("topics") or []})
-        return jsonify({"repos": out, "groups": [x.name for x in cfg.groups], "orgs": cfg.orgs,
+        groups = list(dict.fromkeys([x.name for x in cfg.groups] + [x["group"] for x in out if x["group"]]))
+        return jsonify({"repos": out, "groups": groups, "orgs": cfg.orgs,
                         "defaults": str(cfg.source) if cfg.source else ""})
 
 
@@ -737,16 +738,19 @@ def new_repo():
 def config_view():
     with as_user():
         cfg = load_config()
+        orgs = config.defaults_of_orgs(cfg.orgs) if cfg.org_defaults else []
         groups = []
-        for grp in cfg.groups:
-            groups.append({"name": grp.name, "match": grp.match, "from": grp.reference, "files": grp.files,
+        for grp in cfg.groups + [x for o in orgs for x in o.groups]:
+            groups.append({"name": grp.name, "origin": grp.origin, "match": grp.match, "from": grp.reference,
+                           "files": grp.files,
                            "rulesets": grp.rulesets, "settings": grp.settings, "security": grp.security,
                            "require": grp.require, "immutable_releases": grp.immutable_releases,
                            "vulnerability_reporting": grp.vulnerability_reporting,
                            "release_assets": grp.release_assets, "gitlab": (grp.extra or {}).get("gitlab"),
                            "extra": {k: v for k, v in (grp.extra or {}).items() if k != "gitlab"}})
         return jsonify({"defaults": str(cfg.source) if cfg.source else "", "orgs": cfg.orgs, "repos": cfg.repos,
-                        "exclude": cfg.exclude, "groups": groups,
+                        "exclude": cfg.exclude, "groups": groups, "org_defaults_on": cfg.org_defaults,
+                        "org_defaults": [{"repo": o.where, "error": o.error} for o in orgs],
                         "plugins": [p.name for p in plugins.load()]})
 
 

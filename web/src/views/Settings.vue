@@ -125,6 +125,9 @@ onMounted(load)
           <label>leave out</label><input v-model="s.exclude" placeholder="acme/archive">
           <label>GitLab groups</label><input v-model="s.gitlab_groups" placeholder="grp, grp/sub">
           <label>GitLab projects</label><input v-model="s.gitlab_repos" placeholder="gitlab:grp/proj">
+          <label>org defaults</label>
+          <label class="row"><input v-model="s.org_defaults" type="checkbox">
+            <span class="dim">use each org's (or GitLab group's) <span class="accent">.mason</span> repo for its repos</span></label>
         </div>
         <button class="primary" style="margin-top: 8px" @click="saveSettings">save</button>
       </div>

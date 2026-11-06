@@ -82,7 +82,34 @@ def test_me_csrf_settings(op):
     assert r.status_code == 403
     assert c.put("/api/v1/settings", json={"defaults": "/etc"}, headers=H).status_code == 400  # no server folders
     assert c.put("/api/v1/settings", json={"orgs": "acme, mike"}, headers=H).json["orgs"] == ["acme", "mike"]
+    assert c.get("/api/v1/settings").json["org_defaults"] is True  # each org's .mason: on unless turned off
+    assert c.put("/api/v1/settings", json={"org_defaults": "no"}, headers=H).status_code == 400
+    assert c.put("/api/v1/settings", json={"org_defaults": False}, headers=H).json["org_defaults"] is False
 
+
+
+def test_theme_is_a_per_user_setting(op):
+    """The web app saves the theme to the account, so it follows the user to every browser."""
+    _, c = op
+    assert c.get("/api/v1/me").json["settings"]["theme"] == ""  # the default (phosphor)
+    assert c.put("/api/v1/settings", json={"theme": "grey"}, headers=H).json["theme"] == "grey"
+    assert c.get("/api/v1/me").json["settings"]["theme"] == "grey"
+    assert c.get("/api/v1/settings").json["orgs"] == []  # saving the theme leaves the other settings alone
+    assert c.put("/api/v1/settings", json={"theme": "neon"}, headers=H).status_code == 400
+    assert c.get("/api/v1/settings").json["theme"] == "grey"
+
+
+def test_web_themes_match_the_server():
+    """web/src/themes.js, style.css and the server's THEMES list name the same themes."""
+    import re
+    from pathlib import Path
+
+    from mason.server.context import THEMES
+
+    web = Path(__file__).resolve().parents[1] / "web" / "src"
+    js = re.findall(r"'([a-z]+)'", (web / "themes.js").read_text())
+    css = re.findall(r'\[data-theme="([a-z]+)"\]', (web / "style.css").read_text())
+    assert tuple(js) == THEMES and set(css) == set(THEMES)
 
 def test_lists(op):
     _, c = op

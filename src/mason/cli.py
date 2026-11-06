@@ -188,6 +188,16 @@ def show_config() -> None:
         if g.files:
             bits.append(f"files {g.files}")
         print(f"  {g.name}: {', '.join(bits)}")
+    if not cfg.org_defaults:
+        print("org defaults off (org_defaults = false)")
+    else:
+        found = config.defaults_of_orgs(cfg.orgs)
+        print(f"org defaults {', '.join(o.where for o in found) or 'none'} (each org's {config.ORG_REPO} repo)")
+        for o in found:
+            if o.error:
+                print(f"  {o.error}")
+            for g in o.groups:
+                print(f"  {g.name}: {'match ' + str(g.match) if g.match else 'the rest of the org'}")
     names = [p.name for p in plugins.load()]
     print(f"plugins      {', '.join(names) or 'none'}")
     for err in plugins.errors:

@@ -211,7 +211,7 @@ class Store:
 # ── derived caches ───────────────────────────────────────────────────────────
 
 SPACE_TTL = {"me": 600, "listing": 300, "gl_listing": 300, "nodes": 60, "gl_nodes": 60, "config": 120,
-             "workflows.resolved": 3600}
+             "org_defaults": 300, "workflows.resolved": 3600}
 SPACE_MAX = 5000
 
 
@@ -287,8 +287,9 @@ class Spaces(dict):
                 self.pop(name, None)
 
     def forget_files(self) -> None:
-        """A file was written: a defaults repo, or a repo's .mason.toml or version file, may have changed."""
+        """A file was written: a defaults repo, an org's .mason, or a repo's .mason.toml or version file."""
         self.pop("config", None)
+        self.pop("org_defaults", None)
         self.pop("version_spec", None)
 
 
