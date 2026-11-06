@@ -18,9 +18,10 @@ from mortar.server.context import as_user, user_settings
 
 bp = Blueprint("console", __name__, url_prefix="/api/v1")
 
-READS = {"status", "prs", "pr", "runs", "releases", "packages", "security", "repos", "plugins", "stats", "workflows"}
-WRITES = {"merge", "approve", "doctor", "sync", "new", "rerun", "bump", "release"}
-# write unless --dry-run (doctor: unless no --fix; release: unless --list or no names)
+READS = {"status", "prs", "pr", "runs", "releases", "packages", "security", "repos", "plugins", "stats", "workflows",
+         "issues"}
+WRITES = {"merge", "approve", "doctor", "sync", "new", "rerun", "bump", "release", "issue"}
+# write unless --dry-run (doctor, workflows: unless no --fix; release: unless --list or no names; issue: view)
 LOCAL = {"serve", "init", "tui", "open", "config", "login", "logout", "whoami", "market", "key"}
 
 
@@ -37,6 +38,8 @@ def is_write(argv: list[str]) -> bool:
         return False
     if cmd in ("doctor", "workflows"):
         return "--fix" in argv
+    if cmd == "issue":
+        return len(argv) < 2 or argv[1] != "view"
     if cmd == "release":
         return "--list" not in argv and any(not a.startswith("-") for a in argv[1:])
     return cmd in WRITES or cmd in web_commands()

@@ -120,6 +120,16 @@ def test_changes_are_dry_runs_and_audited(op):
     assert "[dry-run] create private acme/plugin-c from the template acme/plugin-tpl" in text
     text = c.post("/api/v1/approve", json={"repo": "acme/api", "id": 5, "dry_run": True}, headers=H).json["text"]
     assert "[dry-run] approve production for acme/api main" in text
+    got = c.get("/api/v1/issues?mine=1").json
+    assert [(i["repo"], i["number"]) for i in got["issues"]] == [("acme/web", 3)] and got["labels"] == ["bug"]
+    assert "I can reproduce it." in c.get("/api/v1/issue?repo=acme/web&number=3").json["text"]
+    text = c.post("/api/v1/issues", json={"repo": "acme/web", "title": "Crash", "labels": ["bug"], "dry_run": True},
+                  headers=H).json["text"]
+    assert "[dry-run] POST /repos/acme/web/issues" in text
+    text = c.post("/api/v1/issue", json={"repo": "acme/web", "number": 3, "action": "close", "dry_run": True},
+                  headers=H).json["text"]
+    assert "[dry-run] PATCH /repos/acme/web/issues/3" in text
+    assert c.post("/api/v1/issues", json={"repo": "acme/web", "title": " "}, headers=H).status_code == 400
     wf = {w["repo"]: w for w in c.get("/api/v1/workflows").json["workflows"]}
     assert wf["acme/api"] == {"repo": "acme/api", "workflows": 0, "findings": []}
     assert {f["kind"] for f in wf["acme/web"]["findings"]} == {"pinned", "permissions", "pull_request_target",
@@ -127,7 +137,8 @@ def test_changes_are_dry_runs_and_audited(op):
     text = c.post("/api/v1/workflows/pin", json={"repos": ["web"], "dry_run": True}, headers=H).json["text"]
     assert "[dry-run] PUT /repos/acme/web/contents/.github/workflows/ci.yml" in text
     log = c.get("/api/v1/audit").json
-    assert {"merge", "doctor.fix", "sync", "new", "approve", "workflows.pin"} <= {a["action"] for a in log}
+    done = {a["action"] for a in log}
+    assert {"merge", "doctor.fix", "sync", "new", "approve", "workflows.pin", "issue.create", "issue.close"} <= done
     assert all(a["dry_run"] for a in log if a["action"] in ("merge", "sync"))
 
 

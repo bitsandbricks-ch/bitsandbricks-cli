@@ -30,13 +30,14 @@ READ = [re.compile(p) for p in (
     R + r"(/.*)?$",
 )]
 WRITE = {
-    "PATCH": [R + "$", R + r"/pulls/\d+$", R + r"/rulesets/\d+$", R + r"/labels/[^/]+$"],
+    "PATCH": [R + "$", R + r"/pulls/\d+$", R + r"/rulesets/\d+$", R + r"/labels/[^/]+$", R + r"/issues/\d+$"],
     "PUT": [R + r"/contents/.+$", R + r"/pulls/\d+/merge$", R + r"/pulls/\d+/update-branch$",
             R + r"/rulesets/\d+$", R + r"/automated-security-fixes$",
             R + r"/private-vulnerability-reporting$", R + r"/immutable-releases$", R + r"/environments/[^/]+$",
             R + r"/environments/[^/]+/secrets/[^/]+$", R + r"/topics$",
             R + r"/vulnerability-alerts$", R + r"/actions/permissions(/workflow)?$"],
-    "POST": [R + r"/labels$", R + r"/git/refs$", R + r"/pulls$", R + r"/rulesets$", R + r"/actions/runs/\d+/approve$",
+    "POST": [R + r"/labels$", R + r"/issues$", R + r"/git/refs$", R + r"/pulls$", R + r"/rulesets$",
+             R + r"/actions/runs/\d+/approve$",
              R + r"/actions/runs/\d+/pending_deployments$", R + r"/actions/runs/\d+/(rerun(-failed-jobs)?|cancel)$",
              R + r"/generate$", r"/user/repos$", r"/orgs/[\w.-]+/repos$", R + r"/releases$", R + r"/git/tags$",
              R + r"/issues/\d+/comments$", R + r"/dispatches$", R + r"/actions/workflows/[^/]+/dispatches$"],

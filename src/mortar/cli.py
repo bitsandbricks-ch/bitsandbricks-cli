@@ -17,6 +17,7 @@ repo of your orgs. --org and --group narrow that down.
   bnb approve                       runs waiting for you (environments, outside contributors)
   bnb security                      Dependabot, secret and code scanning alerts
   bnb doctor [names] [--fix]        settings, security, rulesets and files against the defaults
+  bnb issues [names] [--mine]       open issues; bnb issue new|view|close|comment name[#12] ...
   bnb workflows [names] [--fix]     unpinned actions, write-all tokens, script injection; --fix: PRs that pin
   bnb sync [names]                  PRs that bring shared files in line
   bnb new owner/name [--group G]    a new repo, set up the way its group wants
@@ -31,10 +32,10 @@ from __future__ import annotations
 import argparse
 import sys
 
-from mortar import __version__, config, core, defaults, packages, plugins, repos, versions, workflows
+from mortar import __version__, config, core, defaults, issues, packages, plugins, repos, versions, workflows
 
 ON_REPOS = ("status", "prs", "merge", "runs", "rerun", "releases", "packages", "approve", "security", "doctor", "sync",
-            "repos", "stats", "workflows")
+            "repos", "stats", "workflows", "issues")
 
 
 def common_parser() -> argparse.ArgumentParser:
@@ -68,6 +69,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict]:
         "repos": "the repos bnb sees and their groups",
         "stats": "PRs merged, time to merge, CI success, releases over the last days",
         "workflows": "risky workflows: unpinned actions, write-all tokens, script injection",
+        "issues": "open issues across repos, by label, assignee or age",
     }
     for cmd in ON_REPOS:
         sp = sub.add_parser(cmd, parents=[common], help=helps[cmd])
@@ -88,6 +90,13 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict]:
             sp.add_argument("--problems", action="store_true", help="only what's missing or failed")
         if cmd == "doctor":
             sp.add_argument("--fix", action="store_true", help="apply settings and rulesets where they drifted")
+        if cmd == "issues":
+            sp.add_argument("--state", choices=("open", "closed", "all"), default="open")
+            sp.add_argument("--label", action="append", metavar="LABEL", help="only with this label (repeatable)")
+            sp.add_argument("--assignee", help="only assigned to this login (none: unassigned, *: any)")
+            sp.add_argument("--mine", action="store_true", help="only assigned to you")
+            sp.add_argument("--stale", type=int, default=0, metavar="DAYS", help="only untouched for DAYS days")
+            sp.add_argument("--limit", type=int, default=20, help="per repo (max 100)")
         if cmd == "workflows":
             sp.add_argument("--fix", action="store_true", help="open a PR per repo that pins the actions to SHAs")
         if cmd == "stats":
@@ -105,6 +114,14 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict]:
     sp.add_argument("target", help="name#12 or a PR URL")
     sp.add_argument("--diff", action="store_true")
     sp.add_argument("--body", action="store_true", help="the whole description")
+    sp = sub.add_parser("issue", parents=[common], help="create, show, close, reopen or comment on an issue")
+    sp.add_argument("action", choices=("new", "view", "close", "reopen", "comment"))
+    sp.add_argument("target", help="new: the repo; else name#12 or an issue URL")
+    sp.add_argument("text", nargs="?", default="", help="new: the title; comment: the comment")
+    sp.add_argument("--body", default="", help="new: the description (- reads it from stdin)")
+    sp.add_argument("--label", action="append", metavar="LABEL", help="new: a label (repeatable)")
+    sp.add_argument("--assignee", action="append", metavar="LOGIN", help="new: assign (repeatable)")
+    sp.add_argument("--not-planned", action="store_true", help="close: as not planned")
     sp = sub.add_parser("open", parents=[common], help="print (and open or copy) a repo or PR link")
     sp.add_argument("target", help="name or name#12")
     sp.add_argument("--actions", action="store_true")
@@ -251,6 +268,8 @@ def main(argv: list[str] | None = None) -> None:
             if not number:
                 sys.exit("Name the PR: bnb pr name#12")
             return repos.pr_detail(repo, number, args.diff, args.body)
+        if args.cmd == "issue":
+            return issue(cfg, args)
         if args.cmd == "bump":
             level = "patch"
             if len(args.repos) > 1 and versions.is_level(args.repos[-1]):
@@ -268,6 +287,22 @@ def main(argv: list[str] | None = None) -> None:
         return run(cfg, args, names, pick)
     except RuntimeError as err:
         sys.exit(str(err))
+
+
+def issue(cfg, args) -> None:
+    repo, number = repos.resolve(cfg, args.target)
+    if args.action == "new":
+        body = sys.stdin.read() if args.body == "-" else args.body
+        issues.create(repo, args.text, body, args.label, args.assignee)
+        return
+    if not number:
+        sys.exit(f"Name the issue: bnb issue {args.action} name#12")
+    if args.action == "view":
+        issues.view(repo, number)
+    elif args.action == "comment":
+        issues.comment(repo, number, sys.stdin.read() if args.text == "-" else args.text)
+    else:
+        issues.set_state(repo, number, args.action == "close", args.not_planned)
 
 
 def run(cfg, args, names: list[str], pick: dict) -> None:
@@ -298,6 +333,8 @@ def run(cfg, args, names: list[str], pick: dict) -> None:
         return defaults.doctor_all(cfg, names, args.fix)
     if args.cmd == "workflows":
         return workflows.workflows(cfg, names, args.fix)
+    if args.cmd == "issues":
+        return issues.issues(names, args.state, args.label, args.assignee, args.mine, args.stale, args.limit)
     if args.cmd == "sync":
         ctx = defaults.sync_ctx(cfg, names, args.only)
         unknown = sorted({p for w in ctx["wants"].values() for p in w.get("unknown", [])})

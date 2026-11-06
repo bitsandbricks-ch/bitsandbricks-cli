@@ -431,6 +431,77 @@ def alerts(gl: GitLab, repo: str) -> tuple[list[dict], list[str]]:
     return sorted(rows, key=lambda a: order.get(a["severity"], 5)), []
 
 
+# ── issues ───────────────────────────────────────────────────────────────────
+
+GL_STATE = {"open": "opened", "closed": "closed", "all": "all"}
+
+
+def issue_row(repo: str, i: dict) -> dict:
+    return {"repo": repo, "provider": "gitlab", "number": i["iid"], "title": i.get("title") or "",
+            "url": i.get("web_url") or "", "state": "open" if i.get("state") == "opened" else i.get("state") or "",
+            "labels": list(i.get("labels") or []), "assignees": [a["username"] for a in i.get("assignees") or []],
+            "author": (i.get("author") or {}).get("username", ""), "comments": i.get("user_notes_count") or 0,
+            "created": i.get("created_at"), "updated": i.get("updated_at")}
+
+
+def issues(gl: GitLab, repo: str, state: str = "open", labels: list[str] | None = None,
+           assignee: str | None = None, limit: int = 50) -> list[dict]:
+    q = {"state": GL_STATE.get(state, "opened"), "order_by": "updated_at", "per_page": str(min(max(limit, 1), 100))}
+    if labels:
+        q["labels"] = ",".join(labels)
+    if assignee in ("none", "*"):
+        q["assignee_id"] = "None" if assignee == "none" else "Any"
+    elif assignee:
+        q["assignee_username"] = assignee
+    got = gl.api("GET", f"{gl.project(repo)}/issues?{urllib.parse.urlencode(q)}") or []
+    return [issue_row(repo, i) for i in got][:limit]
+
+
+def create_issue(gl: GitLab, repo: str, title: str, body: str = "", labels: list[str] | None = None) -> str:
+    if not title.strip():
+        raise RuntimeError("an issue needs a title")
+    data = {"title": title.strip()[:255], "description": body}
+    if labels:
+        data["labels"] = ",".join(labels)
+    got = gl.write("POST", f"{gl.project(repo)}/issues", data) or {}
+    url = got.get("web_url") or f"{path_of(repo)}/-/issues"
+    say(f"{'[dry-run] ' if core.dry_run() else ''}opened {url}")
+    return url
+
+
+def issue_state(gl: GitLab, repo: str, iid: int, close: bool) -> None:
+    gl.write("PUT", f"{gl.project(repo)}/issues/{iid}", {"state_event": "close" if close else "reopen"})
+    say(f"{'closed' if close else 'reopened'} {repo}#{iid}")
+
+
+def issue_comment(gl: GitLab, repo: str, iid: int, text: str) -> None:
+    if not text.strip():
+        raise RuntimeError("the comment is empty")
+    gl.write("POST", f"{gl.project(repo)}/issues/{iid}/notes", {"body": text})
+    say(f"commented on {repo}#{iid}")
+
+
+def issue_view(gl: GitLab, repo: str, iid: int) -> None:
+    i = gl.api("GET", f"{gl.project(repo)}/issues/{iid}") or {}
+    r = issue_row(repo, i)
+    say(f"#{r['number']} {r['title']}\n{r['url']}\n")
+    say(f"  state     {r['state']}, by {r['author']}, opened {ago(r['created'])}, updated {ago(r['updated'])}")
+    if r["labels"]:
+        say(f"  labels    {', '.join(r['labels'])}")
+    if r["assignees"]:
+        say(f"  assignees {', '.join(r['assignees'])}")
+    if (i.get("description") or "").strip():
+        say("\n" + i["description"].strip()[:4000])
+    notes = [n for n in gl.api("GET", f"{gl.project(repo)}/issues/{iid}/notes?per_page=20&sort=asc") or []
+             if not n.get("system")]
+    if notes:
+        say(f"\nComments ({len(notes)}):")
+        for n in notes:
+            say(f"\n  {(n.get('author') or {}).get('username', '?')}, {ago(n.get('created_at'))}:")
+            for line in (n.get("body") or "").strip().splitlines()[:20]:
+                say(f"    {line}")
+
+
 # ── doctor, sync and new projects ────────────────────────────────────────────
 
 

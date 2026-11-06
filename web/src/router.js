@@ -5,6 +5,7 @@ const v = (name) => () => import(`./views/${name}.vue`)
 export const TABS = [
   { path: '/', name: 'repos', label: 'repos', key: '1' },
   { path: '/prs', name: 'prs', label: 'pull requests', key: '2' },
+  { path: '/issues', name: 'issues', label: 'issues', key: 'I' },
   { path: '/runs', name: 'runs', label: 'runs', key: '3' },
   { path: '/approvals', name: 'approvals', label: 'approvals', key: '4' },
   { path: '/releases', name: 'releases', label: 'releases', key: '5' },
@@ -22,7 +23,7 @@ export const TABS = [
 ]
 
 const VIEWS = {
-  repos: 'Repos', prs: 'Prs', runs: 'Runs', approvals: 'Approvals', releases: 'Releases', packages: 'Packages',
+  repos: 'Repos', prs: 'Prs', issues: 'Issues', runs: 'Runs', approvals: 'Approvals', releases: 'Releases', packages: 'Packages',
   security: 'Security', checks: 'Checks', workflows: 'Workflows', stats: 'Stats', defaults: 'Defaults', console: 'Console',
   plugins: 'Plugins', market: 'Market', settings: 'Settings', audit: 'Audit',
 }

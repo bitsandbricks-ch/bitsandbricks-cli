@@ -366,3 +366,23 @@ def test_workflow_pinning_keeps_the_tag():
     assert "'actions/cache@v3' # old" in new and changed == ["actions/checkout@v4"] and failed == ["actions/cache@v3"]
     assert workflows.scan("x.yml", "permissions: {}\njobs:\n  a:\n    steps:\n      - uses: actions/checkout@v4\n",
                           workflows.settings({"allow_unpinned": ["actions/*"]})) == []
+
+
+def test_issues(env):
+    out = bnb(env, "issues", "web", "api")
+    assert "== acme/web\n   #3     Login fails on Safari  [bug] @mike" in out
+    assert "#4     Dark mode" in out and "Add login page" not in out  # PRs are left out
+    assert "== acme/api\n   no issues" in out
+    mine = bnb(env, "issues", "--mine", "web")
+    assert "#3" in mine and "#4" not in mine
+    assert "#3" not in bnb(env, "issues", "--stale", "90", "web") and "#4" in bnb(env, "issues", "--stale", "90", "web")
+    assert "#4" not in bnb(env, "issues", "--label", "bug", "web")
+    out = bnb(env, "issue", "view", "web#3")
+    assert "#3 Login fails on Safari" in out and "Safari 18" in out and "I can reproduce it." in out
+    out = bnb(env, "issue", "new", "web", "Crash on start", "--body", "trace", "--label", "bug", "--dry-run")
+    assert "[dry-run] POST /repos/acme/web/issues" in out
+    out = bnb(env, "issue", "close", "https://github.com/acme/web/issues/3", "--not-planned", "--dry-run")
+    assert "[dry-run] PATCH /repos/acme/web/issues/3" in out and "closed acme/web#3" in out
+    out = bnb(env, "issue", "comment", "web#3", "ok", "--dry-run")
+    assert "[dry-run] POST /repos/acme/web/issues/3/comments" in out
+    assert "Name the issue" in bnb(env, "issue", "close", "web")

@@ -67,12 +67,12 @@ def group_of(cfg: Config, repo: str):
 def resolve(cfg: Config, arg: str) -> tuple[str, int | None]:
     """`owner/name`, `name`, a group alias (`budgets` for plugin-budgets), `x#12` or a PR URL
     -> (owner/name, PR number or None)."""
-    m = re.match(r"(?:https?://github\.com/)?([\w.-]+/[\w.-]+)/pull/(\d+)", arg)
+    m = re.match(r"(?:https?://github\.com/)?([\w.-]+/[\w.-]+)/(?:pull|issues)/(\d+)", arg)
     if m:
         return m.group(1), int(m.group(2))
     name, _, num = arg.partition("#")
     if num and not num.isdigit():
-        raise RuntimeError(f"Not a PR number: {arg}")
+        raise RuntimeError(f"Not a PR or issue number: {arg}")
     number = int(num) if num else None
     if "/" in name:
         return name, number

@@ -233,6 +233,30 @@ if argv[0] == "api":
         out(info(repo))
     if rest == "/immutable-releases":
         out({"enabled": True}) if immutable else fail("gh: Not Found (HTTP 404)")
+    if rest == "/issues":
+        if repo != "acme/web":
+            out([])
+        found = [
+            {"number": 3, "title": "Login fails on Safari", "state": "open", "html_url": f"{WEB}/{repo}/issues/3",
+             "labels": [{"name": "bug"}], "assignees": [{"login": "mike"}], "user": {"login": "ann"}, "comments": 1,
+             "created_at": "2026-11-01T09:00:00Z", "updated_at": "2026-11-05T09:00:00Z"},
+            {"number": 4, "title": "Dark mode", "state": "open", "html_url": f"{WEB}/{repo}/issues/4", "labels": [],
+             "assignees": [], "user": {"login": "bob"}, "comments": 0,
+             "created_at": "2025-01-01T09:00:00Z", "updated_at": "2025-01-02T09:00:00Z"},
+            {"number": 7, "title": "Add login page", "pull_request": {}, "state": "open"},
+        ]
+        if params.get("assignee"):
+            found = [i for i in found if params["assignee"] in [a["login"] for a in i.get("assignees") or []]]
+        if params.get("labels"):
+            found = [i for i in found if params["labels"] in [x["name"] for x in i.get("labels") or []]]
+        out(found)
+    if rest == "/issues/3":
+        out({"number": 3, "title": "Login fails on Safari", "state": "open", "html_url": f"{WEB}/{repo}/issues/3",
+             "labels": [{"name": "bug"}], "assignees": [{"login": "mike"}], "user": {"login": "ann"}, "comments": 1,
+             "body": "Steps: open /login in Safari 18.", "created_at": "2026-11-01T09:00:00Z",
+             "updated_at": "2026-11-05T09:00:00Z"})
+    if rest.startswith("/issues/3/comments"):
+        out([{"user": {"login": "mike"}, "created_at": "2026-11-05T09:00:00Z", "body": "I can reproduce it."}])
     if rest == "/vulnerability-alerts":
         sys.exit(0) if repo == "acme/api" else fail("gh: Not Found (HTTP 404)")
     if rest == "/labels":
