@@ -16,11 +16,14 @@ Nothing reloads on its own: the repo and PR list (one GraphQL query) loads at th
 start, Runs, Releases, Packages and Security (API calls per repo) the first time you open their tab,
 and r reloads the tab you are on. The header shows the API calls left.
 
-Keys: ← → or 1-9 switch tabs · ↑ ↓ move · Enter or o open · r refresh · m auto-merge
-· M merge now · A auto-merge all ready PRs · v filter PRs · y mark ready · d diff
-· a approve a waiting run · x re-run failed jobs · f fix drift and s sync files (Checks tab) · n new repo
-· Enter: the row as a page (Esc back) · t theme
-· ctrl+p every command · q quit. Every change asks first; --dry-run only shows it.
+Keys: Tab / Shift+Tab move between the tab bar, the list, its detail and the log · ← → or 1-9 switch
+tabs · ↑ ↓ move · Enter or o open · m auto-merge · M merge now · A auto-merge all ready PRs · y mark ready
+· d diff · a approve a waiting run · x re-run failed jobs · f fix drift and s sync files (Checks tab)
+· n new repo · Enter: the row as a page (Esc back) · t theme · Every change asks first; --dry-run only shows it.
+
+Function keys, as in htop and Midnight Commander (the letter in brackets does the same):
+F1 help (?) · F2 every command (ctrl+p) · F3 search the list (/) · F4 filter (v: next filter)
+· F5 refresh (r) · F6 sort (>) · F9 the row's menu (Enter) · F10 quit (q).
 """
 
 from __future__ import annotations
@@ -34,6 +37,7 @@ from typing import ClassVar
 from rich.style import Style
 from rich.text import Text
 from textual import work
+from textual.actions import SkipAction
 from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -52,6 +56,7 @@ from textual.widgets import (
     Static,
     TabbedContent,
     TabPane,
+    Tabs,
 )
 from textual.widgets.data_table import CellDoesNotExist, RowDoesNotExist
 
@@ -68,13 +73,76 @@ BASE_TABS = [("repos", "Repos"), ("prs", "Pull requests"), ("runs", "Runs"), ("r
              ("checks", "Checks"), ("settings", "Settings")]
 # Which tabs each key works on: the footer shows only the keys of the tab you are on.
 TAB_ACTIONS = {
-    "merge": {"repos", "prs"}, "merge_all": {"repos", "prs"}, "pr_filter": {"prs"}, "ready": {"prs"},
+    "merge": {"repos", "prs"}, "merge_all": {"repos", "prs"}, "ready": {"prs"},
     "diff": {"prs"}, "approve": {"runs"}, "rerun": {"runs"}, "fix": {"checks"}, "sync": {"checks"},
     "bump": {"repos", "releases"}, "release": {"repos", "releases"}, "new_release": {"repos", "releases"},
     "update_branch": {"prs"}, "comment": {"prs"}, "close_pr": {"prs"},
     "logs": {"runs"}, "cancel_run": {"runs"}, "new_repo": {"repos"},
 }
 PAGE_TABS = {"repos", "prs", "runs", "releases", "packages", "security"}  # Enter opens the row as a page
+LIST_TABS = PAGE_TABS  # tabs whose list can be searched (F3) and sorted (F6)
+# F4: the filters of each list, the first one is what the tab shows by default.
+FILTERS = {
+    "repos": [("all", "all"), ("prs", "with open PRs"), ("failing", "CI failing")],
+    "prs": [("all", "all open"), ("auto", "auto-merge"), ("merged", "recently merged"), ("drafts", "drafts")],
+    "runs": [("all", "all"), ("waiting", "waiting"), ("failed", "failed"), ("running", "running")],
+    "releases": [("all", "all"), ("problems", "with problems")],
+    "packages": [("all", "all"), ("problems", "with problems")],
+    "security": [("all", "all"), ("alerts", "with alerts")],
+}
+PR_FILTERS = FILTERS["prs"]
+TAB_ACTIONS.update({"filter": set(FILTERS), "filter_next": set(FILTERS), "search": LIST_TABS, "sort": LIST_TABS})
+VIEW_ACTIONS = {"filter", "filter_next", "search", "sort"}  # they change the list, not the row: not in keys_line
+AGO = re.compile(r"^(\d+)([dhm]) ago$")
+AGO_SECS = {"d": 86400, "h": 3600, "m": 60}
+
+
+def plain(cell) -> str:
+    return cell.plain if isinstance(cell, Text) else str(cell)
+
+
+def sort_value(cell) -> tuple:
+    """How F6 orders a cell: numbers and ages ("3h ago") by value, the rest as text."""
+    s = plain(cell).strip()
+    if s.isdigit():
+        return (0, int(s), "")
+    if s == "just now":
+        return (0, 0, "")
+    m = AGO.match(s)
+    if m:
+        return (0, int(m.group(1)) * AGO_SECS[m.group(2)], "")
+    return (1, 0, s.lower())
+
+
+def blank(cell) -> bool:
+    return plain(cell).strip() in ("", "-")
+
+
+HELP = """\
+Moving around
+  Tab / Shift+Tab   next / previous panel: tab bar, list, detail, search, log
+  ← →               next / previous tab (on the list or the tab bar), 1-9 jump to a tab
+  ↑ ↓ PgUp PgDn     move in the list, scroll the detail and the log
+  Home End          first / last row
+  Enter or F9       the selected row as a page, or its menu
+  Esc               back from a page or a dialog
+
+Lists (htop and Midnight Commander keys; the letter does the same)
+  F1  ?             this help
+  F2  ctrl+p        every command
+  F3  /             search: only rows with this text stay; Esc clears it
+  F4                pick a filter (v: the next filter)
+  F5  r             refresh the tab you are on
+  F6  >             sort by a column; the same column again reverses it
+  F10 q             quit
+
+Dialogs
+  Tab / Shift+Tab   move between buttons, or through a list of choices
+  y / n             yes / no, Enter picks, Esc cancels
+
+Some terminals keep a function key for themselves (F1 help in GNOME Terminal, F10 its menu,
+F11 full screen; on a Mac the F-keys need fn). The letter keys always work.
+"""
 SETTINGS = [("defaults", "Defaults repo"), ("orgs", "Orgs"), ("groups", "Groups"), ("plugins", "Plugins"),
             ("theme", "Theme"), ("file", "Config file")]
 
@@ -138,7 +206,10 @@ class Confirm(ModalScreen[bool]):
     Confirm Horizontal { height: auto; margin-top: 1; }
     Confirm Button { margin-right: 2; }
     """
-    BINDINGS: ClassVar = [Binding("y", "answer(True)", "Yes"), Binding("n,escape", "answer(False)", "No")]
+    # Tab / Shift+Tab (and ← → ↑ ↓) move between the buttons, Enter presses the one that has focus.
+    BINDINGS: ClassVar = [Binding("y", "answer(True)", "Yes"), Binding("n,escape", "answer(False)", "No"),
+                          Binding("down", "app.focus_next", show=False),
+                          Binding("up", "app.focus_previous", show=False)]
 
     def __init__(self, question: str) -> None:
         super().__init__()
@@ -192,7 +263,11 @@ class Pick(ModalScreen[str]):
     Pick > Vertical { width: 80; height: auto; border: thick $accent; background: $surface; padding: 1 2; }
     Pick OptionList { height: auto; max-height: 12; margin-top: 1; }
     """
-    BINDINGS: ClassVar = [Binding("escape", "cancel", "Cancel")]
+    # The list is the only thing to focus here, so Tab / Shift+Tab go through its choices (like a shell's
+    # completion menu): Tab alone is enough to pick one.
+    BINDINGS: ClassVar = [Binding("escape", "cancel", "Cancel"),
+                          Binding("tab", "move(1)", show=False, priority=True),
+                          Binding("shift+tab", "move(-1)", show=False, priority=True)]
 
     def __init__(self, question: str, options: list[tuple[str, str]]) -> None:
         super().__init__()
@@ -207,8 +282,51 @@ class Pick(ModalScreen[str]):
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         self.dismiss(event.option.id or "")
 
+    def action_move(self, step: int) -> None:
+        options = self.query_one(OptionList)
+        options.action_cursor_down() if step > 0 else options.action_cursor_up()
+
     def action_cancel(self) -> None:
         self.dismiss("")
+
+
+class Help(ModalScreen[None]):
+    """F1 or ?: every key on one page. Esc, F1, ? or q closes it."""
+
+    DEFAULT_CSS = """
+    Help { align: center middle; }
+    Help > VerticalScroll { width: 104; max-width: 100%; height: auto; max-height: 90%;
+                            border: thick $accent; background: $surface; padding: 1 2; }
+    """
+    BINDINGS: ClassVar = [Binding("escape,f1,question_mark,q", "close", "Close")]
+
+    def __init__(self, extra: str = "") -> None:
+        super().__init__()
+        self.extra = extra
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll():
+            yield Static(HELP + self.extra, markup=False)
+
+    def on_mount(self) -> None:
+        self.query_one(VerticalScroll).focus()
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
+class Search(Input):
+    """The search line under the tabs (F3 or /): the list keeps the rows with this text as you type.
+    Enter or ↓ goes back to the list and keeps it, Esc clears it."""
+
+    BINDINGS: ClassVar = [Binding("escape", "clear_search", show=False), Binding("down", "done", show=False)]
+
+    def action_clear_search(self) -> None:
+        self.value = ""
+        self.app.end_search(clear=True)
+
+    def action_done(self) -> None:
+        self.app.end_search()
 
 
 KEY_HINT = re.compile(r"\(([^()\s])\)$")  # "Merge now (M)" -> M
@@ -223,12 +341,15 @@ class RowPage(ModalScreen[None]):
     RowPage #page-title { height: 1; padding: 0 1; background: $panel; color: $accent; text-style: bold; }
     RowPage #page-body { height: 1fr; }
     RowPage #page-actions { width: 46; height: 1fr; border-right: solid $primary; background: $surface; }
+    RowPage #page-actions:focus { border-left: tall $accent; }
     RowPage #page-detail-box { width: 1fr; height: 1fr; padding: 0 1; overflow-x: auto; }
+    RowPage #page-detail-box:focus { border-left: tall $accent; padding-left: 0; }
     RowPage #page-detail { width: auto; }
     RowPage #page-log { height: 8; border-top: solid $primary; background: $surface; padding: 0 1; }
+    RowPage #page-log:focus { border-top: tall $accent; }
     RowPage #page-help { height: 1; padding: 0 1; background: $panel; color: $text-muted; }
     """
-    BINDINGS: ClassVar = [Binding("escape,backspace", "back", "Back"), Binding("r", "reload", "Refresh")]
+    BINDINGS: ClassVar = [Binding("escape,backspace", "back", "Back"), Binding("f5,r", "reload", "Refresh")]
 
     def __init__(self, tab: str, key: str, title: str) -> None:
         super().__init__()
@@ -239,14 +360,14 @@ class RowPage(ModalScreen[None]):
         yield Static(self.title_text, id="page-title", markup=False)
         with Horizontal(id="page-body"):
             yield OptionList(id="page-actions")
-            with VerticalScroll(id="page-detail-box", can_focus=False):
+            with VerticalScroll(id="page-detail-box"):  # Tab: the actions, the detail, the log
                 yield Static("Loading …", id="page-detail", markup=False)
         yield RichLog(id="page-log", wrap=False, markup=False, min_width=40)
-        yield Static("↑ ↓ pick · Enter or the key in ( ) runs it · r refresh · Esc back", id="page-help",
+        yield Static("↑ ↓ pick · Enter or the key in ( ) runs it · Tab next panel · r refresh · Esc back",
+                     id="page-help",
                      markup=False)
 
     def on_mount(self) -> None:
-        self.query_one("#page-log", RichLog).can_focus = False
         self.fill_items()
         self.app.update_detail()  # shows itself here too (MasonTui.show)
         if self.tab == "releases":
@@ -297,9 +418,6 @@ class RowPage(ModalScreen[None]):
         self.app.action_refresh()
 
 
-PR_FILTERS = [("all", "all open"), ("auto", "auto-merge"), ("merged", "recently merged"), ("drafts", "drafts")]
-
-
 class MasonTui(App):
     TITLE = "mason"
     CSS = """
@@ -313,6 +431,13 @@ class MasonTui(App):
     .split { height: 1fr; }
     .split DataTable { width: 3fr; height: 1fr; background: $surface; }
     .split DataTable:focus { border-left: tall $accent; }
+    .detail:focus { border-left: tall $accent; }
+    #log:focus { border-top: tall $accent; }
+    Tabs:focus .-active { background: $block-cursor-background; color: $block-cursor-foreground; }
+    #view { height: 1; padding: 0 1; background: $panel; color: $text-muted; }
+    #search { display: none; height: 1; border: none; padding: 0 1; background: $surface; }
+    #search.-shown { display: block; }
+    #search:focus { border: none; background: $panel; }
     .split DataTable.narrow { width: 24; }
     DataTable > .datatable--header { background: $panel; color: $primary; text-style: bold; }
     .detail { width: 2fr; height: 1fr; border-left: solid $primary; padding: 0 1;
@@ -326,13 +451,22 @@ class MasonTui(App):
         Binding("left", "next_tab(-1)", "Prev tab", show=False, priority=True),
         Binding("right", "next_tab(1)", "Next tab", show=False, priority=True),
         *(Binding(str(i), f"tab_number({i})", show=False) for i in range(1, 10)),
-        Binding("r", "refresh", "Refresh"),
+        # The function keys first, so the footer starts with them, as htop's does. Each also has a letter
+        # (the footer shows the F-key): some terminals keep F1 and F10 for themselves.
+        Binding("f1,question_mark", "help", "Help", key_display="F1"),
+        Binding("f2", "command_palette", "Commands", key_display="F2", show=False),
+        Binding("f3,slash", "search", "Search", key_display="F3"),
+        Binding("f4", "filter", "Filter", key_display="F4"),
+        Binding("f5,r", "refresh", "Refresh", key_display="F5"),
+        Binding("f6,greater_than_sign", "sort", "Sort", key_display="F6"),
+        Binding("f9", "menu", "Menu", key_display="F9"),
+        Binding("f10,q", "quit", "Quit", key_display="F10"),
+        Binding("v", "filter_next", "Next filter", show=False),
         Binding("o", "open", "Open"),
         Binding("t", "toggle_theme", "Theme", show=False),
         Binding("m", "merge(False)", "Auto-merge"),
         Binding("M", "merge(True)", "Merge now"),
         Binding("A", "merge_all", "Auto-merge all"),
-        Binding("v", "pr_filter", "PR filter"),
         Binding("y", "ready", "Ready"),
         Binding("d", "diff", "Diff"),
         Binding("a", "approve", "Approve"),
@@ -348,7 +482,6 @@ class MasonTui(App):
         Binding("f", "fix", "Fix drift"),
         Binding("s", "sync", "Sync files"),
         Binding("n", "new_repo", "New repo"),
-        Binding("q", "quit", "Quit"),
     ]
 
     def __init__(self, cfg: Config, dry_run: bool = False, group: str | None = None) -> None:
@@ -363,7 +496,11 @@ class MasonTui(App):
         self.info: dict[str, dict] = {}
         self.last_summary = ""
         self.last_waiting = 0
-        self.pr_filter = "all"
+        self.filters: dict[str, str] = {}               # tab -> F4 filter (FILTERS); missing: the first one
+        self.searches: dict[str, str] = {}              # tab -> F3 search text
+        self.sorts: dict[str, tuple[int, bool]] = {}    # tab -> F6 (column, reversed)
+        self.rows: dict[str, list[tuple[str, list]]] = {}  # tab -> every row, before filter, search and sort
+        self.heads: dict[str, list[str]] = {}
         self.alerts: dict[str, tuple[list[dict], list[str]]] = {}
         self.releases: dict[str, dict] = {}  # repo -> R.release_info
         self.packages: dict[str, dict] = {}  # owner/image -> P.package_infos entry
@@ -413,8 +550,10 @@ class MasonTui(App):
                 with TabPane(title, id=tab_id), Horizontal(classes="split"):
                     yield DataTable(id=f"{tab_id}-table", cursor_type="row", zebra_stripes=True,
                                     classes="narrow" if narrow else "")
-                    with VerticalScroll(classes="detail", can_focus=False):
+                    with VerticalScroll(classes="detail"):  # focusable: ↑ ↓ scroll it after a Tab
                         yield Static(id=f"{tab_id}-detail", markup=False)
+        yield Search(placeholder="search: only rows with this text stay · Enter keeps it · Esc clears", id="search")
+        yield Static(id="view", markup=False)
         yield RichLog(id="log", wrap=False, markup=False, min_width=40)
         yield Footer()
 
@@ -422,13 +561,13 @@ class MasonTui(App):
         for theme in self.themes:
             self.register_theme(theme)
         self.theme = self.themes[0].name
-        self.query_one("#log", RichLog).can_focus = False
         heads = {"repos": R.status_head(), "prs": ["repo", "#", "title", "state", "checks"],
                  "runs": ["repo", "state", "workflow", "ref", "when"],
                  "releases": ["repo", "release", "when", "assets", "release run"],
                  "packages": ["image", "newest", "updated", "release", "image build"],
                  "security": ["repo", "alerts", "worst", "kinds"],
                  "checks": ["check"], "settings": ["setting"], **{t: ["view"] for t in self.plugin_tabs}}
+        self.heads = heads
         for tab_id, head in heads.items():
             self.query_one(f"#{tab_id}-table", DataTable).add_columns(*head)
         checks = self.query_one("#checks-table", DataTable)
@@ -448,8 +587,8 @@ class MasonTui(App):
             self.bind(key, f"plugin_key({i})", description=description)
         for err in plugins.errors:
             self.log_line(f"plugin broken: {err}")
-        self.log_line(f"Loading … ← → or 1-{min(len(self.tabs), 9)} switch tabs, ↑ ↓ move, Enter opens, "
-                      "r refreshes, ctrl+p all commands, q quits")
+        self.log_line(f"Loading … Tab moves between panels, ← → or 1-{min(len(self.tabs), 9)} switch tabs, "
+                      "↑ ↓ move, Enter opens, F3 searches, F4 filters, F6 sorts, F1 lists every key, F10 quits")
         self.focus_table()
         self.load_github()
 
@@ -478,11 +617,18 @@ class MasonTui(App):
         return "#b24a2f" if self.theme == "mason-light" else SAND
 
     def action_next_tab(self, step: int) -> None:
-        if not isinstance(self.screen, ModalScreen):
-            order = [t for t, _ in self.tabs]
-            self.action_tab(order[(order.index(self.tab()) + step) % len(order)])
-        else:  # in a dialog the arrows move between the buttons
+        """← →: the next tab from the list or the tab bar, the next button in a dialog. Anywhere else
+        (a search or an answer you type, the detail) the arrows stay with what has focus."""
+        focused = self.focused
+        if isinstance(self.screen, ModalScreen):
+            if not isinstance(focused, Button):
+                raise SkipAction()
             self.screen.focus_next() if step > 0 else self.screen.focus_previous()
+            return
+        if focused is not None and not isinstance(focused, (DataTable, Tabs)):
+            raise SkipAction()
+        order = [t for t, _ in self.tabs]
+        self.action_tab(order[(order.index(self.tab()) + step) % len(order)])
 
     def action_toggle_theme(self) -> None:
         names = [t.name for t in self.themes]
@@ -520,6 +666,8 @@ class MasonTui(App):
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         """Hide the keys that do nothing on this tab, so the footer shows what you can do here."""
         tab = self.tab()
+        if isinstance(self.screen, ModalScreen) and action in VIEW_ACTIONS | {"menu"}:
+            return False  # they work on the list, which a page or a dialog covers
         if not tab or isinstance(self.screen, ModalScreen):
             return True
         if action in TAB_ACTIONS:
@@ -554,6 +702,8 @@ class MasonTui(App):
         keys = []
         for b in self.BINDINGS:
             action = b.action.split("(")[0]
+            if action in VIEW_ACTIONS:
+                continue
             if action in TAB_ACTIONS and tab in TAB_ACTIONS[action] and self.row_allows(action, tab):
                 keys.append(f"{b.key} {b.description.lower()}")
         keys += [f"{k[0]} {k[1].lower()}" for i, k in enumerate(self.plugin_keys)
@@ -633,15 +783,13 @@ class MasonTui(App):
 
     def _fill_github(self, rows: list[list[str]], prs: dict[str, dict], info: dict) -> None:
         self.prs, self.info, self.detail_cache = prs, info, {}
-        table = self.query_one("#repos-table", DataTable)
-        keep = self.current_key("repos")
-        table.clear()
+        out = []
         for repo, row in zip(self.repos, rows):
             cells = [Text(c) for c in row]
             cells[0] = Text(self.label(repo))
             cells[4] = styled(row[4])
-            table.add_row(*cells, key=repo)
-        self.restore(table, keep)
+            out.append((repo, cells))
+        self.put_rows("repos", out)
         for repo in self.repos:
             for p in ((info.get(repo) or {}).get("merged") or {}).get("nodes") or []:
                 self.prs[f"{repo}#{p['number']}"] = dict(p, repo=repo, merged=True, isDraft=False)
@@ -656,9 +804,6 @@ class MasonTui(App):
         self.update_detail()
 
     def fill_prs(self) -> None:
-        table = self.query_one("#prs-table", DataTable)
-        keep = self.current_key("prs")
-        table.clear()
         rows = []
         for key, p in self.prs.items():
             if p.get("merged"):
@@ -676,19 +821,17 @@ class MasonTui(App):
                 else:
                     state = styled("draft" if p["isDraft"] else "ready")
                     sort = 2 if p["isDraft"] else 1
-            keep_row = {"all": not p.get("merged"), "auto": bool(p.get("autoMergeRequest")) or p.get("merged"),
-                        "merged": p.get("merged"), "drafts": p.get("isDraft")}[self.pr_filter]
-            if keep_row:
-                rows.append((sort, key, [self.label(p["repo"]), str(p["number"]), Text(p["title"][:60]),
-                                         state, checks]))
-        for _, key, cells in sorted(rows, key=lambda r: r[0]):
-            table.add_row(*cells, key=key)
-        self.restore(table, keep)
-        label = dict(PR_FILTERS)[self.pr_filter]
+            rows.append((sort, key, [self.label(p["repo"]), str(p["number"]), Text(p["title"][:60]),
+                                     state, checks]))
+        self.put_rows("prs", [(key, cells) for _, key, cells in sorted(rows, key=lambda r: r[0])])
+        self.label_prs()
+
+    def label_prs(self) -> None:
+        f = self.filter_of("prs")
         auto = sum(1 for p in self.prs.values() if p.get("autoMergeRequest"))
         with contextlib.suppress(NoMatches):
             self.query_one("#tabs", TabbedContent).get_tab("prs").label = (
-                "Pull requests" + (f" ({label})" if self.pr_filter != "all" else "")
+                "Pull requests" + (f" ({dict(PR_FILTERS)[f]})" if f != "all" else "")
                 + (f" · {auto} auto-merging" if auto else ""))
 
     @work(thread=True, exclusive=True, group="security")
@@ -707,9 +850,7 @@ class MasonTui(App):
     def fill_security(self, found: dict) -> None:
         with contextlib.suppress(NoMatches):
             self.alerts = found
-            table = self.query_one("#security-table", DataTable)
-            keep = self.current_key("security")
-            table.clear()
+            out = []
             rank = R.SEVERITY_ORDER
             rows = sorted(found.items(), key=lambda kv: (rank.get(kv[1][0][0]["severity"], 5) if kv[1][0] else 9,
                                                           -len(kv[1][0]), kv[0]))
@@ -717,9 +858,9 @@ class MasonTui(App):
                 worst = alerts[0]["severity"] if alerts else ("?" if unread else "-")
                 style = DANGER if worst in ("critical", "high", "secret") else WARNING if alerts else ""
                 kinds = ", ".join(sorted({a["kind"] for a in alerts})) or ("can't read all" if unread else "")
-                table.add_row(self.label(repo), Text(str(len(alerts)), style=style), Text(worst, style=style),
-                              kinds, key=repo)
-            self.restore(table, keep)
+                out.append((repo, [self.label(repo), Text(str(len(alerts)), style=style), Text(worst, style=style),
+                                   kinds]))
+            self.put_rows("security", out)
             total = sum(len(a) for a, _ in found.values())
             self.query_one("#tabs", TabbedContent).get_tab("security").label = (
                 f"Security ({total})" if total else "Security")
@@ -741,19 +882,17 @@ class MasonTui(App):
     def fill_releases(self, found: list[dict]) -> None:
         with contextlib.suppress(NoMatches):
             self.releases = {i["repo"]: i for i in found}
-            table = self.query_one("#releases-table", DataTable)
-            keep = self.current_key("releases")
-            table.clear()
+            out = []
             bad = 0
             for i in sorted(found, key=lambda i: (not R.release_problems(i), i["repo"])):
                 tag, when, files, run = R.release_row(i)
                 problems = R.release_problems(i)
                 bad += bool(problems)
                 last = i["runs"][0] if i["runs"] else {}
-                table.add_row(self.label(i["repo"]), tag, when,
-                              Text(files, style=DANGER if i["missing"] else ""),
-                              Text(run, style=STATE_STYLE.get(R.run_state(last), "") if last else ""), key=i["repo"])
-            self.restore(table, keep)
+                out.append((i["repo"], [self.label(i["repo"]), tag, when,
+                                        Text(files, style=DANGER if i["missing"] else ""),
+                                        Text(run, style=STATE_STYLE.get(R.run_state(last), "") if last else "")]))
+            self.put_rows("releases", out)
             self.query_one("#tabs", TabbedContent).get_tab("releases").label = (
                 f"Releases ({bad})" if bad else "Releases")
             if bad:
@@ -773,17 +912,15 @@ class MasonTui(App):
     def fill_packages(self, found: list[dict], err: str) -> None:
         with contextlib.suppress(NoMatches):
             self.packages = {f"{i['owner']}/{i['name']}": i for i in found}
-            table = self.query_one("#packages-table", DataTable)
-            keep = self.current_key("packages")
-            table.clear()
+            out = []
             bad = 0
             for key, i in sorted(self.packages.items(), key=lambda kv: (not P.problems(kv[1]), kv[0])):
                 newest, updated, release, run = P.row(i)
                 bad += bool(P.problems(i))
                 last = i["runs"][0] if i["runs"] else {}
-                table.add_row(key, newest, updated, Text(release, style=DANGER if "missing" in release else ""),
-                              Text(run, style=STATE_STYLE.get(R.run_state(last), "") if last else ""), key=key)
-            self.restore(table, keep)
+                out.append((key, [key, newest, updated, Text(release, style=DANGER if "missing" in release else ""),
+                                  Text(run, style=STATE_STYLE.get(R.run_state(last), "") if last else "")]))
+            self.put_rows("packages", out)
             self.query_one("#tabs", TabbedContent).get_tab("packages").label = (
                 f"Packages ({bad})" if bad else "Packages")
             if err:
@@ -842,12 +979,183 @@ class MasonTui(App):
             lines += ["", "Couldn't read:"] + [f"  {u}" for u in unread]
         return "\n".join(lines)
 
+    # ── the list: F3 search, F4 filter, F6 sort ──────────────────────────
+
+    def filter_of(self, tab: str) -> str:
+        return self.filters.get(tab) or FILTERS[tab][0][0]
+
+    def keeps(self, tab: str, key: str) -> bool:
+        """Whether the tab's F4 filter keeps this row."""
+        f = self.filter_of(tab) if tab in FILTERS else "all"
+        try:
+            if tab == "prs":
+                p = self.prs[key]
+                return bool({"all": not p.get("merged"), "auto": p.get("autoMergeRequest") or p.get("merged"),
+                             "merged": p.get("merged"), "drafts": p.get("isDraft")}[f])
+            if f == "all":
+                return True
+            if tab == "repos":
+                node = self.info.get(key) or {}
+                if f == "prs":
+                    return bool((node.get("pullRequests") or {}).get("totalCount"))
+                rollup = ((node.get("defaultBranchRef") or {}).get("target") or {}).get("statusCheckRollup") or {}
+                return (rollup.get("state") or "") in ("FAILURE", "ERROR")
+            if tab == "runs":
+                _, run, envs = self.runs[key]
+                return {"waiting": bool(envs) or run.get("status") == "waiting",
+                        "failed": (run.get("conclusion") or "") in R.FAILED,
+                        "running": run.get("status") in R.ACTIVE}[f]
+            if tab == "releases":
+                return bool(R.release_problems(self.releases[key]))
+            if tab == "packages":
+                return bool(P.problems(self.packages[key]))
+            if tab == "security":
+                return bool(self.alerts.get(key, ([], []))[0])
+        except (KeyError, TypeError):
+            return True
+        return True
+
+    def put_rows(self, tab: str, rows: list[tuple[str, list]]) -> None:
+        """A list's rows, in the app's own order; what it shows goes through the filter, search and sort."""
+        self.rows[tab] = rows
+        self.apply_view(tab)
+
+    def apply_view(self, tab: str) -> None:
+        table = self.query_one(f"#{tab}-table", DataTable)
+        keep = self.current_key(tab)
+        rows = self.rows.get(tab, [])
+        text = self.searches.get(tab, "").lower()
+        shown = [(k, c) for k, c in rows if self.keeps(tab, k)
+                 and (not text or text in " ".join(plain(x) for x in c).lower())]
+        if tab in self.sorts:
+            col, rev = self.sorts[tab]
+            empty = [r for r in shown if blank(r[1][col])]  # rows without a value stay at the end
+            shown = sorted((r for r in shown if not blank(r[1][col])), key=lambda r: sort_value(r[1][col]),
+                           reverse=rev) + empty
+        table.clear()
+        for key, cells in shown:
+            table.add_row(*cells, key=key)
+        self.restore(table, keep)
+        if tab == self.tab():
+            self.update_view_line()
+
+    def update_view_line(self) -> None:
+        """The line over the log: how many rows the list shows, and the filter, search and sort on it."""
+        tab = self.tab()
+        with contextlib.suppress(NoMatches):
+            line = self.query_one("#view", Static)
+            if tab not in LIST_TABS or tab not in self.rows:
+                line.update("")
+                return
+            total, shown = len(self.rows[tab]), self.query_one(f"#{tab}-table", DataTable).row_count
+            bits = [f"{shown} of {total} rows" if shown != total else f"{total} rows"]
+            if tab in FILTERS:
+                bits.append(f"F4 filter: {dict(FILTERS[tab])[self.filter_of(tab)]}")
+            if self.searches.get(tab):
+                bits.append(f"F3 search: {self.searches[tab]!r}")
+            if tab in self.sorts:
+                col, rev = self.sorts[tab]
+                bits.append(f"F6 sort: {self.heads[tab][col]} {'↓' if rev else '↑'}")
+            line.update(" · ".join(bits))
+
+    def set_filter(self, tab: str, f: str) -> None:
+        self.filters[tab] = f
+        self.apply_view(tab)
+        if tab == "prs":
+            self.label_prs()
+        self.log_line(f"{dict(self.tabs)[tab]}: {dict(FILTERS[tab])[f]} (F4 picks, v the next one)")
+        self.update_detail()
+
+    def action_filter(self) -> None:
+        """F4: pick one of the tab's filters."""
+        tab = self.tab()
+        if tab not in FILTERS:
+            return
+        now = self.filter_of(tab)
+
+        def picked(f: str | None) -> None:
+            if f:
+                self.set_filter(tab, f)
+                self.focus_table(tab)
+        self.pick(f"Filter {dict(self.tabs)[tab]}",
+                  [(k, f"{label}{'  (now)' if k == now else ''}") for k, label in FILTERS[tab]], picked)
+
+    def action_filter_next(self) -> None:
+        """v: the tab's next filter."""
+        tab = self.tab()
+        if tab in FILTERS:
+            order = [k for k, _ in FILTERS[tab]]
+            self.set_filter(tab, order[(order.index(self.filter_of(tab)) + 1) % len(order)])
+
     def action_pr_filter(self) -> None:
-        order = [k for k, _ in PR_FILTERS]
-        self.pr_filter = order[(order.index(self.pr_filter) + 1) % len(order)]
         self.action_tab("prs")
-        self.fill_prs()
-        self.log_line(f"Pull requests: {dict(PR_FILTERS)[self.pr_filter]} (v switches)")
+        self.action_filter_next()
+
+    def action_sort(self) -> None:
+        """F6: sort by a column; the same column again reverses it, "as loaded" goes back to mason's order."""
+        tab = self.tab()
+        if tab not in LIST_TABS:
+            return
+        col, rev = self.sorts.get(tab, (-1, False))
+        options = [("-1", "as loaded (mason's order)" + ("  (now)" if col < 0 else ""))]
+        for i, head in enumerate(self.heads[tab]):
+            now = f"  (now {'↓' if rev else '↑'}, again reverses)" if i == col else ""
+            options.append((str(i), f"{head}{now}"))
+
+        def picked(choice: str | None) -> None:
+            if not choice:
+                return
+            i = int(choice)
+            if i < 0:
+                self.sorts.pop(tab, None)
+            else:
+                self.sorts[tab] = (i, not rev if i == col else False)
+            self.apply_view(tab)
+            self.focus_table(tab)
+            self.update_detail()
+        self.pick(f"Sort {dict(self.tabs)[tab]} by", options, picked)
+
+    def action_search(self) -> None:
+        """F3 or /: the search line; the list keeps the rows with its text as you type."""
+        if self.tab() not in LIST_TABS:
+            return
+        search = self.query_one("#search", Search)
+        search.add_class("-shown")
+        search.focus()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "search" and self.tab() in LIST_TABS:
+            self.searches[self.tab()] = event.value.strip()
+            self.apply_view(self.tab())
+            self.update_detail()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "search":
+            self.end_search()
+
+    def end_search(self, clear: bool = False) -> None:
+        search = self.query_one("#search", Search)
+        if clear or not search.value.strip():
+            search.remove_class("-shown")
+        self.focus_table()
+
+    def show_search(self) -> None:
+        """The search line shows the text of the tab you are on (each tab keeps its own)."""
+        with contextlib.suppress(NoMatches):
+            search = self.query_one("#search", Search)
+            text = self.searches.get(self.tab(), "")
+            with search.prevent(Input.Changed):
+                search.value = text
+            search.set_class(bool(text), "-shown")
+            self.update_view_line()
+
+    def action_help(self) -> None:
+        tab = self.tab()
+        extra = ""
+        if tab not in ("settings", "checks") and tab not in self.plugin_tabs:
+            extra = f"\nOn {dict(self.tabs).get(tab, tab)}, for the selected row\n  " + self.keys_line(tab).replace(
+                "\n", "\n  ") + "\n"
+        self.push_screen(Help(extra))
 
     @work(thread=True, exclusive=True, group="runs")
     def load_runs(self) -> None:
@@ -876,9 +1184,7 @@ class MasonTui(App):
             self._fill_runs(waiting, last)
 
     def _fill_runs(self, waiting, last) -> None:
-        table = self.query_one("#runs-table", DataTable)
-        keep = self.current_key("runs")
-        table.clear()
+        out = []
         self.runs = {}
         seen = set()
         for repo, run, envs in waiting:
@@ -887,8 +1193,8 @@ class MasonTui(App):
             self.runs[key] = (repo, run, envs)
             state = (Text("waiting, not for you", style=WARNING) if R.is_blocked(envs)
                      else Text("waiting for you", style=f"bold {self.highlight()}"))
-            table.add_row(self.label(repo), state,
-                          run.get("name") or "", run.get("head_branch") or "", core.ago(run.get("created_at")), key=key)
+            out.append((key, [self.label(repo), state, run.get("name") or "", run.get("head_branch") or "",
+                              core.ago(run.get("created_at"))]))
         waiting = [w for w in waiting if not R.is_blocked(w[2])]
         for repo, run in last:
             if not run or run["id"] in seen:
@@ -896,9 +1202,9 @@ class MasonTui(App):
             key = f"{repo}|{run['id']}"
             self.runs[key] = (repo, run, [])
             state = "waiting" if run.get("status") == "waiting" else (run.get("conclusion") or run.get("status") or "?")
-            table.add_row(self.label(repo), styled(state), run.get("name") or "",
-                          run.get("head_branch") or "", core.ago(run.get("created_at")), key=key)
-        self.restore(table, keep)
+            out.append((key, [self.label(repo), styled(state), run.get("name") or "",
+                              run.get("head_branch") or "", core.ago(run.get("created_at"))]))
+        self.put_rows("runs", out)
         if len(waiting) != self.last_waiting and waiting:
             self.log_line(f"{len(waiting)} run(s) wait for your approval: Runs tab (3), key a")
         self.last_waiting = len(waiting)
@@ -923,6 +1229,7 @@ class MasonTui(App):
 
     def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
         self.refresh_bindings()
+        self.show_search()
         core.CACHE = CACHE
         self.load_tab_data()
         self.focus_table()
@@ -1199,6 +1506,10 @@ class MasonTui(App):
         commands = [
             ("Auto-merge all ready PRs", "A · every ready PR merges once its checks pass", self.action_merge_all),
             ("Filter pull requests", "v · all, auto-merge, recently merged, drafts", self.action_pr_filter),
+            ("Filter the list", "F4 · the filters of the tab you are on", self.action_filter),
+            ("Search the list", "F3 or / · only rows with the text stay", self.action_search),
+            ("Sort the list", "F6 or > · by a column, again reverses it", self.action_sort),
+            ("Every key", "F1 or ?", self.action_help),
             ("Approve waiting run", "a · an environment you review or an outside contributor's run",
              self.action_approve),
             ("Check defaults", "Checks › Defaults (doctor)", lambda: self.show_check("doctor")),

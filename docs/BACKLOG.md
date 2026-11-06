@@ -87,8 +87,12 @@ move it to "Done" when it ships.
 - `mason tui` themes matching the web UI (phosphor, amber, paper).
 - `mason watch`: a live status line for a set of repos.
 - Shell completion for repo names and groups.
+- Your own keys for the TUI: a `[keys]` table in config.toml (Textual keymaps), e.g. to move F-keys a terminal keeps.
+- The same F3/F4/F6 search, filter and sort in the web app's lists.
 
 ## Done
+
+- TUI keyboard: Tab / Shift+Tab through every panel and dialog, F1-F10 for help, search, filter and sort.
 
 - Workflow hardening: `mason workflows [--fix]`, doctor's `workflows` check and the web app's Workflows tab.
 - More repo settings in mason.toml: topics, labels, Actions permissions, required files and `skip`.
