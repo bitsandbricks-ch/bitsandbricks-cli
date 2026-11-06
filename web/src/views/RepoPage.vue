@@ -7,6 +7,7 @@ import { act, cached, forget } from '../load.js'
 import { useKeys } from '../keys.js'
 import ReleaseForm from '../components/ReleaseForm.vue'
 import TextPane from '../components/TextPane.vue'
+import VersionBar from '../components/VersionBar.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -22,7 +23,7 @@ async function load(fresh = false) {
   if (!detail.value) detail.value = '…'
   try { detail.value = (await cached(`/repo${qs({ repo: repo.value, fresh })}`, fresh)).text } catch (e) { detail.value = `error: ${e.message}` }
 }
-watch(repo, () => { detail.value = ''; output.value = ''; form.value = ''; load() }, { immediate: true })
+watch(repo, () => { detail.value = ''; output.value = ''; form.value = ''; version.value = null; suggest.value = ''; load(); loadReleases() }, { immediate: true })
 
 async function run(q, path, body) {
   const t = await act(q, path, body)
@@ -44,13 +45,18 @@ const actions = computed(() => [
   { k: 'o', label: `open on ${gitlab.value ? 'GitLab' : 'GitHub'}`, fn: open },
 ])
 const publishes = ref('')
+const version = ref(null)
+async function loadReleases(fresh = false) {
+  try {
+    const p = await cached(`/release${qs({ repo: repo.value, fresh })}`, fresh)
+    suggest.value = p.suggest; publishes.value = p.publishes || ''; version.value = p.version || null
+  } catch { suggest.value = suggest.value || 'v0.1.0' }
+}
 async function newRelease(mode) {
   form.value = mode
-  if (!suggest.value) {
-    try { const p = await cached(`/release${qs({ repo: repo.value })}`); suggest.value = p.suggest; publishes.value = p.publishes || '' } catch { suggest.value = 'v0.1.0' }
-  }
+  if (!suggest.value) await loadReleases()
 }
-function done({ text, ok }) { output.value = text; if (ok) { form.value = ''; forget('/release'); forget('/releases'); load(true) } }
+function done({ text, ok }) { output.value = text; if (ok) { form.value = ''; forget('/release'); forget('/releases'); load(true); loadReleases(true) } }
 const open = () => { const url = detail.value.split('\n')[1]; if (url?.startsWith('http')) window.open(url, '_blank', 'noopener') }
 const back = () => (window.history.state?.back ? router.back() : router.push('/'))
 const keys = { Escape: () => (form.value ? (form.value = '') : back()), Backspace: back, r: () => load(true) }
@@ -75,6 +81,7 @@ useKeys(keys)
         <template v-if="output"><h2 style="margin-top: 16px">output</h2><TextPane :text="output" /></template>
       </div>
       <div class="pad">
+        <VersionBar v-if="version" :repo="repo" :version="version" @done="done" />
         <ReleaseForm v-if="form" :key="form" :mode="form" :repo="repo" :suggest="suggest" :publishes="publishes"
                      @done="done" @cancel="form = ''" />
         <TextPane :text="detail" placeholder="loading…" />

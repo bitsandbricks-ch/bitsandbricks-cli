@@ -446,8 +446,49 @@ def tag_create():
                 abort(409, "connect GitLab first")
             text = capture_rate(GL.push_tag, gl, repo, tag, target)
         else:
-            text = capture_rate(REL.push_tag, repo, tag, target)
+            text = capture_rate(REL.push_tag, repo, tag, target, load_config())
     audit("tag.create", f"{repo} {tag}", dry, detail=text)
+    return jsonify({"text": text, "ok": not text.lstrip().startswith("error")})
+
+
+def github_only(repo: str) -> None:
+    if is_gl(repo):
+        abort(400, "bump and release follow a version file, which mason reads on GitHub repos only")
+
+
+@bp.post("/bump")
+@need("read")
+def bump():
+    """Bump: a PR that sets the next version in the group's version file and adds the changelog section.
+    {repo, level: patch|minor|major|1.4.0, auto_merge?, dry_run?}"""
+    from mason import versions as V
+    data = body()
+    repo = valid_repo(str(data.get("repo") or ""))
+    github_only(repo)
+    level = str(data.get("level") or "patch").strip()
+    if not V.is_level(level):
+        abort(400, "level: patch, minor, major or a version like 1.4.0")
+    dry = write_allowed(bool(data.get("dry_run")))
+    with as_user(dry):
+        cfg = load_config()
+        text = capture_rate(V.bump, cfg, repo, level, bool(data.get("auto_merge")))
+    audit("bump", f"{repo} {level}", dry, detail=text)
+    return jsonify({"text": text, "ok": not text.lstrip().startswith("error")})
+
+
+@bp.post("/release/version")
+@need("read")
+def release_version():
+    """Release: push v<version> from the version file once it is newer than the latest release (mason release)."""
+    from mason import versions as V
+    data = body()
+    repo = valid_repo(str(data.get("repo") or ""))
+    github_only(repo)
+    dry = write_allowed(bool(data.get("dry_run")))
+    with as_user(dry):
+        cfg = load_config()
+        text = capture_rate(V.release, cfg, repo, True)
+    audit("release", repo, dry, detail=text)
     return jsonify({"text": text, "ok": not text.lstrip().startswith("error")})
 
 

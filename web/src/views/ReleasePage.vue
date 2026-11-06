@@ -9,6 +9,7 @@ import { useKeys } from '../keys.js'
 import DataTable from '../components/DataTable.vue'
 import ReleaseForm from '../components/ReleaseForm.vue'
 import TextPane from '../components/TextPane.vue'
+import VersionBar from '../components/VersionBar.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -68,6 +69,7 @@ useKeys({ Escape: () => (form.value ? (form.value = '') : back()), Backspace: ba
       <div><DataTable v-model="sel" :columns="columns" :rows="rows" :row-key="(r) => r.tag"
                       :empty="loading ? 'loading…' : 'no releases yet: n creates the first'" @activate="open" /></div>
       <div class="pad">
+        <VersionBar v-if="page?.version" :repo="repo" :version="page.version" @done="done" />
         <ReleaseForm v-if="form" :key="form" :mode="form" :repo="repo" :suggest="page?.suggest" :publishes="page?.publishes"
                      @done="done" @cancel="form = ''" />
         <template v-if="output"><h2>output</h2><TextPane :text="output" /></template>

@@ -329,7 +329,7 @@ def release_new_or_view(cfg, args) -> None:
     if action == "view":
         return releases.view(cfg, repo, tag or None)
     if action == "tag":
-        tag = tag or releases.suggest_from(releases.recent(repo))
+        tag = tag or releases.suggest_tag(cfg, repo)
         if not args.yes and not core.dry_run():
             try:
                 answer = input(f"Push the tag {tag} on {args.target or 'the default branch'} of {repo}? [y/N] ")
@@ -338,7 +338,7 @@ def release_new_or_view(cfg, args) -> None:
             if answer.strip().lower() not in ("y", "yes"):
                 print("left as it is")
                 return None
-        releases.push_tag(repo, tag, args.target)
+        releases.push_tag(repo, tag, args.target, cfg)
         return None
     if not tag:
         sys.exit("Name the tag: mason release new name v1.4.0")

@@ -855,3 +855,18 @@ def test_tag_only(op):
     assert not got["ok"] and "has a tag v1.0.0 already" in got["text"]
     assert c.post("/api/v1/tags", json={"repo": "acme/api", "tag": ""}, headers=H).status_code == 400
     assert any(a["action"] == "tag.create" for a in c.get("/api/v1/audit").json)
+    got = c.post("/api/v1/tags", json={"repo": "acme/plugin-b", "tag": "v9.0.0", "dry_run": True}, headers=H).json
+    assert "plugin.yaml says 0.4.0" in got["text"]
+    page = c.get("/api/v1/release?repo=acme/plugin-b").json
+    assert page["version"]["tag"] == "v0.4.0" and page["version"]["todo"]
+    assert c.get("/api/v1/release?repo=acme/api").json["version"] is None
+
+
+def test_bump_and_release_from_the_web(op):
+    _, c = op
+    got = c.post("/api/v1/bump", json={"repo": "acme/plugin-a", "level": "minor", "dry_run": True}, headers=H).json
+    assert "1.0.0 -> 1.1.0" in got["text"] and "[dry-run] branch bump/v1.1.0" in got["text"]
+    assert c.post("/api/v1/bump", json={"repo": "acme/plugin-a", "level": "huge"}, headers=H).status_code == 400
+    got = c.post("/api/v1/release/version", json={"repo": "acme/plugin-b", "dry_run": True}, headers=H).json
+    assert "[dry-run] push tag v0.4.0 on main" in got["text"]
+    assert c.post("/api/v1/bump", json={"repo": "gitlab:g/p"}, headers=H).status_code == 400
