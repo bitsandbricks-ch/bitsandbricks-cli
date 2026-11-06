@@ -6,6 +6,6 @@ dist/
 build/
 .venv/
 node_modules/
-src/mortar/server/static/
+src/mason/server/static/
 deploy/.env
 data/

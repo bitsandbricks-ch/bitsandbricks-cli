@@ -1,6 +1,6 @@
 {
-  "name": "Mortar",
-  "short_name": "Mortar",
+  "name": "Mason",
+  "short_name": "Mason",
   "description": "Your GitHub and GitLab repos from one terminal",
   "start_url": "/",
   "display": "standalone",

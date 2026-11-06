@@ -64,5 +64,5 @@ jobs:
       - run: python -m build
       - name: The wheel and sdist have the built UI
         run: |
-          unzip -l dist/*.whl | grep 'mortar/server/static/index.html'
-          tar -tzf dist/*.tar.gz | grep 'src/mortar/server/static/index.html'
+          unzip -l dist/*.whl | grep 'mason/server/static/index.html'
+          tar -tzf dist/*.tar.gz | grep 'src/mason/server/static/index.html'

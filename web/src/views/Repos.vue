@@ -1,5 +1,5 @@
 <script setup>
-// Repos: the status table (mtr status) and, on the right, the selected repo with what you can do with it.
+// Repos: the status table (mason status) and, on the right, the selected repo with what you can do with it.
 import { computed, ref, watch } from 'vue'
 import { get, qs } from '../api.js'
 import { act, useLoad } from '../load.js'

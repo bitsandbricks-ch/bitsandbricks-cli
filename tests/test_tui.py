@@ -17,10 +17,10 @@ async def until(pilot, check, seconds: float = 20) -> None:
 
 
 def test_tui_flow(env, monkeypatch):
-    for key in ("PATH", "FAKE_GH_LOG", "XDG_CONFIG_HOME", "MTR_DEFAULTS", "MTR_OPEN", "MTR_PLUGINS"):
+    for key in ("PATH", "FAKE_GH_LOG", "XDG_CONFIG_HOME", "MASON_DEFAULTS", "MASON_OPEN", "MASON_PLUGINS"):
         monkeypatch.setenv(key, env[key])
-    from mortar import config, core, plugins, tui
-    from mortar.plugins import Plugin
+    from mason import config, core, plugins, tui
+    from mason.plugins import Plugin
 
     class Demo(Plugin):
         name = "demo"
@@ -38,7 +38,7 @@ def test_tui_flow(env, monkeypatch):
     cfg = config.load()
 
     async def run():
-        app = tui.MortarTui(cfg, dry_run=True)
+        app = tui.MasonTui(cfg, dry_run=True)
         async with app.run_test(size=(160, 45)) as pilot:
             table = app.query_one("#repos-table")
             await until(pilot, lambda: table.row_count)
@@ -131,17 +131,17 @@ def test_tui_flow(env, monkeypatch):
 
 
 def test_tui_menu_footer_settings_new(env, monkeypatch, tmp_path):
-    for key in ("PATH", "FAKE_GH_LOG", "MTR_DEFAULTS", "MTR_OPEN", "MTR_PLUGINS"):
+    for key in ("PATH", "FAKE_GH_LOG", "MASON_DEFAULTS", "MASON_OPEN", "MASON_PLUGINS"):
         monkeypatch.setenv(key, env[key])
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    from mortar import config, core, tui
+    from mason import config, core, tui
 
     core.DRY_RUN = True
     config._loaded.clear()
     cfg = config.load()
 
     async def run():
-        app = tui.MortarTui(cfg, dry_run=True)
+        app = tui.MasonTui(cfg, dry_run=True)
         async with app.run_test(size=(160, 45)) as pilot:
             table = app.query_one("#repos-table")
             await until(pilot, lambda: table.row_count)

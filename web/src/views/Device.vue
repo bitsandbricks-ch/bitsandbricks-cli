@@ -1,5 +1,5 @@
 <script setup>
-// Approve a device login: `mtr login https://mortar` shows a code; this page turns it into an API key.
+// Approve a device login: `mason login https://mason` shows a code; this page turns it into an API key.
 import { onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { get, log, post } from '../api.js'
@@ -34,7 +34,7 @@ onMounted(lookup)
     <div class="scroll pad" style="max-width: 70ch">
       <div class="box">
         <div class="accent">device login</div>
-        <p class="dim">Type the code your terminal shows after <span class="accent">mtr login</span>. Only approve a code you started yourself.</p>
+        <p class="dim">Type the code your terminal shows after <span class="accent">mason login</span>. Only approve a code you started yourself.</p>
         <div class="row"><input v-model="code" placeholder="ABCD-EFGH" aria-label="code" style="text-transform: uppercase" @keydown.enter="lookup"><button @click="lookup">look up</button></div>
       </div>
       <div v-if="error" class="bad">{{ error }}</div>

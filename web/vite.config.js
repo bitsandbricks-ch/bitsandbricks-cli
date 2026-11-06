@@ -1,12 +1,12 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
-// The build lands in the Python package, which serves it (src/mortar/server/static).
-// `npm run dev` proxies /api to an operator on :8080 (MORTAR_DEV=1 mortar serve).
+// The build lands in the Python package, which serves it (src/mason/server/static).
+// `npm run dev` proxies /api to an operator on :8080 (MASON_DEV=1 mason serve).
 export default defineConfig({
   plugins: [vue()],
   build: {
-    outDir: '../src/mortar/server/static',
+    outDir: '../src/mason/server/static',
     emptyOutDir: true,
     assetsDir: 'assets',
     sourcemap: false,

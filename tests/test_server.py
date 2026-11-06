@@ -16,14 +16,14 @@ if sys.version_info < (3, 10):  # pragma: no cover
 
 @pytest.fixture()
 def op(env, monkeypatch, tmp_path):
-    for key in ("PATH", "FAKE_GH_LOG", "XDG_CONFIG_HOME", "MTR_OPEN", "MTR_PLUGINS"):
+    for key in ("PATH", "FAKE_GH_LOG", "XDG_CONFIG_HOME", "MASON_OPEN", "MASON_PLUGINS"):
         monkeypatch.setenv(key, env[key])
-    monkeypatch.delenv("MTR_DEFAULTS", raising=False)
-    from mortar import config, transport
-    from mortar.server import oauth, security
-    from mortar.server import settings as S
-    from mortar.server.app import create_app
-    from mortar.server.models import Identity, Session, User, db
+    monkeypatch.delenv("MASON_DEFAULTS", raising=False)
+    from mason import config, transport
+    from mason.server import oauth, security
+    from mason.server import settings as S
+    from mason.server.app import create_app
+    from mason.server.models import Identity, Session, User, db
 
     settings = S.Settings(
         url="http://localhost:8080", data=tmp_path, database=f"sqlite:///{tmp_path / 'op.db'}", secret_key="k" * 40,
@@ -46,7 +46,7 @@ def op(env, monkeypatch, tmp_path):
         db.add(Session(id=security.sha256(raw), user_id=user.id, csrf="csrf-token"))
         db.commit()
     client = app.test_client()
-    client.set_cookie("mtr_session", raw, domain="localhost")
+    client.set_cookie("mason_session", raw, domain="localhost")
     config._loaded.clear()
     yield app, client
     transport.set_default(None)
@@ -66,7 +66,7 @@ def test_signed_out_and_headers(op):
     assert anon.get("/api/v1/status").status_code == 401
     r = anon.get("/api/v1/auth/github/login")
     assert r.status_code == 302 and "code_challenge_method=S256" in r.headers["Location"]
-    assert "state=" in r.headers["Location"] and "mtr_oauth=" in r.headers["Set-Cookie"]
+    assert "state=" in r.headers["Location"] and "mason_oauth=" in r.headers["Set-Cookie"]
     assert anon.get("/api/v1/auth/github/callback?state=nope&code=x").headers["Location"].startswith("/login?error=")
     assert anon.get("/api/v1/auth/gitlab/login").status_code == 404  # not set up
 
@@ -115,7 +115,7 @@ def test_changes_are_dry_runs_and_audited(op):
     text = c.post("/api/v1/doctor", json={"repos": ["b"], "fix": True, "dry_run": True}, headers=H).json["text"]
     assert "[dry-run] PATCH /repos/acme/plugin-b" in text
     text = c.post("/api/v1/sync", json={"repos": ["b"], "dry_run": True}, headers=H).json["text"]
-    assert "update LICENSE" in text and "[dry-run] PR on mtr/sync-" in text
+    assert "update LICENSE" in text and "[dry-run] PR on mason/sync-" in text
     text = c.post("/api/v1/new", json={"repo": "acme/plugin-c", "dry_run": True}, headers=H).json["text"]
     assert "[dry-run] create private acme/plugin-c from the template acme/plugin-tpl" in text
     text = c.post("/api/v1/approve", json={"repo": "acme/api", "id": 5, "dry_run": True}, headers=H).json["text"]
@@ -144,27 +144,27 @@ def test_changes_are_dry_runs_and_audited(op):
 
 def test_console(op):
     _, c = op
-    out = c.post("/api/v1/console", json={"line": "mtr status"}, headers=H).json["text"]
+    out = c.post("/api/v1/console", json={"line": "mason status"}, headers=H).json["text"]
     assert "acme/api" in out and "v1.10.0" in out
-    assert "draft, left open" in c.post("/api/v1/console", json={"line": "mtr merge --dry-run web#8"},
+    assert "draft, left open" in c.post("/api/v1/console", json={"line": "mason merge --dry-run web#8"},
                                         headers=H).json["text"]
-    assert c.post("/api/v1/console", json={"line": "mtr init /etc"}, headers=H).status_code == 400
+    assert c.post("/api/v1/console", json={"line": "mason init /etc"}, headers=H).status_code == 400
     assert c.post("/api/v1/console", json={"line": "rm -rf /"}, headers=H).status_code == 400
-    assert "usage" in c.post("/api/v1/console", json={"line": "mtr status --nope"}, headers=H).json["text"]
+    assert "usage" in c.post("/api/v1/console", json={"line": "mason status --nope"}, headers=H).json["text"]
 
 
 def test_api_keys_and_device_login(op):
     app, c = op
     r = c.post("/api/v1/keys", json={"name": "laptop", "scope": "read"}, headers=H)
     key = r.json["key"]
-    assert key.startswith("mtr_") and r.status_code == 201
+    assert key.startswith("mason_") and r.status_code == 201
     k = app.test_client()
     auth = {"Authorization": f"Bearer {key}"}
     assert k.get("/api/v1/me", headers=auth).json["scope"] == "read"
     assert k.post("/api/v1/merge", json={"targets": ["web#7"]}, headers=auth).status_code == 403  # read key
     assert k.post("/api/v1/merge", json={"targets": ["web#7"], "dry_run": True}, headers=auth).status_code == 200
     assert k.post("/api/v1/keys", json={"name": "x"}, headers=auth).status_code == 403  # keys come from the browser
-    assert k.get("/api/v1/me", headers={"Authorization": "Bearer mtr_deadbeef_nope"}).status_code == 401
+    assert k.get("/api/v1/me", headers={"Authorization": "Bearer mason_deadbeef_nope"}).status_code == 401
     c.delete(f"/api/v1/keys/{r.json['id']}", headers=H)
     assert k.get("/api/v1/status", headers=auth).status_code == 401  # revoked
 
@@ -174,18 +174,18 @@ def test_api_keys_and_device_login(op):
         "authorization_pending"
     assert c.get(f"/api/v1/device/info?code={code['user_code']}").json["scope"] == "write"
     assert c.post("/api/v1/device/approve", json={"user_code": code["user_code"]}, headers=H).json["ok"]
-    from mortar.server.models import DeviceGrant, db
+    from mason.server.models import DeviceGrant, db
     with app.app_context():
         db.query(DeviceGrant).update({"last_poll": None})
         db.commit()
     got = dev.post("/api/v1/device/token", json={"device_code": code["device_code"]}).json
-    assert got["key"].startswith("mtr_") and got["scope"] == "write"
+    assert got["key"].startswith("mason_") and got["scope"] == "write"
     assert dev.post("/api/v1/device/token", json={"device_code": code["device_code"]}).json["error"] == \
         "expired_token"  # handed out once
 
 
 def test_proxy_allowlist():
-    from mortar.server.api.proxy import allowed
+    from mason.server.api.proxy import allowed
     assert allowed("GET", "/repos/acme/web/pulls")
     assert allowed("PATCH", "/repos/acme/web")
     assert allowed("POST", "/repos/acme/web/actions/runs/5/pending_deployments")
@@ -199,13 +199,13 @@ def test_proxy_allowlist():
 def test_defaults_editor(op):
     _, c = op
     d = c.get("/api/v1/defaults").json
-    assert d["repo"] == "acme/defaults" and d["path"] == "mortar.toml" in d["files"]
+    assert d["repo"] == "acme/defaults" and d["path"] == "mason.toml" in d["files"]
     assert d["problems"] == []
-    bad = c.post("/api/v1/defaults/validate", json={"path": "mortar.toml",
+    bad = c.post("/api/v1/defaults/validate", json={"path": "mason.toml",
                                                     "text": '[[group]]\nname="a"\nmatch={nope=1}\n'}, headers=H).json
     assert "match doesn't know nope" in bad["problems"][0]
     bad = c.post("/api/v1/defaults/validate", headers=H, json={
-        "path": "mortar.toml", "text": '[[group]]\nname="a"\nskip=["nope"]\nvisibility="x"\nactions={y=1}\n'}).json
+        "path": "mason.toml", "text": '[[group]]\nname="a"\nskip=["nope"]\nvisibility="x"\nactions={y=1}\n'}).json
     assert [p.split(": ")[1][:14] for p in bad["problems"]] == ["skip doesn't k", "visibility is ", "actions knows "]
     rs = c.post("/api/v1/defaults/validate", json={"path": "rulesets/default/x.json", "text": '{"target": "x"}'},
                headers=H).json
@@ -218,7 +218,7 @@ def test_defaults_editor(op):
 
 def test_market(op, tmp_path):
     app, c = op
-    from mortar import market
+    from mason import market
     pem, pub = market.keygen()
     doc = {"name": "test", "plugins": [{"name": "demo", "package": "demo-pkg", "version": "1.0",
                                         "source": "git+https://example.org/demo@v1"}]}
@@ -244,20 +244,20 @@ def test_stats(op):
 
 
 def test_settings_defaults(monkeypatch, tmp_path):
-    from mortar.server import settings as S
-    for k in ("MTR_URL", "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "GITHUB_URL", "GITLAB_CLIENT_ID",
-              "GITLAB_CLIENT_SECRET", "MTR_ALLOW_USERS", "MTR_ALLOW_ORGS", "MTR_ADMINS"):
+    from mason.server import settings as S
+    for k in ("MASON_URL", "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "GITHUB_URL", "GITLAB_CLIENT_ID",
+              "GITLAB_CLIENT_SECRET", "MASON_ALLOW_USERS", "MASON_ALLOW_ORGS", "MASON_ADMINS"):
         monkeypatch.delenv(k, raising=False)
-    monkeypatch.setenv("MTR_DATA", str(tmp_path))
+    monkeypatch.setenv("MASON_DATA", str(tmp_path))
     op = S.load()
-    assert op.url == "http://localhost:8080" and op.problems() == []  # no MTR_DEV, no allow lists needed
+    assert op.url == "http://localhost:8080" and op.problems() == []  # no MASON_DEV, no allow lists needed
     assert op.github.client_id == S.GITHUB_CLIENT_ID == "Ov23liFJgLtIjB3ZtuOy"
     assert op.github.method == "device" and not op.gitlab.enabled and op.open_sign_in
     monkeypatch.setenv("GITHUB_CLIENT_ID", "mine")
     monkeypatch.setenv("GITHUB_CLIENT_SECRET", "s")
     monkeypatch.setenv("GITLAB_CLIENT_ID", "gl")
     monkeypatch.setenv("GITLAB_CLIENT_SECRET", "gs")
-    monkeypatch.setenv("MTR_ALLOW_ORGS", "acme")
+    monkeypatch.setenv("MASON_ALLOW_ORGS", "acme")
     op = S.load()
     assert (op.github.client_id, op.github.method, op.gitlab.method) == ("mine", "redirect", "redirect")
     assert not op.open_sign_in
@@ -265,25 +265,25 @@ def test_settings_defaults(monkeypatch, tmp_path):
     monkeypatch.setenv("GITHUB_URL", "https://ghe.example.org")  # the public app means nothing there
     assert S.load().github.client_id == ""
     for url in ("http://localhost:8080", "http://127.0.0.1", "http://192.168.1.5:8080", "http://10.0.0.2",
-                "http://[::1]:8080", "http://nas.local", "http://mortar.lan", "http://box.home.arpa",
-                "https://mortar.example.org"):
+                "http://[::1]:8080", "http://nas.local", "http://mason.lan", "http://box.home.arpa",
+                "https://mason.example.org"):
         op.url = url
         assert op.problems() == [], url
-    for url in ("http://mortar.example.org", "http://8.8.8.8", "http://local.example.org", "mortar.example.org"):
+    for url in ("http://mason.example.org", "http://8.8.8.8", "http://local.example.org", "mason.example.org"):
         op.url = url
         assert op.problems(), url
 
 
 def test_serve_port_sets_default_url(monkeypatch, tmp_path, capsys):
-    from mortar.server import app as A
-    from mortar.server import settings as S
-    monkeypatch.delenv("MTR_URL", raising=False)
-    monkeypatch.setenv("MTR_DATA", str(tmp_path))
+    from mason.server import app as A
+    from mason.server import settings as S
+    monkeypatch.delenv("MASON_URL", raising=False)
+    monkeypatch.setenv("MASON_DATA", str(tmp_path))
     assert S.load().url == "http://localhost:8080"
     assert S.load(9000).url == "http://localhost:9000"
-    monkeypatch.setenv("MTR_URL", "https://mortar.example.org/")  # an explicit MTR_URL wins
-    assert S.load(9000).url == "https://mortar.example.org"
-    monkeypatch.delenv("MTR_URL")
+    monkeypatch.setenv("MASON_URL", "https://mason.example.org/")  # an explicit MASON_URL wins
+    assert S.load(9000).url == "https://mason.example.org"
+    monkeypatch.delenv("MASON_URL")
     ran = {}
 
     class FakeApp:
@@ -291,7 +291,7 @@ def test_serve_port_sets_default_url(monkeypatch, tmp_path, capsys):
             ran.update(kw)
 
     monkeypatch.setattr(A, "create_app", lambda op: ran.update(url=op.url) or FakeApp())
-    from mortar import cli
+    from mason import cli
     cli.main(["serve", "--port", "9000"])
     assert (ran["url"], ran["port"], ran["host"]) == ("http://localhost:9000", 9000, "127.0.0.1")
     with pytest.raises(SystemExit):
@@ -320,7 +320,7 @@ class FakeGitHub:
 
 
 def _poll(app, client):
-    from mortar.server.models import DeviceSignIn, db
+    from mason.server.models import DeviceSignIn, db
     with app.app_context():  # pretend the interval has passed
         db.query(DeviceSignIn).update({"last_poll": None})
         db.commit()
@@ -329,7 +329,7 @@ def _poll(app, client):
 
 def test_device_sign_in_is_open_to_anyone(op, monkeypatch):
     app, mike = op
-    from mortar.server import oauth
+    from mason.server import oauth
     app.config["OP"].allow_users = set()  # no allow lists: anyone may sign in
     fake = FakeGitHub()
     monkeypatch.setattr(oauth, "_http", fake)
@@ -340,7 +340,7 @@ def test_device_sign_in_is_open_to_anyone(op, monkeypatch):
     assert ann.post("/api/v1/auth/github/device/poll", json={}).json["status"] == "expired"  # nothing started
     r = ann.post("/api/v1/auth/github/device", json={"next": "/prs"})
     assert r.json["user_code"] == "ABCD-1234" and r.json["verification_uri"] == "https://github.com/login/device"
-    assert "mtr_device=" in r.headers["Set-Cookie"] and "HttpOnly" in r.headers["Set-Cookie"]
+    assert "mason_device=" in r.headers["Set-Cookie"] and "HttpOnly" in r.headers["Set-Cookie"]
     assert fake.calls[0][2] == {"client_id": "id", "scope": "repo"}
     assert "dev-123" not in r.get_data(as_text=True)  # GitHub's device code stays on the server
     fake.answers = [(200, {"error": "authorization_pending"}), (200, {"error": "slow_down", "interval": 10}),
@@ -351,7 +351,7 @@ def test_device_sign_in_is_open_to_anyone(op, monkeypatch):
     assert _poll(app, ann).json == {"status": "pending", "interval": 10}
     got = _poll(app, ann)
     assert got.json == {"status": "done", "next": "/prs"}
-    assert any("mtr_session=" in h for h in got.headers.getlist("Set-Cookie"))
+    assert any("mason_session=" in h for h in got.headers.getlist("Set-Cookie"))
     assert fake.calls[-2][2]["grant_type"] == oauth.DEVICE_GRANT and "client_secret" not in fake.calls[-2][2]
     me = ann.get("/api/v1/me").json
     assert me["user"]["name"] == "Ann" and not me["user"]["is_admin"] and me["identities"][0]["login"] == "ann"
@@ -368,10 +368,10 @@ def test_device_sign_in_is_open_to_anyone(op, monkeypatch):
 
 def test_device_sign_in_respects_allow_lists_and_admins(op, monkeypatch):
     app, mike = op
-    from mortar.server import oauth
+    from mason.server import oauth
     fake = FakeGitHub(login="eve", uid="66")
     monkeypatch.setattr(oauth, "_http", fake)
-    eve = app.test_client()  # MTR_ALLOW_USERS=github:mike
+    eve = app.test_client()  # MASON_ALLOW_USERS=github:mike
     eve.post("/api/v1/auth/github/device", json={})
     fake.answers = [(200, {"access_token": "eve-token"})]
     r = _poll(app, eve)
@@ -380,7 +380,7 @@ def test_device_sign_in_respects_allow_lists_and_admins(op, monkeypatch):
     eve.post("/api/v1/auth/github/device", json={})
     fake.answers = [(200, {"error": "access_denied"})]
     assert _poll(app, eve).json == {"status": "failed", "error": "you cancelled the sign-in at GitHub"}
-    # admins come only from MTR_ADMINS, also for an existing session
+    # admins come only from MASON_ADMINS, also for an existing session
     assert mike.get("/api/v1/me").json["user"]["is_admin"]
     app.config["OP"].admins = set()
     assert not mike.get("/api/v1/me").json["user"]["is_admin"]
@@ -395,7 +395,7 @@ def test_device_only_github(op, monkeypatch):
     assert anon.get("/api/v1/me").json["sign_in"] == {"github": "device"}
     assert anon.get("/api/v1/auth/github/login").status_code == 404
     assert anon.get("/api/v1/auth/github/callback?state=x&code=y").status_code == 404
-    from mortar.server import oauth
+    from mason.server import oauth
     monkeypatch.setattr(oauth, "_http", lambda *a, **k: (400, {"error": "device_flow_disabled"}))
     r = anon.post("/api/v1/auth/github/device", json={})
     assert r.status_code == 502 and "device flow switched on" in r.json["error"]
@@ -406,7 +406,7 @@ def test_redirect_sign_in_github_and_gitlab(op, monkeypatch):
     app, _ = op
     from urllib.parse import parse_qs, urlsplit
 
-    from mortar.server import oauth
+    from mason.server import oauth
     op_ = app.config["OP"]
     op_.gitlab.client_id, op_.gitlab.client_secret = "gl-id", "gl-secret"
     op_.allow_users = set()
