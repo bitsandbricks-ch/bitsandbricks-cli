@@ -277,7 +277,7 @@ def me():
         return jsonify({"user": None, "providers": list(sign_in_methods()), "sign_in": sign_in_methods()})
     u = g.user
     return jsonify({
-        "user": {"id": u.id, "name": u.name, "avatar_url": u.avatar_url, "is_admin": u.is_admin},
+        "user": {"id": u.id, "name": u.name, "avatar_url": u.avatar_url},
         "identities": [{"id": i.id, "provider": i.provider, "host": i.host, "login": i.login, "scopes": i.scopes,
                         "expires_at": iso(i.expires_at)} for i in u.identities],
         "providers": list(sign_in_methods()), "sign_in": sign_in_methods(),
@@ -590,27 +590,9 @@ def secret_of(user: User, name: str) -> str:
 @bp.get("/audit")
 @need("read")
 def audit_log():
-    q = db.query(Audit)
-    if not (g.user.is_admin and request.args.get("all") == "1"):
-        q = q.filter(Audit.user_id == g.user.id)
+    q = db.query(Audit).filter(Audit.user_id == g.user.id)  # only your own: nobody reads another user's
     rows = q.order_by(Audit.id.desc()).limit(min(int(request.args.get("limit", 200)), 1000)).all()
     names = {u.id: u.name for u in db.query(User).filter(User.id.in_({r.user_id for r in rows if r.user_id}))}
     return jsonify([{"at": iso(r.at), "user": names.get(r.user_id, ""), "via": r.via, "ip": r.ip, "action": r.action,
                      "target": r.target, "dry_run": r.dry_run, "ok": r.ok, "detail": r.detail} for r in rows])
 
-
-@bp.get("/admin/users")
-@need("admin")
-def admin_users():
-    rows = db.query(User).order_by(User.id).all()
-    return jsonify([{"id": u.id, "name": u.name, "is_admin": u.is_admin, "last_login": iso(u.last_login),
-                     "logins": [f"{i.provider}:{i.login}" for i in u.identities],
-                     "keys": db.query(ApiKey).filter_by(user_id=u.id, revoked_at=None).count()} for u in rows])
-
-
-@bp.get("/admin/stats")
-@need("admin")
-def admin_stats():
-    return jsonify({"transports": oauth.transport_stats(), "users": db.query(User).count(),
-                    "sessions": db.query(Session).count(),
-                    "keys": db.query(ApiKey).filter_by(revoked_at=None).count()})

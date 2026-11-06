@@ -106,4 +106,4 @@ jobs:
           IMAGE: ${{ steps.tags.outputs.image }}
         run: |
           img="$(docker images --format '{{.Repository}}:{{.Tag}}' "$IMAGE" | head -1)"
-          docker run --rm -e MASON_ADMINS=github:ci "$img" mason serve --check
+          docker run --rm "$img" mason serve --check

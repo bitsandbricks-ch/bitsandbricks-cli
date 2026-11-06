@@ -63,7 +63,6 @@ skips the build. An editable install (`pip install -e`) never builds it, so from
 ```sh
 pip install -e ".[server]"                   # flask, sqlalchemy, cryptography, gunicorn
 (cd web && npm ci && npm run build)          # the UI, into src/mason/server/static
-export MASON_ADMINS=github:you                 # optional: sign-in works without any settings
 mason serve --check                            # what the settings allow, and what is missing
 mason serve                                    # http://localhost:8080 (Flask's development server)
 mason serve --host 0.0.0.0 --port 9000         # somewhere else
@@ -91,7 +90,7 @@ CI (`.github/workflows/image.yml`) publishes the image to GitHub Container Regis
 
 ```sh
 cd deploy
-cp .env.example .env        # MASON_URL, the OAuth apps, MASON_ADMINS, POSTGRES_PASSWORD (and MASON_TAG)
+cp .env.example .env        # MASON_URL, the OAuth apps, POSTGRES_PASSWORD (and MASON_TAG)
 docker compose run --rm mason mason serve --check   # what the settings allow, and what is missing
 docker compose up -d        # Mason on 127.0.0.1:8080, data in the `data` and `db` volumes
 docker compose pull && docker compose up -d        # update to the newest image of MASON_TAG
@@ -127,8 +126,13 @@ Settings › Accounts, and both logins then belong to the same Mason user.
 
 Anyone with a GitHub or GitLab account may sign in, and each user sees only their own repos (through
 their own token), API keys, sessions, secrets and audit log. `MASON_ALLOW_USERS` and `MASON_ALLOW_ORGS`
-restrict who may sign in; `MASON_ADMINS` names the admins, and only it makes anyone an admin (taking a
-login off the list takes the admin rights away at the next request).
+restrict who may sign in.
+
+Mason has no admins. Every setting belongs to one user: the defaults repo and the repos to manage (with
+the groups, rules and templates kept in that defaults repo), the theme, which plugins are on, plugin
+secrets, API keys and sessions. No user can read or change another user's, and there is no page or API
+that lists other users. What applies to the whole server (sign-in, limits, the plugin index, which plugins
+are installed) is set where Mason runs, in the environment below and with `pip`, not from the web.
 
 ## OAuth apps
 
@@ -152,16 +156,14 @@ GitLab: set `GITLAB_URL`.
 | `GITLAB_CLIENT_ID`, `GITLAB_CLIENT_SECRET`, `GITLAB_URL`, `GITLAB_SCOPES` | the GitLab login |
 | `MASON_ALLOW_USERS` | optional: only these may sign in: `github:mike, gitlab:ann`, or a bare login for either |
 | `MASON_ALLOW_ORGS` | optional: only members of these GitHub orgs or GitLab groups may sign in |
-| `MASON_ADMINS` | the admins (may always sign in): everyone's audit log, plugins for everyone, installs |
 | `MASON_IDLE_HOURS`, `MASON_SESSION_DAYS` | session idle timeout (12) and lifetime (7) |
 | `MASON_CACHE` | the base time GitHub and GitLab answers are kept per user (`60s`, `0` to always ask); see [Caching](#caching) |
 | `MASON_CACHE_SIZE`, `MASON_CACHE_USER_SIZE` | memory for cached answers, all users together (`256MB`) and one user's share (`32MB`) |
 | `MASON_PLUGIN_INDEX`, `MASON_PLUGIN_INDEX_KEYS` | the plugin index (URL or file; default: `plugins/index.json` on this repo's main branch) and extra public keys (base64, comma separated) it may be signed with |
-| `MASON_PLUGIN_INSTALL` | `1` lets admins install plugins from the marketplace page |
 | `MASON_TRUSTED_PROXIES` | how many proxies in front set `X-Forwarded-*` (0) |
 | `MASON_AUDIT_DAYS`, `MASON_AUDIT_ROWS`, `MASON_AUDIT_OUTPUT` | audit rows go after 90 days; each user keeps the newest 1000; command output is cut to 1000 characters |
 | `MASON_RATE_API`, `MASON_RATE_WRITES`, `MASON_RATE_ANON` | API calls per minute: per user (600), changes per user (60), signed-out calls per address (120); 0 switches one off. Reads through the GitHub proxy for the CLI aren't counted (they spend only your own GitHub quota) |
-| `MASON_SIGNUPS_PER_HOUR`, `MASON_SIGNUPS_PER_IP`, `MASON_MAX_USERS` | new accounts per hour in all (60) and per address (5), and the most accounts this Mason takes (1000; 0 = no cap); admins from `MASON_ADMINS` always get in |
+| `MASON_SIGNUPS_PER_HOUR`, `MASON_SIGNUPS_PER_IP`, `MASON_MAX_USERS` | new accounts per hour in all (60) and per address (5), and the most accounts this Mason takes (1000; 0 = no cap); nobody is exempt |
 | `MASON_MAX_KEYS`, `MASON_MAX_SESSIONS` | working API keys (50) and browser sessions (20) per user |
 | `MASON_AUDIT_IPS` | what the audit log keeps of the caller's address: `hash` (default: an HMAC with the secret key, so "same address" shows without the address), `none`, or `full` |
 
@@ -223,8 +225,8 @@ cache: nothing one user fetched is ever looked up for another.
   `v-html` anywhere in the UI, `X-Frame-Options: DENY`, `no-referrer`, HSTS, `Cache-Control: no-store` on the API.
 - **Throttling and caps** so open sign-in can't fill the disk: sign-ins, device codes, code lookups and bad
   keys are throttled per address; API calls per user (and per address when signed out); new accounts per
-  hour, per address and in all (`MASON_MAX_USERS`); and what each user stores is capped (below). Admins from
-  `MASON_ADMINS` always get an account. Counters live in memory, so they start over on restart, and each
+  hour, per address and in all (`MASON_MAX_USERS`, with no exemptions); and what each user stores is capped
+  (below). Counters live in memory, so they start over on restart, and each
   server process counts on its own (the image runs one).
 
   | Per user | Cap |
@@ -285,12 +287,12 @@ Plugins are the same Python entry points the CLI loads. In Mason they can also a
 - `web_secrets()`: per-user secrets (e.g. a Hubra token) that users set in Settings and plugins read with
   `plugins.secret(name)` while serving that user.
 
-Each user switches plugins on or off for themselves; admins can switch one off for everyone.
+Each user switches plugins on or off for themselves only.
 
 The marketplace reads a plugin index (this repo's `plugins/index.json` by default) signed with Ed25519 (`mason market
 keygen`, `mason market sign`). Unsigned or wrongly signed indexes are shown but nothing installs from them.
-Installing from the web is off unless `MASON_PLUGIN_INSTALL=1`, and only admins can do it; restart
-Mason after an install. The signing code is adapted from labdex (relicensed into Mason under MIT by its author).
+An installed plugin runs inside Mason for every user, so plugins are installed where Mason runs
+(`pip install`, or `mason market install NAME`), never from the web; restart Mason afterwards. The signing code is adapted from labdex (relicensed into Mason under MIT by its author).
 
 ## API
 
@@ -299,5 +301,5 @@ Everything the UI does is JSON under `/api/v1` and works with an API key (`Autho
 `/me`, `/config`, `/repos`, `/repo`, `/status`, `/prs`, `/pr`, `/merge`, `/ready`, `/issues`, `/issue`,
 `/runs`, `/approvals`, `/approve`, `/releases`, `/releases/jobs`, `/packages`, `/security`, `/doctor`, `/sync`,
 `/workflows`, `/workflows/pin`, `/new`, `/metrics?days=`, `/console`, `/defaults…`, `/plugins…`, `/market…`,
-`/settings`, `/keys`, `/sessions`, `/secrets`, `/audit`, `/rate`, `/cache/clear`, and for admins
-`/admin/users` and `/admin/stats`. `/api/v1/health` needs no sign-in. Changes take `"dry_run": true`.
+`/settings`, `/keys`, `/sessions`, `/secrets`, `/audit`, `/rate` and `/cache/clear`, each only ever about
+the caller. `/api/v1/health` needs no sign-in. Changes take `"dry_run": true`.

@@ -82,7 +82,6 @@ class Settings:
     gitlab: Provider
     allow_users: set = field(default_factory=set)
     allow_orgs: set = field(default_factory=set)
-    admins: set = field(default_factory=set)
     idle_hours: int = 12
     session_days: int = 7
     cache: str = "60s"
@@ -90,7 +89,6 @@ class Settings:
     cache_user_size: int = 32 * 1024 * 1024  # one user's share
     plugin_index: str = ""
     plugin_index_keys: list = field(default_factory=list)
-    plugin_install: bool = False
     trusted_proxies: int = 0
     audit_days: int = 90
     audit_rows: int = 1000
@@ -182,7 +180,6 @@ def load(port: int | None = None) -> Settings:
                         f"{gl_web}/api/v4", _env("GITLAB_SCOPES", GITLAB_SCOPES)),
         allow_users=_who(_list("MASON_ALLOW_USERS")),
         allow_orgs=_who(_list("MASON_ALLOW_ORGS")),
-        admins=_who(_list("MASON_ADMINS")),
         idle_hours=int(_env("MASON_IDLE_HOURS", "12")),
         session_days=int(_env("MASON_SESSION_DAYS", "7")),
         cache=_env("MASON_CACHE", "60s"),
@@ -191,7 +188,6 @@ def load(port: int | None = None) -> Settings:
         plugin_index=_env("MASON_PLUGIN_INDEX",
                           "https://raw.githubusercontent.com/bitsandbricks-ch/mason-cli/main/plugins/index.json"),
         plugin_index_keys=_list("MASON_PLUGIN_INDEX_KEYS"),
-        plugin_install=_env("MASON_PLUGIN_INSTALL") == "1",
         trusted_proxies=int(_env("MASON_TRUSTED_PROXIES", "0")),
         audit_days=int(_env("MASON_AUDIT_DAYS", "90")),
         audit_rows=int(_env("MASON_AUDIT_ROWS", "1000")),

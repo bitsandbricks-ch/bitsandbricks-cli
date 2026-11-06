@@ -1,7 +1,7 @@
 # Mason, the web app, with Postgres, from the image CI publishes to GHCR.
 # Put it behind a TLS proxy (Caddy, Traefik, nginx) that serves MASON_URL and forwards to 127.0.0.1:8080.
 #   cd deploy
-#   cp .env.example .env      # fill in MASON_URL, the OAuth apps, MASON_ADMINS and POSTGRES_PASSWORD
+#   cp .env.example .env      # fill in MASON_URL, the OAuth apps and POSTGRES_PASSWORD
 #   docker compose up -d
 #   docker compose run --rm mason mason serve --check   # what the settings allow, and what is missing
 # Build from this checkout instead of pulling: docker compose up -d --build

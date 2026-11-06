@@ -1,6 +1,6 @@
 <script setup>
-// Settings: logins, the defaults repo and which repos to manage, API keys, sessions, plugin secrets,
-// and (admins) users. Everything a CLI user keeps in files lives here per user.
+// Settings: logins, the defaults repo and which repos to manage, API keys, sessions and plugin secrets.
+// Everything a CLI user keeps in files lives here, per user: nobody else sees or changes yours.
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { del, get, loadMe, log, post, put, state } from '../api.js'
@@ -12,8 +12,6 @@ const s = ref(null)
 const keys = ref([])
 const sessions = ref([])
 const secrets = ref([])
-const users = ref([])
-const opstats = ref(null)
 const newKey = ref({ name: 'laptop', scope: 'read', days: 90 })
 const fresh = ref(null) // the key just made: shown once
 const origin = window.location.origin
@@ -38,7 +36,6 @@ async function load() {
     const got = await get('/settings')
     s.value = { ...got, ...Object.fromEntries(LISTS.map((k) => [k, asText(got[k])])) }
     ;[keys.value, sessions.value, secrets.value] = await Promise.all([get('/keys'), get('/sessions'), get('/secrets')])
-    if (state.me?.user?.is_admin) [users.value, opstats.value] = await Promise.all([get('/admin/users'), get('/admin/stats')])
   } catch (e) { log(e.message, 'error') }
 }
 async function saveSettings() {
@@ -174,15 +171,6 @@ onMounted(load)
           <button @click="setSecret(x)">{{ x.set ? 'replace' : 'set' }}</button>
           <button v-if="x.set" @click="dropSecret(x)">remove</button>
         </div>
-      </div>
-
-      <div v-if="state.me.user.is_admin && opstats" class="box">
-        <div class="accent">mason (admin)</div>
-        <div class="dim">{{ opstats.users }} users · {{ opstats.sessions }} sessions · {{ opstats.keys }} keys · cache: {{ JSON.stringify(opstats.transports) }}</div>
-        <table class="table" style="margin-top: 6px">
-          <tr v-for="u in users" :key="u.id"><td>{{ u.name }}<span v-if="u.is_admin" class="warn"> admin</span></td>
-            <td class="dim">{{ u.logins.join(', ') }}</td><td class="dim">{{ u.keys }} keys</td><td class="dim">{{ ago(u.last_login) }}</td></tr>
-        </table>
       </div>
 
       <div class="box">

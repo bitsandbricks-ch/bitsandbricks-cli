@@ -160,21 +160,12 @@ def member_of(name: str, token: str, uid: str, org: str) -> bool:
 
 
 def allowed(name: str, login: str, token: str, uid: str) -> bool:
-    """With no MASON_ALLOW_USERS or MASON_ALLOW_ORGS anyone may sign in; with them, only those (and admins)."""
+    """With no MASON_ALLOW_USERS or MASON_ALLOW_ORGS anyone may sign in; with them, only those."""
     op = current_app.config["OP"]
     who = {(name, login.lower()), ("*", login.lower())}
-    if op.open_sign_in or who & op.allow_users or who & op.admins:
+    if op.open_sign_in or who & op.allow_users:
         return True
     return any(prov in (name, "*") and member_of(name, token, uid, org) for prov, org in op.allow_orgs)
-
-
-def is_admin(name: str, login: str) -> bool:
-    return bool({(name, login.lower()), ("*", login.lower())} & current_app.config["OP"].admins)
-
-
-def admin_of(user: User) -> bool:
-    """Admins come only from MASON_ADMINS: a user is one while one of their logins is listed there."""
-    return any(is_admin(i.provider, i.login) for i in user.identities)
 
 
 def sign_in(name: str, got: dict, link_user: User | None) -> User:
@@ -193,9 +184,8 @@ def sign_in(name: str, got: dict, link_user: User | None) -> User:
     else:
         if not allowed(name, me["login"], token, me["uid"]):
             raise PermissionError(f"{name} user {me['login']} may not use this operator")
-        if not is_admin(name, me["login"]):
-            from mason.server import auth, limits
-            limits.new_account(auth.client_ip())
+        from mason.server import auth, limits
+        limits.new_account(auth.client_ip())
         user = User(name=me["name"] or me["login"], avatar_url=me["avatar_url"])
         db.add(user)
         db.flush()
@@ -212,7 +202,6 @@ def sign_in(name: str, got: dict, link_user: User | None) -> User:
     ident.scopes = str(got.get("scope") or p.scopes)[:500]
     db.flush()
     db.refresh(user, ["identities"])
-    user.is_admin = admin_of(user)
     if not user.avatar_url:
         user.avatar_url = me["avatar_url"]
     db.commit()
@@ -338,10 +327,3 @@ def gitlab(user: User):
     op = current_app.config["OP"]
     return _kept(("gitlab", user.id, security.sha256(token)),
                  lambda: GitLab(token, api_url=op.gitlab.api, web=op.gitlab.web, cache=op.cache))
-
-
-def transport_stats() -> list[dict]:
-    with _tlock:
-        return [{"provider": k[0], "user_id": k[1], **(t.cache_info() if hasattr(t, "cache_info") else {}),
-                 "rate": getattr(t, "last_rate", {})}
-                for k, t in _transports.items()]
