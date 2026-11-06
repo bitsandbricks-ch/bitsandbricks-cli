@@ -1,7 +1,8 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { get, loadMe, log, post, state } from './api.js'
+import { get, loadMe, log, post, put, state } from './api.js'
+import { THEMES } from './themes.js'
 import { TABS } from './router.js'
 import { typing } from './keys.js'
 import { prompt } from './ui.js'
@@ -9,12 +10,19 @@ import PromptDialog from './components/PromptDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
-const themes = ['phosphor', 'amber', 'paper']
-const theme = ref(localStorage.getItem('mason-theme') || 'phosphor')
+const signedIn = computed(() => !!state.me?.user)
+const themes = THEMES
+function stored() { try { return localStorage.getItem('mason-theme') } catch { return null } }
+const theme = ref(themes.includes(stored()) ? stored() : 'phosphor')
 const plugins = ref([])
 watch(theme, (t) => { document.documentElement.dataset.theme = t; try { localStorage.setItem('mason-theme', t) } catch { /* private mode */ } }, { immediate: true })
+// The theme is a per-user setting: signing in picks up your choice, and switching saves it to your account.
+watch(() => state.me?.settings?.theme, (t) => { if (themes.includes(t)) theme.value = t }, { immediate: true })
+watch(theme, async (t) => {
+  if (!signedIn.value || state.me.scope === 'read' || state.me.settings?.theme === t) return
+  try { state.me.settings = { ...state.me.settings, ...(await put('/settings', { theme: t })) } } catch { /* stays on this device */ }
+})
 
-const signedIn = computed(() => !!state.me?.user)
 const who = computed(() => (state.me?.identities || []).map((i) => `${i.provider}:${i.login}`).join(' '))
 const last = computed(() => state.log[0])
 const rate = computed(() => {

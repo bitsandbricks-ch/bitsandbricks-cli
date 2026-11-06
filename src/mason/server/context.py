@@ -19,6 +19,7 @@ REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 GITLAB_REPO = re.compile(r"^gitlab:[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$")
 SETTING_KEYS = {"defaults": str, "ref": str, "orgs": list, "repos": list, "exclude": list,
                 "gitlab_groups": list, "gitlab_repos": list, "theme": str, "plugins_off": list}
+THEMES = ("phosphor", "amber", "grey", "paper")  # the web app's themes (web/src/themes.js); "" is the default
 
 
 class NoTransport:
@@ -68,6 +69,8 @@ def clean_settings(body: dict) -> dict:
                 abort(400, f"{k} must be a short text")
             v = v.strip()
         out[k] = v
+    if out.get("theme") and out["theme"] not in THEMES:
+        abort(400, f"theme is one of {', '.join(THEMES)}")
     if out.get("defaults") and not (REPO.match(out["defaults"]) or GITLAB_REPO.match(out["defaults"])):
         abort(400, "defaults must be a repo (owner/name) or a GitLab project (gitlab:group/name)")
     return out

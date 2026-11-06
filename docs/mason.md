@@ -30,6 +30,8 @@ scripts (key)        ─┘      │                  └─> GitLab REST/GraphQ
 ![audit](screenshots/12-audit.png)
 ![theme amber](screenshots/13-theme-amber.png)
 ![theme paper](screenshots/14-theme-paper.png)
+![theme grey](screenshots/15-theme-grey.png)
+![theme grey, pull requests](screenshots/16-theme-grey-prs.png)
 
 On a phone (the layout adapts below 700px; it can be added to the home screen):
 
@@ -58,7 +60,8 @@ one-key shortcut (`1` to `9` for the first ones, `I` issues, `W` workflows, `D` 
 - **Settings** holds the defaults repo, orgs, extra and left-out repos, GitLab groups and projects,
   connected accounts, API keys, sessions and plugin secrets.
 - **Keys:** arrows or `j`/`k` move, Enter acts, `/` filters, `r` reloads, `t` switches the theme
-  (phosphor, amber, paper), `?` lists the keys.
+  (phosphor, amber, grey, paper) and saves your choice to your account, so every browser you sign in
+  with uses it; `?` lists the keys.
 
 ## Run it
 
