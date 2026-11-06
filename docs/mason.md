@@ -49,6 +49,8 @@ one-key shortcut (`1` to `9` for the first ones, `I` issues, `W` workflows, `D` 
 - **Releases** creates releases: **n** opens a form with the tag (the next patch is suggested on a repo's
   release page), title, notes, target branch, draft, pre-release, and notes GitHub writes from the merged
   PRs. GitLab projects get the same form without draft and pre-release, which GitLab doesn't have.
+  **T** (new tag) pushes only the tag, for repos whose workflow creates the release on a tag push (hubra's,
+  with immutable releases); the release form warns when it finds such a workflow.
 - **Caching:** a tab you go back to shows its last answer at once and asks again after a minute; `r` and
   every change ask again right away.
 - **Issues** lists issues across GitHub repos and GitLab projects, filtered by state, label, mine and age.
@@ -336,7 +338,7 @@ An installed plugin runs inside Mason for every user, so plugins are installed w
 Everything the UI does is JSON under `/api/v1` and works with an API key (`Authorization: Bearer mason_…`):
 
 `/me`, `/config`, `/repos`, `/repo`, `/status`, `/prs`, `/pr`, `/merge`, `/ready`, `/issues`, `/issue`,
-`/runs`, `/approvals`, `/approve`, `/releases` (GET lists, POST creates), `/release?repo=&tag=`, `/releases/jobs`, `/packages`, `/security`, `/doctor`, `/sync`,
+`/runs`, `/approvals`, `/approve`, `/releases` (GET lists, POST creates), `/tags` (POST pushes a tag only), `/release?repo=&tag=`, `/releases/jobs`, `/packages`, `/security`, `/doctor`, `/sync`,
 `/workflows`, `/workflows/pin`, `/new`, `/metrics?days=`, `/console`, `/defaults…`, `/plugins…`, `/market…`,
 `/settings`, `/keys`, `/sessions`, `/secrets`, `/audit`, `/rate` and `/cache/clear`, each only ever about
 the caller, and for operators (in the browser) `/operator`, `/operator/plugins/NAME` and

@@ -816,3 +816,15 @@ def test_operator_panel(op, monkeypatch, capsys):
     # removing takes effect at the next request
     assert operator_command(app.config["OP"], "remove", "mike") == 0
     assert mike.get("/api/v1/operator").status_code == 403
+
+
+def test_tag_only(op):
+    _, c = op
+    assert c.get("/api/v1/release?repo=acme/plugin-b").json["publishes"] == ".github/workflows/release.yml"
+    assert c.get("/api/v1/release?repo=acme/api").json["publishes"] == ""
+    got = c.post("/api/v1/tags", json={"repo": "acme/plugin-b", "tag": "v0.4.0", "dry_run": True}, headers=H).json
+    assert "[dry-run] push the tag v0.4.0 on main of acme/plugin-b; .github/workflows/release.yml" in got["text"]
+    got = c.post("/api/v1/tags", json={"repo": "acme/plugin-a", "tag": "v1.0.0"}, headers=H).json
+    assert not got["ok"] and "has a tag v1.0.0 already" in got["text"]
+    assert c.post("/api/v1/tags", json={"repo": "acme/api", "tag": ""}, headers=H).status_code == 400
+    assert any(a["action"] == "tag.create" for a in c.get("/api/v1/audit").json)
