@@ -89,8 +89,8 @@ docker compose pull && docker compose up -d        # update to the newest image 
 ```
 
 Put a TLS proxy (Caddy, Traefik, nginx) in front that serves `MTR_URL` and forwards to `127.0.0.1:8080`;
-compose sets `MTR_TRUSTED_PROXIES=1` so Mortar sees the real client address, and forces `MTR_DEV` off, so
-`MTR_URL` must be https. Without `MTR_ALLOW_*` only the admins in `MTR_ADMINS` can sign in. The image is
+compose sets `MTR_TRUSTED_PROXIES=1` so Mortar sees the real client address. Without `MTR_ALLOW_*` anyone
+with a GitHub or GitLab account can sign in and sees only their own repos and keys. The image is
 private until you make the package public in its GitHub settings (or `docker login ghcr.io` first).
 To build from the checkout instead of pulling: `docker compose up -d --build`, or `docker build -t mortar .`.
 
