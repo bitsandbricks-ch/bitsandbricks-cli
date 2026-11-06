@@ -290,12 +290,19 @@ def unlink(ident_id: int):
         abort(404)
     if len(g.user.identities) < 2:
         abort(400, "this is your only login; delete your account instead")
-    oauth.revoke(ident)
+    got = oauth.revoke(ident)
     db.delete(ident)
     db.commit()
     oauth.forget_transports(g.user.id)
-    audit("unlink", f"{ident.provider}:{ident.login}")
-    return jsonify({"ok": True})
+    audit("unlink", f"{ident.provider}:{ident.login}", ok=got["revoked"], detail=_revoke_note(got))
+    return jsonify({"ok": True, "revoked": [got]})
+
+
+def _revoke_note(got: dict) -> str:
+    who = f"{got['provider']}:{got['login']}"
+    if got["revoked"]:
+        return f"{who}: token revoked"
+    return f"{who}: token not revoked by Mortar; revoke it at {got['manual']}"
 
 
 @bp.get("/sessions")
@@ -324,12 +331,13 @@ def end_other_session(sid: str):
 def delete_me():
     if g.get("session") is None:
         abort(403, "delete your account in the browser")
-    for i in g.user.identities:
-        oauth.revoke(i)
-    audit("account.delete", g.user.name)
+    revoked = [oauth.revoke(i) for i in g.user.identities]
+    oauth.forget_transports(g.user.id)
+    audit("account.delete", g.user.name, ok=all(r["revoked"] for r in revoked),
+          detail="\n".join(_revoke_note(r) for r in revoked))
     db.delete(g.user)
     db.commit()
-    resp = make_response(jsonify({"ok": True}))
+    resp = make_response(jsonify({"ok": True, "revoked": revoked}))
     auth.clear_session_cookie(resp)
     return resp
 

@@ -1,12 +1,30 @@
 // Small shared helpers: confirmation prompts, time, links in text.
 import { reactive } from 'vue'
 
-export const prompt = reactive({ open: false, question: '', detail: '', resolve: null, allowDry: true, input: null })
+export const prompt = reactive({ open: false, question: '', detail: '', resolve: null, allowDry: true, input: null,
+  links: [], notice: false })
 
 // ask('Merge acme/web#7 now?') -> 'yes' | 'dry' | null
 export function ask(question, { detail = '', allowDry = true, input = null } = {}) {
   return new Promise((resolve) => {
-    Object.assign(prompt, { open: true, question, detail, allowDry, input, resolve })
+    Object.assign(prompt, { open: true, question, detail, allowDry, input, resolve, links: [], notice: false })
+  })
+}
+
+// tell('Revoke it at GitHub', { links: [{ href, label }] }): a message with links and an ok button.
+export function tell(question, { detail = '', links = [] } = {}) {
+  return new Promise((resolve) => {
+    Object.assign(prompt, { open: true, question, detail, allowDry: false, input: null, resolve, links, notice: true })
+  })
+}
+
+// What DELETE /me and /me/identities/:id answer about the tokens: links for those Mortar couldn't revoke.
+export async function tellRevoked(got) {
+  const manual = (got?.revoked || []).filter((r) => !r.revoked && r.manual)
+  if (!manual.length) return
+  await tell('Mortar deleted its copy of your token, but could not revoke it at the provider. Revoke it there:', {
+    detail: 'The built-in GitHub sign-in has no client secret, and GitHub only lets an app revoke tokens with one.',
+    links: manual.map((r) => ({ href: r.manual, label: `${r.provider} (${r.login}): ${shortLink(r.manual)}` })),
   })
 }
 

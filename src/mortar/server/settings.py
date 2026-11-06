@@ -13,6 +13,7 @@ GITHUB_SCOPES = "repo read:org workflow security_events read:packages"
 # Mortar's own GitHub OAuth app. A client ID is public (it is in every authorize URL), so it is safe to
 # ship: with it anyone can sign in with GitHub's device flow, no client secret needed. GITHUB_CLIENT_ID
 # overrides it, and with GITHUB_CLIENT_SECRET the usual redirect sign-in works too.
+# Without a secret Mortar can't revoke tokens at GitHub (oauth.revoke): users get the link to do it.
 GITHUB_CLIENT_ID = "Ov23liFJgLtIjB3ZtuOy"
 DEFAULT_PORT = 8080
 LOCAL_SUFFIXES = (".localhost", ".local", ".lan", ".home.arpa")

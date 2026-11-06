@@ -433,3 +433,63 @@ def test_redirect_sign_in_github_and_gitlab(op, monkeypatch):
     me = anon.get("/api/v1/me").json
     assert me["identities"][0]["provider"] == "gitlab" and me["identities"][0]["login"] == "gil"
     assert not me["user"]["is_admin"]
+
+
+# ── revoking tokens when a login is disconnected or the account deleted ──────
+
+
+def _add_gitlab(app, monkeypatch):
+    from mortar.server.models import Identity, User, db
+    op = app.config["OP"]
+    monkeypatch.setattr(op.gitlab, "client_id", "glid")
+    monkeypatch.setattr(op.gitlab, "client_secret", "glsecret")
+    with app.app_context():
+        user = db.query(User).one()
+        db.add(Identity(user_id=user.id, provider="gitlab", host="gitlab.com", uid="9", login="mike-gl",
+                        access_enc=app.config["VAULT"].encrypt("gltoken")))
+        db.commit()
+        return [i.id for i in db.query(Identity).order_by(Identity.id)]
+
+
+def test_unlink_revokes_with_a_client_secret(op, monkeypatch):
+    app, c = op
+    from mortar.server import oauth
+    calls = []
+    monkeypatch.setattr(oauth, "_http", lambda method, url, data=None, **kw: calls.append((method, url, data, kw))
+                        or (204 if method == "DELETE" else 200, {}))
+    gh_id, gl_id = _add_gitlab(app, monkeypatch)
+    r = c.delete(f"/api/v1/me/identities/{gl_id}", headers=H)
+    assert r.json["revoked"] == [{"provider": "gitlab", "login": "mike-gl", "revoked": True, "manual": ""}]
+    assert calls[-1][:2] == ("POST", "https://gitlab.com/oauth/revoke") and calls[-1][2]["token"] == "gltoken"
+    # the last login goes with the account: GitHub's revoke API with the app's ID and secret
+    r = c.delete("/api/v1/me", headers=H)
+    assert r.json["revoked"][0]["revoked"] is True
+    method, url, _, kw = calls[-1]
+    assert (method, url) == ("DELETE", "https://api.github.com/applications/id/token")
+    assert kw["json_body"] == {"access_token": "ghtoken"} and kw["headers"]["Authorization"].startswith("Basic ")
+
+
+def test_device_flow_tokens_cant_be_revoked_and_say_so(op, monkeypatch):
+    app, c = op
+    from mortar.server import oauth
+    calls = []
+    monkeypatch.setattr(oauth, "_http", lambda *a, **kw: calls.append(a) or (200, {}))
+    monkeypatch.setattr(app.config["OP"].github, "client_secret", "")  # the built-in sign-in: no secret
+    r = c.delete("/api/v1/me", headers=H)
+    assert r.status_code == 200 and not calls
+    assert r.json["revoked"] == [{"provider": "github", "login": "mike", "revoked": False,
+                                  "manual": "https://github.com/settings/connections/applications/id"}]
+    with app.app_context():
+        from mortar.server.models import Audit, Identity, db
+        assert db.query(Identity).count() == 0  # Mortar's copy is gone either way
+        row = db.query(Audit).filter_by(action="account.delete").one()
+        assert not row.ok and "settings/connections/applications/id" in row.detail
+
+
+def test_failed_revoke_gives_the_link(op, monkeypatch):
+    app, c = op
+    from mortar.server import oauth
+    monkeypatch.setattr(oauth, "_http", lambda *a, **kw: (500, {}))
+    _, gl_id = _add_gitlab(app, monkeypatch)
+    got = c.delete(f"/api/v1/me/identities/{gl_id}", headers=H).json["revoked"][0]
+    assert got["revoked"] is False and got["manual"] == "https://gitlab.com/-/user_settings/applications"

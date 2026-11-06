@@ -170,8 +170,14 @@ configured (GitHub Enterprise without `GITHUB_CLIENT_ID`, say) or the URL is pla
   decision is made at every sign-in, not once.
 - **The user's own token, always.** Every GitHub and GitLab call is made with the signed-in user's token, so
   nobody sees or changes more than their account may. The server never falls back to a token or gh login of
-  its own. Tokens are encrypted at rest (Fernet), refreshed when they expire (GitLab), and revoked at the
-  provider when someone disconnects a login or deletes their account.
+  its own. Tokens are encrypted at rest (Fernet) and refreshed when they expire (GitLab).
+- **Revoking tokens.** When someone disconnects a login or deletes their account, Mortar deletes its copy of
+  the token and asks the provider to revoke it. Both GitHub's and GitLab's revoke APIs need the OAuth app's
+  client secret, so this works only with `GITHUB_CLIENT_SECRET` (GitHub) and always for GitLab, which
+  needs its secret anyway. With the built-in GitHub sign-in (device flow, no secret) Mortar **cannot**
+  revoke the token: the UI then shows the link to the app's page at GitHub
+  (`https://github.com/settings/connections/applications/<client id>`), where one click revokes it, and the
+  audit log records that it wasn't revoked. A failed revoke call is handled the same way.
 - **Sessions** are random cookies (`__Host-` prefixed, `Secure`, `HttpOnly`, `SameSite=Lax`); the database
   keeps only their SHA-256. Idle and absolute timeouts; users see and end their other sessions.
 - **CSRF**: every change needs the session's `X-CSRF-Token` header and a matching `Origin`.

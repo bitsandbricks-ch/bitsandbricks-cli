@@ -9,6 +9,7 @@ themselves.
 
 from __future__ import annotations
 
+import base64
 import json
 import threading
 import urllib.error
@@ -28,10 +29,14 @@ DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code"
 
 
 def _http(method: str, url: str, data: dict | None = None, token: str | None = None,
-          headers: dict | None = None) -> tuple[int, dict]:
+          headers: dict | None = None, json_body: dict | None = None) -> tuple[int, dict]:
     body = urllib.parse.urlencode(data).encode() if data is not None else None
+    if json_body is not None:
+        body = json.dumps(json_body).encode()
     req = urllib.request.Request(url, data=body, method=method)
     req.add_header("Accept", "application/json")
+    if json_body is not None:
+        req.add_header("Content-Type", "application/json")
     req.add_header("User-Agent", "mortar-server")
     if token:
         req.add_header("Authorization", f"Bearer {token}")
@@ -235,27 +240,53 @@ def access_token(ident: Identity) -> str:
     return vault.decrypt(ident.access_enc)
 
 
-def revoke(ident: Identity) -> None:
-    """Best effort: tell GitHub/GitLab the operator no longer needs the token."""
+def connections_url(ident: Identity) -> str:
+    """Where the user revokes Mortar's access by hand: the app's page at GitHub when we know its client ID,
+    else the list of authorized apps at GitHub or GitLab."""
+    p = provider(ident.provider)
+    web = p.web if p is not None else f"https://{ident.host}"
+    if ident.provider == "github":
+        if p is not None and p.client_id:
+            return f"{web}/settings/connections/applications/{p.client_id}"
+        return f"{web}/settings/applications"
+    return f"{web}/-/user_settings/applications"
+
+
+def revoke(ident: Identity) -> dict:
+    """Tell GitHub/GitLab to revoke the identity's token, where the provider lets us.
+
+    GitHub's revoke API (DELETE /applications/{client_id}/token) and GitLab's /oauth/revoke both need the
+    app's client secret. Mortar's built-in GitHub sign-in is the device flow, which has no secret, so there
+    the token can't be revoked by Mortar: the answer says so ("revoked": False) and gives the page where the
+    user revokes it in one click ("manual"). Mortar deletes its copy of the token either way.
+
+    -> {"provider", "login", "revoked": bool, "manual": url or ""}
+    """
+    out = {"provider": ident.provider, "login": ident.login, "revoked": False, "manual": ""}
     p = provider(ident.provider)
     token = current_app.config["VAULT"].decrypt(ident.access_enc)
-    if not p or not token or not p.client_secret:  # revoking needs the app's secret
-        return
+    if not token:  # nothing we could still use, so nothing to revoke
+        out["revoked"] = True
+        return out
+    if p is None or not p.client_secret:
+        out["manual"] = connections_url(ident)
+        return out
     try:
         if ident.provider == "gitlab":
-            _http("POST", f"{p.web}/oauth/revoke", {"client_id": p.client_id, "client_secret": p.client_secret,
-                                                    "token": token})
+            status, _ = _http("POST", f"{p.web}/oauth/revoke", {"client_id": p.client_id,
+                                                                "client_secret": p.client_secret, "token": token})
+            ok = status == 200
         else:
-            import base64
             basic = base64.b64encode(f"{p.client_id}:{p.client_secret}".encode()).decode()
-            req_body = json.dumps({"access_token": token}).encode()
-            req = urllib.request.Request(f"{p.api}/applications/{p.client_id}/token", data=req_body, method="DELETE")
-            req.add_header("Authorization", f"Basic {basic}")
-            req.add_header("Accept", "application/vnd.github+json")
-            req.add_header("Content-Type", "application/json")
-            urllib.request.urlopen(req, timeout=10).close()  # noqa: S310
-    except (RuntimeError, urllib.error.URLError, OSError):
-        pass
+            status, _ = _http("DELETE", f"{p.api}/applications/{p.client_id}/token", json_body={"access_token": token},
+                              headers={"Authorization": f"Basic {basic}", "Accept": "application/vnd.github+json"})
+            ok = status in (204, 404)  # 404: GitHub no longer knows the token, so it is dead already
+    except (RuntimeError, OSError):
+        ok = False
+    out["revoked"] = ok
+    if not ok:
+        out["manual"] = connections_url(ident)
+    return out
 
 
 # ── each user's transports, kept so caches outlive one request ───────────────
