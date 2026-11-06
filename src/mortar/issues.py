@@ -1,4 +1,4 @@
-"""Issues across repos: `bnb issues` lists and filters them, `bnb issue` creates, shows, closes, reopens and
+"""Issues across repos: `mtr issues` lists and filters them, `mtr issue` creates, shows, closes, reopens and
 comments. GitHub here; Mortar (the web app) adds GitLab issues (server/gitlab.py).
 """
 
@@ -17,7 +17,7 @@ def _epoch(stamp: str) -> float:
 
 
 def row(repo: str, i: dict) -> dict:
-    """One issue as the web app and `bnb issues` show it."""
+    """One issue as the web app and `mtr issues` show it."""
     return {"repo": repo, "provider": "github", "number": i["number"], "title": i.get("title") or "",
             "url": i.get("html_url") or f"{WEB}/{repo}/issues/{i['number']}", "state": i.get("state") or "",
             "labels": [lab["name"] if isinstance(lab, dict) else str(lab) for lab in i.get("labels") or []],
@@ -48,7 +48,7 @@ def stale(rows: list[dict], days: int) -> list[dict]:
     return [r for r in rows if r.get("updated") and _epoch(r["updated"]) < cutoff]
 
 
-# ── bnb issues ───────────────────────────────────────────────────────────────
+# ── mtr issues ───────────────────────────────────────────────────────────────
 
 
 def report(repo: str, ctx: dict) -> None:
@@ -77,7 +77,7 @@ def issues(repos: list[str], state: str = "open", labels: list[str] | None = Non
                              "stale": stale_days})
 
 
-# ── bnb issue ────────────────────────────────────────────────────────────────
+# ── mtr issue ────────────────────────────────────────────────────────────────
 
 
 def create(repo: str, title: str, body: str = "", labels: list[str] | None = None,

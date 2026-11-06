@@ -1,4 +1,4 @@
-"""Which repos bnb works on, how names resolve, and the everyday commands:
+"""Which repos mtr works on, how names resolve, and the everyday commands:
 status, prs, pr, merge, runs, approve, security, open."""
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ _listing = core.Scoped("listing")  # {(orgs, repos, exclude): {repo: info}}
 
 
 def listing(cfg: Config) -> dict[str, dict]:
-    """{owner/name: {"topics": [...], "archived": bool}} of every repo bnb looks after, sorted."""
+    """{owner/name: {"topics": [...], "archived": bool}} of every repo mtr looks after, sorted."""
     key = (tuple(cfg.orgs), tuple(cfg.repos), tuple(cfg.exclude))
     if key in _listing:
         return _listing[key]
@@ -86,7 +86,7 @@ def resolve(cfg: Config, arg: str) -> tuple[str, int | None]:
         raise RuntimeError(f"{name} is ambiguous: {', '.join(hits)}")
     if len(cfg.orgs) == 1:
         return f"{cfg.orgs[0]}/{name}", number
-    raise RuntimeError(f"Unknown repo: {name}" + ("" if cfg.orgs else " (no orgs set: bnb init, or BNB_ORGS)"))
+    raise RuntimeError(f"Unknown repo: {name}" + ("" if cfg.orgs else " (no orgs set: mtr init, or MTR_ORGS)"))
 
 
 def pick_repos(cfg: Config, names: list[str], group: str | None = None) -> tuple[list[str], dict[str, list[int]]]:
@@ -95,7 +95,7 @@ def pick_repos(cfg: Config, names: list[str], group: str | None = None) -> tuple
     if not names:
         repos = [r for r in listing(cfg) if not listing(cfg)[r].get("missing")]
         if not repos:
-            raise RuntimeError("No repos: name an org with bnb init <defaults repo>, BNB_ORGS or --org")
+            raise RuntimeError("No repos: name an org with mtr init <defaults repo>, MTR_ORGS or --org")
     else:
         repos = []
         for arg in names:
@@ -407,7 +407,7 @@ def approve_run(repo: str, run: dict, envs: list[dict]) -> None:
     ids = [e["id"] for e in envs if e is not RUN_APPROVAL and e.get("id") is not None]
     if ids:
         api("POST", f"/repos/{repo}/actions/runs/{run['id']}/pending_deployments",
-            {"environment_ids": ids, "state": "approved", "comment": "Approved with bnb"})
+            {"environment_ids": ids, "state": "approved", "comment": "Approved with mtr"})
 
 
 def all_waiting(repos: list[str]) -> list[tuple[str, dict, list[dict]]]:
@@ -534,7 +534,7 @@ def comment_pr(repo: str, number: int, text: str) -> None:
 
 
 def rerun(repos: list[str], run_id: int | None, yes: bool) -> None:
-    """bnb rerun: the failed jobs of each repo's newest failed run (or of --run ID)."""
+    """mtr rerun: the failed jobs of each repo's newest failed run (or of --run ID)."""
     for repo in repos:
         if run_id:
             run = api("GET", f"/repos/{repo}/actions/runs/{run_id}") or {}

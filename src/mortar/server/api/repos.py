@@ -1,7 +1,7 @@
-"""Every bnb command for GitHub and GitLab, as JSON for the web UI (and anything else with an API key).
+"""Every mtr command for GitHub and GitLab, as JSON for the web UI (and anything else with an API key).
 
 GitHub repos are `owner/name`, GitLab projects `gitlab:group/project`; lists hold both. Reads run
-bnb's own code (repos.py, packages.py, defaults.py) with the user's token; changes are recorded in
+mtr's own code (repos.py, packages.py, defaults.py) with the user's token; changes are recorded in
 the audit log and take `dry_run`.
 """
 

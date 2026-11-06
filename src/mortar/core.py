@@ -1,10 +1,10 @@
 """Plumbing every command shares: output, the GitHub API, small helpers.
 
-How bnb reaches GitHub is a *transport* (transport.py):
+How mtr reaches GitHub is a *transport* (transport.py):
 
-* the gh CLI (`gh auth login` once), so bnb never sees a token: the default;
+* the gh CLI (`gh auth login` once), so mtr never sees a token: the default;
 * a token over HTTPS: what the operator (the web app) uses with each user's own OAuth token;
-* an operator: `bnb login https://operator.example` makes every command and the TUI go
+* an operator: `mtr login https://operator.example` makes every command and the TUI go
   through the operator with an API key, so the laptop needs neither gh nor a GitHub token.
 
 The transport, dry run and command output are per context (contextvars), so the operator can
@@ -41,9 +41,9 @@ class RateLimited(RuntimeError):
 
 # ── per-context state ────────────────────────────────────────────────────────
 
-_dry_run: contextvars.ContextVar[bool | None] = contextvars.ContextVar("bnb_dry_run", default=None)
-_lines: contextvars.ContextVar[list | None] = contextvars.ContextVar("bnb_lines", default=None)
-_printed: contextvars.ContextVar[io.StringIO | None] = contextvars.ContextVar("bnb_printed", default=None)
+_dry_run: contextvars.ContextVar[bool | None] = contextvars.ContextVar("mtr_dry_run", default=None)
+_lines: contextvars.ContextVar[list | None] = contextvars.ContextVar("mtr_lines", default=None)
+_printed: contextvars.ContextVar[io.StringIO | None] = contextvars.ContextVar("mtr_printed", default=None)
 
 
 def dry_run() -> bool:
@@ -354,9 +354,9 @@ def compact(value) -> str:
 
 
 def open_mode() -> str:
-    """How links open: BNB_OPEN=browser|copy|print. Over SSH the default is copy: a browser would
+    """How links open: MTR_OPEN=browser|copy|print. Over SSH the default is copy: a browser would
     start on the remote machine (or a text browser inside the terminal)."""
-    mode = (os.environ.get("BNB_OPEN") or os.environ.get("HUBRA_OPEN") or "").strip().lower()
+    mode = (os.environ.get("MTR_OPEN") or os.environ.get("HUBRA_OPEN") or "").strip().lower()
     if mode in ("browser", "copy", "print"):
         return mode
     return "copy" if os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY") else "browser"

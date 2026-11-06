@@ -1,10 +1,10 @@
-"""`bnb login <operator URL>`: sign the CLI and the TUI in to an operator with an API key.
+"""`mtr login <operator URL>`: sign the CLI and the TUI in to an operator with an API key.
 
 The operator shows a code page; you approve the code in the browser where you are signed in with
-GitHub or GitLab, and bnb gets an API key (read or write) that it keeps in
-~/.config/mortar/server.json (readable only by you). From then on every bnb command and
-`bnb tui` go through the operator: no gh and no GitHub token needed on this machine.
-`bnb logout` forgets the key (revoke it in the operator under Settings › API keys).
+GitHub or GitLab, and mtr gets an API key (read or write) that it keeps in
+~/.config/mortar/server.json (readable only by you). From then on every mtr command and
+`mtr tui` go through the operator: no gh and no GitHub token needed on this machine.
+`mtr logout` forgets the key (revoke it in the operator under Settings › API keys).
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ def login(url: str, scope: str = "write", key: str | None = None) -> None:
         path = transport.save_operator_login(url, key)
         print(f"Signed in to {url} as {me['user']['name']} ({me.get('scope')}); key saved in {path}")
         return
-    status, got = _post(f"{url}/api/v1/device/code", {"scope": scope, "client": "bnb CLI"})
+    status, got = _post(f"{url}/api/v1/device/code", {"scope": scope, "client": "mtr CLI"})
     if status != 200:
         raise RuntimeError(f"the operator refused: {got.get('error') or status}")
     link = got["verification_uri_complete"]
@@ -64,7 +64,7 @@ def login(url: str, scope: str = "write", key: str | None = None) -> None:
         if status == 200 and ans.get("key"):
             path = transport.save_operator_login(url, ans["key"])
             print(f"Signed in to {url} as {ans.get('user') or '?'} ({ans.get('scope')} key); saved in {path}")
-            print("bnb and bnb tui now go through the operator. bnb logout undoes it.")
+            print("mtr and mtr tui now go through the operator. mtr logout undoes it.")
             return
         err = ans.get("error")
         if err == "slow_down":
@@ -73,7 +73,7 @@ def login(url: str, scope: str = "write", key: str | None = None) -> None:
             raise RuntimeError("the login was denied in the browser")
         elif err == "expired_token":
             break
-    raise RuntimeError("the code expired before it was approved; run bnb login again")
+    raise RuntimeError("the code expired before it was approved; run mtr login again")
 
 
 def logout() -> None:
@@ -92,6 +92,6 @@ def whoami() -> None:
         logins = ", ".join(f"{i['provider']}:{i['login']}" for i in me.get("identities") or [])
         print(f"operator  {t.operator}\nuser      {user.get('name', '?')} ({logins})\nkey       {me.get('scope')}")
     elif isinstance(t, transport.GhTransport):
-        print("gh CLI (gh auth status shows the account); bnb login <operator URL> signs in to an operator")
+        print("gh CLI (gh auth status shows the account); mtr login <operator URL> signs in to an operator")
     else:
         print(f"{getattr(t, 'name', '?')} transport")

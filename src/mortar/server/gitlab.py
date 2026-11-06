@@ -1,4 +1,4 @@
-"""GitLab: the bnb commands for GitLab projects, with the user's own GitLab token.
+"""GitLab: the mtr commands for GitLab projects, with the user's own GitLab token.
 
 Projects are named `gitlab:group/subgroup/project` next to GitHub's `owner/name`, so both live in
 one list. Groups in mortar.toml match them too (`match = { provider = "gitlab", ... }` limits
@@ -360,7 +360,7 @@ def waiting(gl: GitLab, repos: list[str]) -> list[dict]:
 def approve(gl: GitLab, repo: str, kind: str, ident: int) -> None:
     if kind == "deployment":
         gl.write("POST", f"{gl.project(repo)}/deployments/{int(ident)}/approval",
-                 {"status": "approved", "comment": "Approved with bnb"})
+                 {"status": "approved", "comment": "Approved with mtr"})
         say(f"approved deployment {ident} of {full(repo)}")
     elif kind == "manual":
         gl.write("POST", f"{gl.project(repo)}/jobs/{int(ident)}/play")
@@ -579,9 +579,9 @@ def doctor(gl: GitLab, cfg, repo: str, fix: bool = False) -> None:
     for p in problems:
         say(f"   - {p}")
     if not fix and (fixable or bad_branches):
-        say(f"   fix: bnb doctor --fix {full(repo)}")
+        say(f"   fix: mtr doctor --fix {full(repo)}")
     if any(p.endswith(("is missing", f"differs from {want['label']}")) for p in problems):
-        say(f"   fix: bnb sync {full(repo)}  (merge request with the files)")
+        say(f"   fix: mtr sync {full(repo)}  (merge request with the files)")
 
 
 def sync(gl: GitLab, cfg, repo: str, only: list[str] | None = None) -> None:
@@ -601,7 +601,7 @@ def sync(gl: GitLab, cfg, repo: str, only: list[str] | None = None) -> None:
     for p in changed:
         say(f"   {'update' if p in ours else 'add'} {p}")
     stamp = core.git_blob_sha("".join(sorted(want["files"].values())))[:7]
-    branch = f"bnb/sync-{stamp}"
+    branch = f"mtr/sync-{stamp}"
     open_mrs = gl.api("GET", f"{gl.project(repo)}/merge_requests?state=opened&source_branch={branch}") or []
     if open_mrs:
         say(f"   merge request already open: {open_mrs[0].get('web_url')}")
@@ -618,7 +618,7 @@ def sync(gl: GitLab, cfg, repo: str, only: list[str] | None = None) -> None:
         "title": f"Sync shared files with {want['label']}",
         "description": "Copies these files from the defaults:\n\n" + "\n".join(f"- `{p}`" for p in changed)
                        + "\n\nCheck the diff for changes this project made on purpose before merging.\n\n"
-                         "Opened by `bnb sync`."}) or {}
+                         "Opened by `mtr sync`."}) or {}
     say(f"   merge request: {mr.get('web_url', '')}")
 
 
@@ -635,7 +635,7 @@ def create(gl: GitLab, cfg, repo: str, group_name: str | None = None, public: bo
     say(f"== {full(repo)}" + (f" (group {group.name})" if group else " (no group: a plain project)"))
     try:
         gl.api("GET", gl.project(repo))
-        raise RuntimeError(f"{full(repo)} exists already (bnb doctor --fix applies the defaults)")
+        raise RuntimeError(f"{full(repo)} exists already (mtr doctor --fix applies the defaults)")
     except HttpError as err:
         if err.status != 404:
             raise

@@ -10,9 +10,9 @@ import PromptDialog from './components/PromptDialog.vue'
 const route = useRoute()
 const router = useRouter()
 const themes = ['phosphor', 'amber', 'paper']
-const theme = ref(localStorage.getItem('bnb-theme') || 'phosphor')
+const theme = ref(localStorage.getItem('mtr-theme') || 'phosphor')
 const plugins = ref([])
-watch(theme, (t) => { document.documentElement.dataset.theme = t; try { localStorage.setItem('bnb-theme', t) } catch { /* private mode */ } }, { immediate: true })
+watch(theme, (t) => { document.documentElement.dataset.theme = t; try { localStorage.setItem('mtr-theme', t) } catch { /* private mode */ } }, { immediate: true })
 
 const signedIn = computed(() => !!state.me?.user)
 const who = computed(() => (state.me?.identities || []).map((i) => `${i.provider}:${i.login}`).join(' '))

@@ -20,7 +20,7 @@ const BANNER = [
   <div class="center">
     <div style="max-width: 720px; width: 100%">
       <pre class="banner" aria-hidden="true">{{ BANNER }}</pre>
-      <p><span class="accent">$</span> bnb login<span class="cursor" /></p>
+      <p><span class="accent">$</span> mtr login<span class="cursor" /></p>
       <p class="dim">Your GitHub and GitLab repos, pull requests, runs, approvals, releases, security alerts and
         defaults, from one terminal in the browser: Mortar holds your bricks together. You sign in with your own account; Mortar only ever acts
         with your token, so you see and change no more than you could yourself.</p>
@@ -32,7 +32,7 @@ const BANNER = [
           [ sign in with GitLab ]</a>
         <span v-if="!providers.length" class="bad">No sign-in is set up: the admin sets GITHUB_CLIENT_ID or GITLAB_CLIENT_ID.</span>
       </div>
-      <p class="dim">The CLI: <span class="accent">bnb login {{ origin }}</span> then <span class="accent">bnb tui</span>.</p>
+      <p class="dim">The CLI: <span class="accent">mtr login {{ origin }}</span> then <span class="accent">mtr tui</span>.</p>
     </div>
   </div>
 </template>

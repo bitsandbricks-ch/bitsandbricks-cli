@@ -1,9 +1,9 @@
-"""Who is calling: a browser session (cookie) or an API key (Authorization: Bearer bnbo_...).
+"""Who is calling: a browser session (cookie) or an API key (Authorization: Bearer mtr_...).
 
 - Session: after an OAuth login at GitHub or GitLab. The cookie is HttpOnly, Secure (__Host-),
   SameSite=Lax and holds a random value; the database keeps only its SHA-256. Sessions end after
-  MORTAR_IDLE_HOURS without use and MORTAR_SESSION_DAYS at the latest.
-- API key: for the CLI and TUI (`bnb login`), read or write, optionally expiring, revocable.
+  MTR_IDLE_HOURS without use and MTR_SESSION_DAYS at the latest.
+- API key: for the CLI and TUI (`mtr login`), read or write, optionally expiring, revocable.
 
 State-changing requests with a cookie must carry X-CSRF-Token (the session's token, which only
 same-origin script can read from /api/v1/me) and, when the browser sends one, a same-origin Origin.
@@ -61,7 +61,7 @@ def client_ip() -> str:
 
 
 def cookie_name() -> str:
-    return "__Host-bnbo" if current_app.config["OP"].secure_cookies else "bnbo_session"
+    return "__Host-mtr" if current_app.config["OP"].secure_cookies else "mtr_session"
 
 
 def set_session_cookie(resp, value: str) -> None:

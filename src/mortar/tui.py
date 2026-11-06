@@ -1,6 +1,6 @@
-"""bnb tui: one full-screen view of your repos across orgs.
+"""mtr tui: one full-screen view of your repos across orgs.
 
-Start it with `bnb tui` (needs Textual: the [tui] extra or `pipx inject mortar-cli textual`).
+Start it with `mtr tui` (needs Textual: the [tui] extra or `pipx inject mortar-cli textual`).
 
   Repos          group, latest release, PRs, CI per repo
   Pull requests  every open PR; the right side shows the selected one in depth
@@ -81,12 +81,12 @@ SETTINGS = [("defaults", "Defaults repo"), ("orgs", "Orgs"), ("groups", "Groups"
 BRICK, SAND, SKY = "#e2674a", "#f2c46d", "#6cb6d9"
 SUCCESS, WARNING, DANGER = "#3fa76a", "#e0a43a", "#d9534f"
 THEMES = [
-    Theme(name="bnb", dark=True, primary=SKY, secondary=BRICK, accent=SAND,
+    Theme(name="mtr", dark=True, primary=SKY, secondary=BRICK, accent=SAND,
           foreground="#e9e7e4", background="#121314", surface="#1a1c1e", panel="#24272a",
           success=SUCCESS, warning=WARNING, error=DANGER,
           variables={"footer-key-foreground": SAND, "block-cursor-background": "#2f5d75",
                      "block-cursor-foreground": "#ffffff", "link-color": SKY, "border": "#2e3134"}),
-    Theme(name="bnb-light", dark=False, primary="#1f6f94", secondary=BRICK, accent="#b24a2f",
+    Theme(name="mtr-light", dark=False, primary="#1f6f94", secondary=BRICK, accent="#b24a2f",
           foreground="#1d1f21", background="#f7f6f3", surface="#ffffff", panel="#ece9e3",
           success="#2a7d4f", warning=WARNING, error=DANGER,
           variables={"footer-key-foreground": "#b24a2f", "block-cursor-background": "#1f6f94",
@@ -247,7 +247,7 @@ class RowPage(ModalScreen[None]):
     def on_mount(self) -> None:
         self.query_one("#page-log", RichLog).can_focus = False
         self.fill_items()
-        self.app.update_detail()  # shows itself here too (BnbTui.show)
+        self.app.update_detail()  # shows itself here too (MortarTui.show)
         self.query_one("#page-actions", OptionList).focus()
 
     def fill_items(self) -> None:
@@ -297,7 +297,7 @@ class RowPage(ModalScreen[None]):
 PR_FILTERS = [("all", "all open"), ("auto", "auto-merge"), ("merged", "recently merged"), ("drafts", "drafts")]
 
 
-class BnbTui(App):
+class MortarTui(App):
     TITLE = "mortar"
     CSS = """
     Screen { background: $background; }
@@ -439,7 +439,7 @@ class BnbTui(App):
                 table.add_row(label, key=key)
         for i, (key, description, *_) in enumerate(self.plugin_keys):
             if self.key_taken(key, self.key_tabs(i)):
-                self.log_line(f"plugin key {key} ({description}) left out: bnb uses {key} on those tabs")
+                self.log_line(f"plugin key {key} ({description}) left out: mtr uses {key} on those tabs")
                 continue
             self.bind(key, f"plugin_key({i})", description=description)
         for err in plugins.errors:
@@ -471,7 +471,7 @@ class BnbTui(App):
             self.action_tab(self.tabs[n - 1][0])
 
     def highlight(self) -> str:
-        return "#b24a2f" if self.theme == "bnb-light" else SAND
+        return "#b24a2f" if self.theme == "mtr-light" else SAND
 
     def action_next_tab(self, step: int) -> None:
         if not isinstance(self.screen, ModalScreen):
@@ -504,7 +504,7 @@ class BnbTui(App):
         return set(k[3]) if len(k) > 3 and k[3] else {"repos", "prs"}
 
     def key_taken(self, key: str, tabs: set[str]) -> bool:
-        """Whether a bnb key already works on one of these tabs (a key may serve bnb and a plugin on
+        """Whether a mtr key already works on one of these tabs (a key may serve mtr and a plugin on
         different tabs)."""
         for b in self.BINDINGS:
             if key in (k.strip() for k in b.key.split(",")):
@@ -1173,7 +1173,7 @@ class BnbTui(App):
             self.log_line("f fixes drift from the Checks tab › Defaults")
             return
         self.confirm_then("Apply the defaults' settings, security and rulesets (and each repo's own rulesets\n"
-                          "files) to every repo that drifted? (bnb doctor --fix)",
+                          "files) to every repo that drifted? (mtr doctor --fix)",
                           D.doctor_all, self.cfg, list(self.repos), True)
 
     def action_sync(self) -> None:
@@ -1183,7 +1183,7 @@ class BnbTui(App):
 
         def sync_all(repos) -> None:
             core.for_each(repos, D.sync, D.sync_ctx(self.cfg, repos))
-        self.confirm_then("Open a PR in each repo whose shared files differ from its group's? (bnb sync)",
+        self.confirm_then("Open a PR in each repo whose shared files differ from its group's? (mtr sync)",
                           sync_all, list(self.repos))
 
     def get_system_commands(self, screen):
@@ -1194,7 +1194,7 @@ class BnbTui(App):
             ("Approve waiting run", "a · an environment you review or an outside contributor's run",
              self.action_approve),
             ("Check defaults", "Checks › Defaults (doctor)", lambda: self.show_check("doctor")),
-            ("Fix drift", "f · bnb doctor --fix (Checks tab)", self.action_fix),
+            ("Fix drift", "f · mtr doctor --fix (Checks tab)", self.action_fix),
             ("Sync shared files", "s · PRs with each group's files", self.action_sync),
             ("Security alerts", "4 · Dependabot, secret and code scanning", lambda: self.action_tab("security")),
             ("Switch theme", "t", self.action_toggle_theme),
@@ -1493,12 +1493,12 @@ class BnbTui(App):
         if key == "plugins":
             out = [f"{p.name}: {getattr(p, 'description', '')}" for p in plugins.load()] or ["No plugins."]
             out += [f"broken: {e}" for e in plugins.errors]
-            out += ["", "Add one: pipx inject mortar-cli <package>", "Limit them: BNB_PLUGINS=a,b or none"]
+            out += ["", "Add one: pipx inject mortar-cli <package>", "Limit them: MTR_PLUGINS=a,b or none"]
             return "\n".join(out)
         if key == "theme":
             return f"Theme: {self.theme}\n\nEnter or t: next theme ({', '.join(t.name for t in self.themes)})"
         path = config.config_file()
-        text = path.read_text() if path.exists() else "(none yet: mortar init writes it)"
+        text = path.read_text() if path.exists() else "(none yet: mtr init writes it)"
         return f"{path}\n\n{text}"
 
     def setting(self, key: str) -> None:
@@ -1529,7 +1529,7 @@ class BnbTui(App):
         if value:
             source = config.Source(value)
             if config.read_defaults(source)[1] is None:
-                self.log_line(f"No {config.DEFAULTS_FILE} in {value} (mortar init {value} starts one)")
+                self.log_line(f"No {config.DEFAULTS_FILE} in {value} (mtr init {value} starts one)")
                 return
             self.save_config(defaults=value)
 
@@ -1642,7 +1642,7 @@ class BnbTui(App):
         def sync_all(repos) -> None:
             core.for_each(repos, D.sync, D.sync_ctx(self.cfg, repos))
         self.confirm_then(f"Open a PR in {', '.join(repos) if len(repos) < 4 else f'{len(repos)} repos'} where the "
-                          "shared files differ from the group's? (bnb sync)", sync_all, list(repos))
+                          "shared files differ from the group's? (mtr sync)", sync_all, list(repos))
 
     # ── new repo ──────────────────────────────────────────────────────────
 
@@ -1682,4 +1682,4 @@ def run(cfg: Config, dry_run: bool = False, group: str | None = None) -> None:
     core.set_dry_run(dry_run)
     core.CACHE = CACHE
     core.WORKERS = 4  # fewer calls at once: GitHub's secondary rate limit watches bursts
-    BnbTui(cfg, dry_run=dry_run, group=group).run()
+    MortarTui(cfg, dry_run=dry_run, group=group).run()

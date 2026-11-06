@@ -1,4 +1,4 @@
-"""Workflow hardening: `bnb workflows` (and doctor, for groups with `workflows = ...`).
+"""Workflow hardening: `mtr workflows` (and doctor, for groups with `workflows = ...`).
 
 Reads each repo's .github/workflows/*.yml and flags what lets an attacker in:
 
@@ -7,7 +7,7 @@ Reads each repo's .github/workflows/*.yml and flags what lets an attacker in:
 * `pull_request_target` workflows that check out the PR's code (it runs with secrets),
 * `${{ github.event... }}` text from issues, PRs and commits straight in a `run:` script (script injection).
 
-`bnb workflows --fix` opens a PR per repo that pins every action to the commit its tag points at now,
+`mtr workflows --fix` opens a PR per repo that pins every action to the commit its tag points at now,
 keeping the tag as a comment (`uses: actions/checkout@<sha> # v4`). The rest needs a person.
 
 The workflows are read line by line, not as YAML: no dependency, and line numbers stay exact.
@@ -210,7 +210,7 @@ def report(repo: str, ctx: dict) -> None:
     for f in found:
         say(f"   - {f['path'].rsplit('/', 1)[-1]}:{f['line']} {f['text']}")
     if any(f["kind"] == "pinned" for f in found):
-        say(f"   fix: bnb workflows --fix {repo}  (PR that pins the actions)")
+        say(f"   fix: mtr workflows --fix {repo}  (PR that pins the actions)")
 
 
 def fix_repo(repo: str, want: dict, files: dict) -> tuple[str | None, set[str]]:
@@ -232,7 +232,7 @@ def fix_repo(repo: str, want: dict, files: dict) -> tuple[str | None, set[str]]:
     names = sorted(set(all_changed))
     body = ("Pins every action to the commit its tag points at today, and keeps the tag as a comment so "
             "Dependabot or Renovate can keep updating it.\n\n" + "\n".join(f"- `{n}`" for n in names) +
-            "\n\nOpened by Mortar (`bnb workflows --fix`).")
+            "\n\nOpened by Mortar (`mtr workflows --fix`).")
     url = core.open_pr(repo, base, f"mortar/pin-actions-{secrets.token_hex(3)}", changes,
                        "Pin actions to commit SHAs", "Pin GitHub Actions to commit SHAs", body)
     say(f"   PR: {url}  (pins {len(names)} {'action' if len(names) == 1 else 'actions'} "

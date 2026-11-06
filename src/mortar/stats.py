@@ -1,4 +1,4 @@
-"""`bnb stats`: how the repos are doing over the last N days.
+"""`mtr stats`: how the repos are doing over the last N days.
 
 Per repo: pull requests merged and opened, the median time to merge, open and stale PRs, workflow
 runs with their success rate and median duration, and releases. Totals add a week-by-week series.

@@ -12,9 +12,7 @@ GITLAB_SCOPES = "api"
 
 
 def _env(name: str, default: str = "") -> str:
-    """MORTAR_X, or BNB_OPERATOR_X: the name before the rename."""
-    old = "BNB_OPERATOR_" + name[len("MORTAR_"):] if name.startswith("MORTAR_") else ""
-    return os.environ.get(name, os.environ.get(old, default) if old else default).strip()
+    return os.environ.get(name, default).strip()
 
 
 def _list(name: str) -> list[str]:
@@ -80,16 +78,16 @@ class Settings:
             out.append("no login: set GITHUB_CLIENT_ID/GITHUB_CLIENT_SECRET and/or "
                        "GITLAB_CLIENT_ID/GITLAB_CLIENT_SECRET")
         if not (self.allow_users or self.allow_orgs or self.allow_anyone or self.admins):
-            out.append("nobody may sign in: set MORTAR_ALLOW_USERS, MORTAR_ALLOW_ORGS or "
-                       "MORTAR_ADMINS (or MORTAR_ALLOW_ANYONE=1 on purpose)")
+            out.append("nobody may sign in: set MTR_ALLOW_USERS, MTR_ALLOW_ORGS or "
+                       "MTR_ADMINS (or MTR_ALLOW_ANYONE=1 on purpose)")
         if not self.dev and not self.secure_cookies:
-            out.append("MORTAR_URL must be https:// (MORTAR_DEV=1 allows http for local development)")
+            out.append("MTR_URL must be https:// (MTR_DEV=1 allows http for local development)")
         return out
 
 
 def secret_key(data: Path) -> str:
-    """MORTAR_SECRET_KEY, or a random key created once in the data folder (0600)."""
-    env = _env("MORTAR_SECRET_KEY")
+    """MTR_SECRET_KEY, or a random key created once in the data folder (0600)."""
+    env = _env("MTR_SECRET_KEY")
     if env:
         return env
     path = data / "secret.key"
@@ -104,14 +102,14 @@ def secret_key(data: Path) -> str:
 
 
 def load() -> Settings:
-    data = Path(_env("MORTAR_DATA", "data")).resolve()
+    data = Path(_env("MTR_DATA", "data")).resolve()
     gl_web = _env("GITLAB_URL", "https://gitlab.com").rstrip("/")
     gh_web = _env("GITHUB_URL", "https://github.com").rstrip("/")
     public = gh_web == "https://github.com"
     gh_api = _env("GITHUB_API_URL") or ("https://api.github.com" if public else f"{gh_web}/api/v3")
-    dev = _env("MORTAR_DEV") == "1"
+    dev = _env("MTR_DEV") == "1"
     return Settings(
-        url=_env("MORTAR_URL", "http://localhost:8080" if dev else "").rstrip("/"),
+        url=_env("MTR_URL", "http://localhost:8080" if dev else "").rstrip("/"),
         data=data,
         database=_env("DATABASE_URL") or f"sqlite:///{data / 'operator.db'}",
         secret_key=secret_key(data),
@@ -120,16 +118,16 @@ def load() -> Settings:
                         _env("GITHUB_SCOPES", GITHUB_SCOPES)),
         gitlab=Provider("gitlab", _env("GITLAB_CLIENT_ID"), _env("GITLAB_CLIENT_SECRET"), gl_web,
                         f"{gl_web}/api/v4", _env("GITLAB_SCOPES", GITLAB_SCOPES)),
-        allow_users=_who(_list("MORTAR_ALLOW_USERS")),
-        allow_orgs=_who(_list("MORTAR_ALLOW_ORGS")),
-        allow_anyone=_env("MORTAR_ALLOW_ANYONE") == "1",
-        admins=_who(_list("MORTAR_ADMINS")),
-        idle_hours=int(_env("MORTAR_IDLE_HOURS", "12")),
-        session_days=int(_env("MORTAR_SESSION_DAYS", "7")),
-        cache=_env("MORTAR_CACHE", "60s"),
-        plugin_index=_env("BNB_PLUGIN_INDEX",
+        allow_users=_who(_list("MTR_ALLOW_USERS")),
+        allow_orgs=_who(_list("MTR_ALLOW_ORGS")),
+        allow_anyone=_env("MTR_ALLOW_ANYONE") == "1",
+        admins=_who(_list("MTR_ADMINS")),
+        idle_hours=int(_env("MTR_IDLE_HOURS", "12")),
+        session_days=int(_env("MTR_SESSION_DAYS", "7")),
+        cache=_env("MTR_CACHE", "60s"),
+        plugin_index=_env("MTR_PLUGIN_INDEX",
                           "https://raw.githubusercontent.com/bitsandbricks-ch/bitsandbricks-cli/main/plugins/index.json"),
-        plugin_index_keys=_list("BNB_PLUGIN_INDEX_KEYS"),
-        plugin_install=_env("MORTAR_PLUGIN_INSTALL") == "1",
-        trusted_proxies=int(_env("MORTAR_TRUSTED_PROXIES", "0")),
+        plugin_index_keys=_list("MTR_PLUGIN_INDEX_KEYS"),
+        plugin_install=_env("MTR_PLUGIN_INSTALL") == "1",
+        trusted_proxies=int(_env("MTR_TRUSTED_PROXIES", "0")),
     )

@@ -1,17 +1,15 @@
 # Mortar
 
-Mortar (`mortar`, short: `bnb`) is a terminal tool, TUI and web app for looking after many GitHub (and, in the web app, GitLab) repositories at once, across orgs and user accounts: status, pull requests, merges, workflow runs and approvals, security alerts, stats, and drift checks against shared defaults. It holds your bricks together.
+Mortar (the `mtr` command) is a terminal tool, TUI and web app for looking after many GitHub (and, in the web app, GitLab) repositories at once, across orgs and user accounts: status, pull requests, merges, workflow runs and approvals, security alerts, stats, and drift checks against shared defaults. It holds your bricks together.
 
-Formerly bitsandbricks: the `bnb` and `bitsandbricks` commands, `import bitsandbricks`, plugins registered under `bitsandbricks.plugins`, `~/.config/bitsandbricks` and the `BNB_OPERATOR_*` settings all keep working.
-
-The defaults live in a repository you choose. Point `bnb` at any repo (or local folder) that holds a `mortar.toml`, and it checks your repos against it. Nothing is tied to one org: every user can keep their own defaults repo.
+The defaults live in a repository you choose. Point `mtr` at any repo (or local folder) that holds a `mortar.toml`, and it checks your repos against it. Nothing is tied to one org: every user can keep their own defaults repo.
 
 ## Install
 
 ```sh
 pipx install "mortar-cli[tui] @ git+https://github.com/bitsandbricks-ch/bitsandbricks-cli"
-gh auth login          # bnb talks to GitHub through the gh CLI and never sees a token
-bnb init your-org/your-defaults
+gh auth login          # mtr talks to GitHub through the gh CLI and never sees a token
+mtr init your-org/your-defaults
 ```
 
 To update a git install to a new version: `pipx install --force "git+https://..."`.
@@ -22,38 +20,40 @@ Repos are named as `owner/name`, as a bare `name` when only one repo has it, or 
 
 | Command | What it does |
 |---|---|
-| `bnb init <owner/repo or folder>` | Use this defaults repo. A local folder without `mortar.toml` gets a starter file. |
-| `bnb config` | Where bnb looks: config file, defaults, orgs, groups, plugins. |
-| `bnb repos` | The repos bnb sees, with their group. |
-| `bnb status` | One line per repo: group, latest release, PRs ready/draft, CI. One GraphQL query per 20 repos. |
-| `bnb prs` | Open PRs with checks, reviews, conflicts and auto-merge. |
-| `bnb pr web#12 [--diff]` | One PR in detail: merge state, failing checks with links, files, description. |
-| `bnb merge [names] [--now] [--ready]` | Auto-merge open PRs (or merge now). Drafts and conflicts stay open. |
-| `bnb runs [--failed]` | Latest workflow runs. |
-| `bnb rerun name [--run ID] [--yes]` | Re-runs the failed jobs of the repo's newest failed run (or of run ID), after listing its jobs and the step that failed. Jobs that passed and approvals already given stay. |
-| `bnb releases [--problems]` | Each repo's latest release, its assets, and its release runs. Flags assets the group's `release_assets` wants but the release lacks, and a failed last release run with the job and step that failed. |
-| `bnb packages [--problems]` | Container images on GHCR of your orgs: newest tags, whether the repo's latest release has an image with its tag, and a failed last image build (a run named or filed like image, docker or container) with the job and step that failed. |
-| `bnb bump name [patch\|minor\|major\|1.4.0] [--auto-merge]` | Opens a PR on `bump/v<new>` that sets the version in the group's `version` file (plugin.yaml, pyproject.toml, package.json, VERSION, ...) and adds the section to each `changelog`: Keep a Changelog `[Unreleased]` entries become `## [1.4.0] - date`, otherwise a `## 1.4.0` section lists the PRs merged since the last release. Default: patch. |
-| `bnb release [names] [--yes]` | Pushes the tag `v<version>` on the default branch of each named repo whose version is newer than its latest release (and whose first changelog has the section), after asking. The repo's own workflow builds and publishes. When the tag is there already it shows its release run. No names: a table of version against latest release. |
-| `bnb approve [--yes]` | Runs waiting for you: environments you review, and outside contributors' runs. A run that waits for someone else says why you can't approve it, for example "Prevent self-review" when you started it and are its only reviewer. |
-| `bnb security` | Open Dependabot, secret scanning and code scanning alerts. |
-| `bnb doctor [names] [--fix]` | Settings, security, release immutability, rulesets and files against the defaults. `--fix` applies them. |
-| `bnb sync [names] [--only PATH]` | Opens a PR per repo whose shared files differ. |
-| `bnb workflows [names] [--fix]` | Risky GitHub Actions workflows: actions not pinned to a commit, `write-all` or missing `permissions`, `pull_request_target` that checks out the PR, script injection from `${{ github.event... }}`. `--fix` opens a PR per repo that pins the actions to commit SHAs. |
-| `bnb new owner/name [--group G] [--public]` | Creates a repo the way its group wants it: from the reference repo when that is a GitHub template, the group's files committed, then its settings, security and rulesets applied. Private unless `--public`. |
-| `bnb open web#12` | Prints the link, and opens it (or copies it over SSH; `BNB_OPEN=browser\|copy\|print`). |
-| `bnb stats [--days 30]` | Pull requests merged and opened, median time to merge, open and stale PRs, workflow runs with success rate and duration, releases. |
-| `bnb plugins` | Installed plugins. |
-| `bnb market [install NAME]` | Plugins in the signed plugin index; `install` adds one (only from a verified index). `keygen`, `sign` and `verify` are for whoever publishes an index. |
-| `mortar serve [--check]` | Run Mortar, the web app (`pipx inject mortar-cli 'mortar-cli[server]'`); `--check` shows what its settings allow. See [docs/mortar.md](docs/mortar.md). |
-| `bnb login https://mortar` | Go through [Mortar](docs/mortar.md), the web app, with an API key: approve a code in the browser, and every command and the TUI then work without gh or a GitHub token here. `bnb logout` forgets the key, `bnb whoami` says how bnb reaches GitHub. |
-| `bnb tui` | Everything above, full screen. |
+| `mtr init <owner/repo or folder>` | Use this defaults repo. A local folder without `mortar.toml` gets a starter file. |
+| `mtr config` | Where mtr looks: config file, defaults, orgs, groups, plugins. |
+| `mtr repos` | The repos mtr sees, with their group. |
+| `mtr status` | One line per repo: group, latest release, PRs ready/draft, CI. One GraphQL query per 20 repos. |
+| `mtr prs` | Open PRs with checks, reviews, conflicts and auto-merge. |
+| `mtr pr web#12 [--diff]` | One PR in detail: merge state, failing checks with links, files, description. |
+| `mtr merge [names] [--now] [--ready]` | Auto-merge open PRs (or merge now). Drafts and conflicts stay open. |
+| `mtr runs [--failed]` | Latest workflow runs. |
+| `mtr rerun name [--run ID] [--yes]` | Re-runs the failed jobs of the repo's newest failed run (or of run ID), after listing its jobs and the step that failed. Jobs that passed and approvals already given stay. |
+| `mtr releases [--problems]` | Each repo's latest release, its assets, and its release runs. Flags assets the group's `release_assets` wants but the release lacks, and a failed last release run with the job and step that failed. |
+| `mtr packages [--problems]` | Container images on GHCR of your orgs: newest tags, whether the repo's latest release has an image with its tag, and a failed last image build (a run named or filed like image, docker or container) with the job and step that failed. |
+| `mtr bump name [patch\|minor\|major\|1.4.0] [--auto-merge]` | Opens a PR on `bump/v<new>` that sets the version in the group's `version` file (plugin.yaml, pyproject.toml, package.json, VERSION, ...) and adds the section to each `changelog`: Keep a Changelog `[Unreleased]` entries become `## [1.4.0] - date`, otherwise a `## 1.4.0` section lists the PRs merged since the last release. Default: patch. |
+| `mtr release [names] [--yes]` | Pushes the tag `v<version>` on the default branch of each named repo whose version is newer than its latest release (and whose first changelog has the section), after asking. The repo's own workflow builds and publishes. When the tag is there already it shows its release run. No names: a table of version against latest release. |
+| `mtr approve [--yes]` | Runs waiting for you: environments you review, and outside contributors' runs. A run that waits for someone else says why you can't approve it, for example "Prevent self-review" when you started it and are its only reviewer. |
+| `mtr security` | Open Dependabot, secret scanning and code scanning alerts. |
+| `mtr doctor [names] [--fix]` | Settings, security, release immutability, rulesets and files against the defaults. `--fix` applies them. |
+| `mtr sync [names] [--only PATH]` | Opens a PR per repo whose shared files differ. |
+| `mtr issues [names] [--mine] [--label L] [--assignee X] [--stale DAYS] [--state closed\|all]` | Issues across repos, newest activity first; PRs are left out. |
+| `mtr issue new name "title" [--body TEXT] [--label L] [--assignee X]` | Opens an issue. `mtr issue view\|close\|reopen\|comment name#12` shows, closes (`--not-planned`), reopens or comments on one. |
+| `mtr workflows [names] [--fix]` | Risky GitHub Actions workflows: actions not pinned to a commit, `write-all` or missing `permissions`, `pull_request_target` that checks out the PR, script injection from `${{ github.event... }}`. `--fix` opens a PR per repo that pins the actions to commit SHAs. |
+| `mtr new owner/name [--group G] [--public]` | Creates a repo the way its group wants it: from the reference repo when that is a GitHub template, the group's files committed, then its settings, security and rulesets applied. Private unless `--public`. |
+| `mtr open web#12` | Prints the link, and opens it (or copies it over SSH; `MTR_OPEN=browser\|copy\|print`). |
+| `mtr stats [--days 30]` | Pull requests merged and opened, median time to merge, open and stale PRs, workflow runs with success rate and duration, releases. |
+| `mtr plugins` | Installed plugins. |
+| `mtr market [install NAME]` | Plugins in the signed plugin index; `install` adds one (only from a verified index). `keygen`, `sign` and `verify` are for whoever publishes an index. |
+| `mtr serve [--check]` | Run Mortar, the web app (`pipx inject mortar-cli 'mortar-cli[server]'`); `--check` shows what its settings allow. See [docs/mortar.md](docs/mortar.md). |
+| `mtr login https://mortar` | Go through [Mortar](docs/mortar.md), the web app, with an API key: approve a code in the browser, and every command and the TUI then work without gh or a GitHub token here. `mtr logout` forgets the key, `mtr whoami` says how mtr reaches GitHub. |
+| `mtr tui` | Everything above, full screen. |
 
 Security alerts need the `security_events` scope and packages the `read:packages` scope: `gh auth refresh -s security_events,read:packages`.
 
 ## TUI
 
-`bnb tui` has tabs for Repos, Pull requests, Runs, Releases, Packages, Security, Checks (doctor plus plugin checks) and Settings (defaults repo, orgs, groups, plugins, theme, config file), plus any tabs that plugins add.
+`mtr tui` has tabs for Repos, Pull requests, Runs, Releases, Packages, Security, Checks (doctor plus plugin checks) and Settings (defaults repo, orgs, groups, plugins, theme, config file), plus any tabs that plugins add.
 
 - **Keys per row:** the footer and the top of the right side list only the keys that do something for the selected row (approve only on a run that waits, re-run only on a failed one, ready only on a draft).
 - **Pull requests:** **u** updates the branch from its base, **c** comments, **C** closes without merging, besides merge, ready and diff.
@@ -69,7 +69,7 @@ Security alerts need the `security_events` scope and packages the `read:packages
 
 ## Configuration
 
-Your own config is `~/.config/mortar/config.toml` (or `~/.config/bitsandbricks/` from before the rename) (`bnb init` writes it):
+Your own config is `~/.config/mortar/config.toml` (`mtr init` writes it):
 
 ```toml
 defaults = "your-org/your-defaults"   # a GitHub repo, or a local folder
@@ -77,9 +77,9 @@ ref = "main"                          # optional branch or tag
 orgs = ["another-org"]                # added to the orgs the defaults name
 ```
 
-`BNB_DEFAULTS`, `BNB_DEFAULTS_REF` and `BNB_ORGS` (comma separated) override it for one run.
+`MTR_DEFAULTS`, `MTR_DEFAULTS_REF` and `MTR_ORGS` (comma separated) override it for one run.
 
-`mortar.toml` in the defaults repo is shared by everyone who points bnb at it (a defaults repo that still has the older `bitsandbricks.toml` keeps working):
+`mortar.toml` in the defaults repo is shared by everyone who points mtr at it:
 
 ```toml
 orgs = ["your-org", "your-user"]
@@ -110,9 +110,9 @@ visibility = "private"                             # public, private or internal
 description = true                                 # every repo has a description
 workflows = { allow_unpinned = ["actions/*"] }     # doctor checks the workflows too (or: workflows = true)
 skip = ["labels"]                                  # checks this group leaves out
-release_assets = ["*.zip"]                         # files every release must attach (bnb releases)
-version = "pyproject.toml"                         # the file with the version (bnb bump, bnb release)
-changelog = ["CHANGELOG.md"]                       # changelogs bnb bump adds the section to
+release_assets = ["*.zip"]                         # files every release must attach (mtr releases)
+version = "pyproject.toml"                         # the file with the version (mtr bump, mtr release)
+changelog = ["CHANGELOG.md"]                       # changelogs mtr bump adds the section to
 rulesets = "rulesets/default"                      # ruleset JSON files (export them from GitHub)
 files = "files/default"                            # copied into each repo, path for path
 ```
@@ -121,32 +121,32 @@ The first group that matches a repo is its group. With `from`, the group takes e
 
 A ruleset from the defaults folder only has to be covered: a repo may set more than the file says (GitHub fills in its own defaults). A reference repo's rulesets must match exactly. Each repo's own `.github/rulesets/*.json` must also match what's live, and `doctor --fix` imports them.
 
-`doctor --fix` sets settings, security (Dependabot alerts and security updates too), topics (it adds the missing ones and keeps the rest), labels (it creates missing ones and fixes colors, and leaves other labels alone) and the Actions permissions. `branch`, `visibility`, `description` and `required_files` are only checked, because changing them can break things: a missing required file is a job for `bnb sync` or a PR.
+`doctor --fix` sets settings, security (Dependabot alerts and security updates too), topics (it adds the missing ones and keeps the rest), labels (it creates missing ones and fixes colors, and leaves other labels alone) and the Actions permissions. `branch`, `visibility`, `description` and `required_files` are only checked, because changing them can break things: a missing required file is a job for `mtr sync` or a PR.
 
 `skip` turns checks off for a group: `settings`, `security`, `vulnerability_reporting`, `immutable_releases`, `rulesets`, `own_rulesets` (the repo's `.github/rulesets`), `files`, `required_files`, `topics`, `labels`, `actions`, `branch`, `visibility`, `description`, `workflows` and `plugins` (the plugins' doctor checks).
 
-`workflows` makes doctor check the group's workflow files like `bnb workflows` does. It takes `true` or a table: `pinned`, `permissions`, `pull_request_target` and `injection` turn single checks off with `false`, and `allow_unpinned = ["actions/*", "your-org/*"]` lets actions of owners you trust stay on a tag. `bnb workflows --fix` keeps the tag as a comment (`uses: actions/checkout@<sha> # v4`), so Dependabot and Renovate keep updating the pins.
+`workflows` makes doctor check the group's workflow files like `mtr workflows` does. It takes `true` or a table: `pinned`, `permissions`, `pull_request_target` and `injection` turn single checks off with `false`, and `allow_unpinned = ["actions/*", "your-org/*"]` lets actions of owners you trust stay on a tag. `mtr workflows --fix` keeps the tag as a comment (`uses: actions/checkout@<sha> # v4`), so Dependabot and Renovate keep updating the pins.
 
 Unknown keys on a group stay there for plugins (`group.extra`).
 
 ## Plugins
 
-A plugin is a Python package with an entry point in the `mortar.plugins` group (`bitsandbricks.plugins` still works). It can add commands, `status` columns (with extra GraphQL fields), doctor checks and hints, TUI tabs and palette commands. See `src/mortar/plugins.py`.
+A plugin is a Python package with an entry point in the `mortar.plugins` group. It can add commands, `status` columns (with extra GraphQL fields), doctor checks and hints, TUI tabs and palette commands. See `src/mortar/plugins.py`.
 
 ```toml
 [project.entry-points."mortar.plugins"]
 hubra = "hubra_cli.bnb:HubraPlugin"
 ```
 
-Install one next to bnb with `pipx inject mortar-cli <package>`. `BNB_PLUGINS=none` (or a comma separated list of names) limits which plugins load.
+Install one next to mtr with `pipx inject mortar-cli <package>`. `MTR_PLUGINS=none` (or a comma separated list of names) limits which plugins load.
 
 hubra-cli is one: it adds Hubra plugin releases, signing checks and a Hubra tab.
 
 ## Mortar (web app)
 
-`mortar serve` runs bnb as a web app: people sign in with GitHub and GitLab (OAuth, their own tokens), and
+`mtr serve` runs mtr as a web app: people sign in with GitHub and GitLab (OAuth, their own tokens), and
 get every command and TUI view in a terminal-style browser UI, plus a defaults editor with templates,
-stats, a console, plugins and a signed plugin marketplace. `bnb login https://your-mortar` points the CLI
+stats, a console, plugins and a signed plugin marketplace. `mtr login https://your-mortar` points the CLI
 and TUI at it with an API key, so a laptop needs neither gh nor a token.
 
 ```sh

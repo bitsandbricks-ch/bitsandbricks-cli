@@ -1,8 +1,8 @@
-"""The plugin marketplace: a signed index of bnb plugins, for `bnb market` and the operator.
+"""The plugin marketplace: a signed index of mtr plugins, for `mtr market` and the operator.
 
 An index is JSON:
 
-    {"name": "mortar plugins", "description": "...", "generated": "2026-11-05",
+    {"name": "mtr plugins", "description": "...", "generated": "2026-11-05",
      "plugins": [{"name": "hubra", "package": "hubra-cli", "version": "0.12.0",
                   "source": "git+https://github.com/hubra-app/hubra-cli@v0.12.0",
                   "description": "...", "homepage": "https://github.com/hubra-app/hubra-cli",
@@ -11,14 +11,14 @@ An index is JSON:
 
 The signature covers name, description, generated, plugins, key_id and public_key (canonical
 JSON). An index counts as verified only when it is signed by a key you trust: the keys in
-mortar/keys/*.pub, BNB_PLUGIN_INDEX_KEYS (base64, comma separated) or --key. Nothing from an
+mortar/keys/*.pub, MTR_PLUGIN_INDEX_KEYS (base64, comma separated) or --key. Nothing from an
 unverified index is installed.
 
-    bnb market                       list the plugins (and which are installed)
-    bnb market install hubra         install one (pipx inject when bnb runs from pipx)
-    bnb market keygen                a new signing key pair
-    bnb market sign index.json --key private.pem
-    bnb market verify index.json --key <public key>
+    mtr market                       list the plugins (and which are installed)
+    mtr market install hubra         install one (pipx inject when mtr runs from pipx)
+    mtr market keygen                a new signing key pair
+    mtr market sign index.json --key private.pem
+    mtr market verify index.json --key <public key>
 
 Signing adapted from labdex (labdex/plugins/trust.py), relicensed into mortar (formerly bitsandbricks)
 under MIT by its author.
@@ -78,11 +78,11 @@ def public_b64(pub) -> str:
 
 
 def trusted_keys(extra: list[str] | None = None) -> dict:
-    """{key_id: public key} of the bundled keys, BNB_PLUGIN_INDEX_KEYS and `extra`."""
+    """{key_id: public key} of the bundled keys, MTR_PLUGIN_INDEX_KEYS and `extra`."""
     texts = []
     if KEYS_DIR.is_dir():
         texts += [f.read_text() for f in sorted(KEYS_DIR.glob("*.pub"))]
-    texts += [k for k in (os.environ.get("BNB_PLUGIN_INDEX_KEYS") or "").split(",") if k.strip()]
+    texts += [k for k in (os.environ.get("MTR_PLUGIN_INDEX_KEYS") or "").split(",") if k.strip()]
     texts += [k for k in extra or [] if k.strip()]
     out = {}
     for t in texts:
@@ -124,7 +124,7 @@ def verify(doc: dict, keys: dict) -> tuple[str, str]:
         return "unverified", "the index isn't signed"
     kid = str(doc.get("key_id") or "")
     if kid not in keys:
-        return "unverified", f"signed with key {kid or '?'}, which you don't trust (BNB_PLUGIN_INDEX_KEYS)"
+        return "unverified", f"signed with key {kid or '?'}, which you don't trust (MTR_PLUGIN_INDEX_KEYS)"
     try:
         keys[kid].verify(base64.b64decode(doc["signature"]), _payload(doc))
     except (InvalidSignature, ValueError, TypeError):
@@ -133,7 +133,7 @@ def verify(doc: dict, keys: dict) -> tuple[str, str]:
 
 
 def fetch(where: str | None = None, timeout: int = 15) -> dict:
-    where = where or os.environ.get("BNB_PLUGIN_INDEX") or DEFAULT_INDEX
+    where = where or os.environ.get("MTR_PLUGIN_INDEX") or DEFAULT_INDEX
     if where.startswith("https://"):
         req = urllib.request.Request(where, headers={"User-Agent": "mortar", "Accept": "application/json"})
         with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - https only
@@ -197,27 +197,27 @@ def install(name: str, where: str | None = None, keys: list[str] | None = None) 
     if entry is None:
         raise RuntimeError(f"no plugin {name} in the index")
     if not entry["source"]:
-        raise RuntimeError(f"{name} has no source bnb would install from")
+        raise RuntimeError(f"{name} has no source mtr would install from")
     proc = subprocess.run(install_command(entry["source"]), capture_output=True, text=True, check=False, timeout=600)
     if proc.returncode != 0:
         raise RuntimeError(f"installing {name} failed:\n{(proc.stderr or proc.stdout)[-1500:]}")
-    return (proc.stdout or "")[-1500:] + f"\ninstalled {name} {entry['version']}; restart bnb (or the operator)"
+    return (proc.stdout or "")[-1500:] + f"\ninstalled {name} {entry['version']}; restart mtr (or the operator)"
 
 
 def command(action: str, name: str | None, where: str | None, key: str | None) -> None:
     keys = [k for k in (key or "").split(",") if k.strip()]
     if action == "keygen":
         pem, pub = keygen()
-        path = Path("bnb-index.key")
+        path = Path("mtr-index.key")
         fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "wb") as f:
             f.write(pem)
         print(f"private key: {path} (keep it secret)\npublic key:  {pub}\n"
-              "Trust it with BNB_PLUGIN_INDEX_KEYS, or commit it as src/mortar/keys/<name>.pub")
+              "Trust it with MTR_PLUGIN_INDEX_KEYS, or commit it as src/mortar/keys/<name>.pub")
         return
     if action == "sign":
         if not name or not key:
-            raise RuntimeError("bnb market sign index.json --key private.pem")
+            raise RuntimeError("mtr market sign index.json --key private.pem")
         doc = json.loads(Path(name).read_text())
         doc.pop("signature", None)
         signed = sign(doc, Path(key).read_bytes())
@@ -230,7 +230,7 @@ def command(action: str, name: str | None, where: str | None, key: str | None) -
         return
     if action == "install":
         if not name:
-            raise RuntimeError("bnb market install <name>")
+            raise RuntimeError("mtr market install <name>")
         print(install(name, where, keys))
         return
     got = listing(where, keys)
@@ -239,4 +239,4 @@ def command(action: str, name: str | None, where: str | None, key: str | None) -
         mark = f"installed {p['installed']}" if p["installed"] else "-"
         print(f"{p['name']:<16} {p['version']:<10} {mark:<20} {p['description'][:70]}")
     if got["status"] != "verified":
-        print("\nbnb only installs from a verified index.")
+        print("\nmtr only installs from a verified index.")

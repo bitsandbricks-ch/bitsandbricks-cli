@@ -61,7 +61,7 @@ def released(node: dict) -> str | None:
 
 
 def package_infos(cfg: Config, repos: list[str], nodes: dict[str, dict] | None = None) -> tuple[list[dict], str]:
-    """Every container image of the orgs whose repo bnb looks after (or that has no repo), with its newest
+    """Every container image of the orgs whose repo mtr looks after (or that has no repo), with its newest
     versions, the repo's newest release, and the repo's recent image build runs. Returns (infos, error).
     One call per org, one per image, one per repo with images."""
     wanted = set(repos)

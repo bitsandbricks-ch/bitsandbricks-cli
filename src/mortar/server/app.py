@@ -1,7 +1,7 @@
-"""Mortar's server: bnb as a web app for many users, each signed in with GitHub and/or GitLab.
+"""Mortar's server: mtr as a web app for many users, each signed in with GitHub and/or GitLab.
 
-    mortar serve                  run it (gunicorn in production: see the Dockerfile)
-    mortar serve --check          show what the settings allow and what is missing
+    mtr serve                  run it (gunicorn in production: see the Dockerfile)
+    mtr serve --check          show what the settings allow and what is missing
 
 Every setting comes from the environment (docs/mortar.md). The web UI is a single page app in
 static/ (built from web/ with Vite); /api/v1 is the JSON API the UI, the CLI and the TUI share.
@@ -115,7 +115,7 @@ def main(argv: list[str] | None = None) -> None:
     args = p.parse_args(argv)
     op = S.load()
     if args.cmd == "check":
-        print(f"url          {op.url or '(MORTAR_URL is not set)'}")
+        print(f"url          {op.url or '(MTR_URL is not set)'}")
         print(f"data         {op.data}")
         print(f"database     {op.database.split('@')[-1]}")
         print(f"github       {'on' if op.github.enabled else 'off'} ({op.github.web})")

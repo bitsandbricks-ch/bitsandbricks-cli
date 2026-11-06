@@ -1,30 +1,30 @@
-"""mortar (bnb): your GitHub repos, across orgs, from one terminal.
+"""mortar (mtr): your GitHub repos, across orgs, from one terminal.
 
 Repos are named as owner/name, as a bare name when only one repo has it, or by
 their group alias (the group's prefix dropped). name#12 is a PR. No names: every
 repo of your orgs. --org and --group narrow that down.
 
-  bnb init your-org/your-defaults   point bnb at a defaults repo (or a local folder)
-  bnb status | prs | runs           what's going on
-  bnb stats [--days 30]             PRs merged, time to merge, CI success, releases
-  bnb rerun name [--run ID]         re-run the failed jobs of a run
-  bnb releases [--problems]         latest releases, missing assets, failed release runs
-  bnb packages [--problems]         container images: newest tags, release images, image builds
-  bnb bump name [patch|minor|1.4.0] a PR with the next version and its changelog section
-  bnb release [names] [--yes]       tag v<version> where it is newer than the latest release
-  bnb pr web#12 [--diff]            one PR in detail
-  bnb merge [names] [--now]         auto-merge open PRs (drafts and conflicts stay)
-  bnb approve                       runs waiting for you (environments, outside contributors)
-  bnb security                      Dependabot, secret and code scanning alerts
-  bnb doctor [names] [--fix]        settings, security, rulesets and files against the defaults
-  bnb issues [names] [--mine]       open issues; bnb issue new|view|close|comment name[#12] ...
-  bnb workflows [names] [--fix]     unpinned actions, write-all tokens, script injection; --fix: PRs that pin
-  bnb sync [names]                  PRs that bring shared files in line
-  bnb new owner/name [--group G]    a new repo, set up the way its group wants
-  bnb tui                           all of it, full screen
-  bnb login https://mortar          go through Mortar (the web app) with an API key: no gh needed
-  bnb market [install NAME]         plugins from the signed plugin index
-  mortar serve [--check]            run Mortar, the web app (the [server] extra)
+  mtr init your-org/your-defaults   point mtr at a defaults repo (or a local folder)
+  mtr status | prs | runs           what's going on
+  mtr stats [--days 30]             PRs merged, time to merge, CI success, releases
+  mtr rerun name [--run ID]         re-run the failed jobs of a run
+  mtr releases [--problems]         latest releases, missing assets, failed release runs
+  mtr packages [--problems]         container images: newest tags, release images, image builds
+  mtr bump name [patch|minor|1.4.0] a PR with the next version and its changelog section
+  mtr release [names] [--yes]       tag v<version> where it is newer than the latest release
+  mtr pr web#12 [--diff]            one PR in detail
+  mtr merge [names] [--now]         auto-merge open PRs (drafts and conflicts stay)
+  mtr approve                       runs waiting for you (environments, outside contributors)
+  mtr security                      Dependabot, secret and code scanning alerts
+  mtr doctor [names] [--fix]        settings, security, rulesets and files against the defaults
+  mtr issues [names] [--mine]       open issues; mtr issue new|view|close|comment name[#12] ...
+  mtr workflows [names] [--fix]     unpinned actions, write-all tokens, script injection; --fix: PRs that pin
+  mtr sync [names]                  PRs that bring shared files in line
+  mtr new owner/name [--group G]    a new repo, set up the way its group wants
+  mtr tui                           all of it, full screen
+  mtr login https://mortar          go through Mortar (the web app) with an API key: no gh needed
+  mtr market [install NAME]         plugins from the signed plugin index
+  mtr serve [--check]            run Mortar, the web app (the [server] extra)
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ def common_parser() -> argparse.ArgumentParser:
 
 
 def build_parser() -> tuple[argparse.ArgumentParser, dict]:
-    p = argparse.ArgumentParser(prog="bnb", description=__doc__.split("\n\n", 1)[0],
+    p = argparse.ArgumentParser(prog="mtr", description=__doc__.split("\n\n", 1)[0],
                                 formatter_class=argparse.RawDescriptionHelpFormatter,
                                 epilog=__doc__.split("\n\n", 1)[1])
     p.add_argument("--version", action="version", version=f"mortar {__version__}")
@@ -66,7 +66,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict]:
         "security": "open security alerts",
         "doctor": "check repos against the defaults",
         "sync": "open PRs with the group's shared files",
-        "repos": "the repos bnb sees and their groups",
+        "repos": "the repos mtr sees and their groups",
         "stats": "PRs merged, time to merge, CI success, releases over the last days",
         "workflows": "risky workflows: unpinned actions, write-all tokens, script injection",
         "issues": "open issues across repos, by label, assignee or age",
@@ -126,25 +126,25 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict]:
     sp.add_argument("target", help="name or name#12")
     sp.add_argument("--actions", action="store_true")
     sp.add_argument("--releases", action="store_true")
-    sp = sub.add_parser("init", help="point bnb at a defaults repo (owner/repo or a local folder)")
+    sp = sub.add_parser("init", help="point mtr at a defaults repo (owner/repo or a local folder)")
     sp.add_argument("defaults", help="owner/repo or a folder with mortar.toml")
     sp.add_argument("--ref", help="branch or tag of the defaults repo")
     sp.add_argument("--org", action="append", metavar="ORG", help="orgs for a new mortar.toml")
     sp = sub.add_parser("new", parents=[common], help="create a repo the way its group wants it")
-    sp.add_argument("repo", help="owner/name (name alone when bnb knows one org)")
+    sp.add_argument("repo", help="owner/name (name alone when mtr knows one org)")
     sp.add_argument("--public", action="store_true", help="public (default: private)")
     sp.add_argument("--description", default="")
-    sub.add_parser("config", help="show where bnb looks and what it found")
+    sub.add_parser("config", help="show where mtr looks and what it found")
     sp = sub.add_parser("login", help="sign in to Mortar (the web app) with an API key")
     sp.add_argument("url", help="Mortar's URL, e.g. https://mortar.example.org")
     sp.add_argument("--read", action="store_true", help="a read-only key")
     sp.add_argument("--key", help="use this API key instead of approving a code in the browser")
     sub.add_parser("logout", help="forget Mortar's API key")
-    sub.add_parser("whoami", help="how bnb reaches GitHub, and as whom")
+    sub.add_parser("whoami", help="how mtr reaches GitHub, and as whom")
     sp = sub.add_parser("market", help="plugins in the plugin index: list, install, sign")
     sp.add_argument("action", nargs="?", default="list", choices=("list", "install", "keygen", "sign", "verify"))
     sp.add_argument("name", nargs="?", help="plugin to install, or the index file to sign/verify")
-    sp.add_argument("--index", help="index URL or file (default: BNB_PLUGIN_INDEX or the official one)")
+    sp.add_argument("--index", help="index URL or file (default: MTR_PLUGIN_INDEX or the official one)")
     sp.add_argument("--key", help="sign: the private key (PEM); verify/list: trusted public keys, comma separated")
     sub.add_parser("plugins", help="installed plugins")
     sp = sub.add_parser("tui", parents=[common], help="full screen (needs: pipx inject mortar-cli textual)")
@@ -162,7 +162,7 @@ def show_config() -> None:
     mine = config.user_config()
     print(f"config file  {config.config_file()}{'' if config.config_file().exists() else ' (none yet)'}")
     cfg = config.load()
-    print(f"defaults     {cfg.source or 'none (bnb init <owner/repo or folder>)'}")
+    print(f"defaults     {cfg.source or 'none (mtr init <owner/repo or folder>)'}")
     print(f"orgs         {', '.join(cfg.orgs) or 'none'}")
     if cfg.repos:
         print(f"extra repos  {', '.join(cfg.repos)}")
@@ -202,7 +202,7 @@ def init(args) -> None:
             print(f"{args.defaults} has no {config.DEFAULTS_FILE} yet. Commit this as a start:\n")
             print(starter)
     path = config.save_user_config(values)
-    print(f"bnb now uses {source} (saved in {path})")
+    print(f"mtr now uses {source} (saved in {path})")
 
 
 def list_repos(cfg, names: list[str]) -> None:
@@ -216,7 +216,7 @@ def list_repos(cfg, names: list[str]) -> None:
 
 def main(argv: list[str] | None = None) -> None:
     argv = sys.argv[1:] if argv is None else argv
-    if argv[:1] == ["serve"]:  # the web app: mortar serve [--host H] [--port P], mortar serve --check
+    if argv[:1] == ["serve"]:  # the web app: mtr serve [--host H] [--port P], mtr serve --check
         from mortar.server.app import main as server
         server(["check"] if "--check" in argv else ["serve", *argv[1:]])
         return
@@ -248,7 +248,7 @@ def main(argv: list[str] | None = None) -> None:
                 print("No plugins installed (pipx inject mortar-cli <package>).")
             return None
         if not core.transport().logged_in():
-            sys.exit("Log in first: gh auth login (or bnb login <Mortar URL>)")
+            sys.exit("Log in first: gh auth login (or mtr login <Mortar URL>)")
         if args.cmd in handlers:
             return handlers[args.cmd](args)
         cfg = config.load(getattr(args, "org", None))
@@ -266,7 +266,7 @@ def main(argv: list[str] | None = None) -> None:
             if args.cmd == "open":
                 return repos.open_page(repo, number, args.actions, args.releases)
             if not number:
-                sys.exit("Name the PR: bnb pr name#12")
+                sys.exit("Name the PR: mtr pr name#12")
             return repos.pr_detail(repo, number, args.diff, args.body)
         if args.cmd == "issue":
             return issue(cfg, args)
@@ -296,7 +296,7 @@ def issue(cfg, args) -> None:
         issues.create(repo, args.text, body, args.label, args.assignee)
         return
     if not number:
-        sys.exit(f"Name the issue: bnb issue {args.action} name#12")
+        sys.exit(f"Name the issue: mtr issue {args.action} name#12")
     if args.action == "view":
         issues.view(repo, number)
     elif args.action == "comment":
@@ -319,7 +319,7 @@ def run(cfg, args, names: list[str], pick: dict) -> None:
         return repos.runs(names, args.limit, args.failed)
     if args.cmd == "rerun":
         if not args.repos:
-            sys.exit("Name the repo: bnb rerun hubra")
+            sys.exit("Name the repo: mtr rerun hubra")
         return repos.rerun(names, args.run, args.yes)
     if args.cmd == "releases":
         return repos.releases(cfg, names, args.problems)

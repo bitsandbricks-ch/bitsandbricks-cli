@@ -1,4 +1,4 @@
-"""Stats over the last N days for GitHub and GitLab (bnb stats as charts), and the operator's own numbers."""
+"""Stats over the last N days for GitHub and GitLab (mtr stats as charts), and the operator's own numbers."""
 
 from __future__ import annotations
 

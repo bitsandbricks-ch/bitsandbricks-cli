@@ -51,7 +51,7 @@ def validate(path: str, text: str) -> list[str]:
     problems: list[str] = []
     if len(text) > 200_000:
         return ["the file is bigger than 200 KB"]
-    if path in config.DEFAULTS_FILES:
+    if path == config.DEFAULTS_FILE:
         try:
             raw = config.parse_defaults(text)
         except RuntimeError as err:
@@ -77,7 +77,7 @@ def validate(path: str, text: str) -> list[str]:
                 problems.append(f"{label}: match.provider is github or gitlab")
             unknown = set(grp.get("settings") or {}) - set(D.REPO_SETTINGS)
             if unknown:
-                problems.append(f"{label}: settings bnb doesn't check: {', '.join(sorted(unknown))}")
+                problems.append(f"{label}: settings mtr doesn't check: {', '.join(sorted(unknown))}")
             off = set(config._list(grp.get("skip"))) - set(config.CHECKS)
             if off:
                 problems.append(f"{label}: skip doesn't know {', '.join(sorted(off))} "
@@ -91,7 +91,7 @@ def validate(path: str, text: str) -> list[str]:
                 problems.append(f"{label}: labels is a list of names or a table of name = color")
             gl = grp.get("gitlab") or {}
             if gl and set(gl.get("settings") or {}) - set(GL.SETTINGS):
-                problems.append(f"{label}: gitlab settings bnb doesn't know: "
+                problems.append(f"{label}: gitlab settings mtr doesn't know: "
                                 f"{', '.join(sorted(set(gl['settings']) - set(GL.SETTINGS)))}")
             for b, levels in (gl.get("protected_branches") or {}).items():
                 if not isinstance(levels, dict) or any(v not in GL.ACCESS for v in levels.values()):
@@ -147,8 +147,7 @@ def overview():
     with as_user() as (_gh, gl):
         try:
             files = read_tree(gl, repo, ref)
-            # an older defaults repo keeps bitsandbricks.toml; edit that one until it's renamed
-            name = next((n for n in config.DEFAULTS_FILES if n in files), config.DEFAULTS_FILE)
+            name = config.DEFAULTS_FILE
             text, _ = read_file(gl, repo, name, ref)
         except RuntimeError as err:
             abort(502, f"{repo}: {err}")
@@ -217,7 +216,7 @@ def write_github(repo: str, ref: str | None, path: str, text: str, delete: bool,
     sha = got[1] if got else None
     if delete and not sha:
         raise RuntimeError(f"{path} isn't there")
-    branch = base if mode == "commit" else f"bnb/defaults-{secrets.token_hex(3)}"
+    branch = base if mode == "commit" else f"mtr/defaults-{secrets.token_hex(3)}"
     if mode == "pr":
         head = core.api("GET", f"/repos/{repo}/git/ref/heads/{base}")["object"]["sha"]
         core.api("POST", f"/repos/{repo}/git/refs", {"ref": f"refs/heads/{branch}", "sha": head})
@@ -241,7 +240,7 @@ def write_gitlab(gl, repo: str, ref: str | None, path: str, text: str, delete: b
     info = gl.api("GET", gl.project(repo)) or {}
     base = ref or info.get("default_branch") or "main"
     exists = gl.file(repo, path, base) is not None
-    branch = base if mode == "commit" else f"bnb/defaults-{secrets.token_hex(3)}"
+    branch = base if mode == "commit" else f"mtr/defaults-{secrets.token_hex(3)}"
     action = "delete" if delete else ("update" if exists else "create")
     commit = {"branch": branch, "commit_message": message,
               "actions": [{"action": action, "file_path": path, **({} if delete else {"content": text})}]}

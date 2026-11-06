@@ -1,14 +1,14 @@
 # Mortar
 
-Mortar is bnb as a web app: it holds the bricks together. People sign in with their own GitHub and GitLab accounts and get every
+Mortar is mtr as a web app: it holds the bricks together. People sign in with their own GitHub and GitLab accounts and get every
 CLI and TUI view in a terminal-style browser UI: repos, pull requests, runs, approvals, releases, packages,
-security alerts, doctor/fix/sync, stats, a defaults editor, a `bnb` console, plugins and a plugin marketplace.
-The same API serves `bnb` and `bnb tui` on a laptop: `bnb login https://mortar` and they need neither gh
+security alerts, doctor/fix/sync, stats, a defaults editor, a `mtr` console, plugins and a plugin marketplace.
+The same API serves `mtr` and `mtr tui` on a laptop: `mtr login https://mortar` and they need neither gh
 nor a GitHub token.
 
 ```
 browser (Vue, web/)  ─┐                         ┌─> GitHub REST/GraphQL  (the user's own OAuth token)
-bnb / bnb tui (key) ──┼─> /api/v1  (Flask)  ────┤
+mtr / mtr tui (key) ──┼─> /api/v1  (Flask)  ────┤
 scripts (key)        ─┘      │                  └─> GitLab REST/GraphQL  (the user's own OAuth token)
                              └─> database: users, logins (tokens encrypted), sessions, API keys, audit
 ```
@@ -40,24 +40,24 @@ On a phone (the layout adapts below 700px; it can be added to the home screen):
 pip install -e ".[server]"                   # flask, sqlalchemy, cryptography, gunicorn
 (cd web && npm ci && npm run build)          # the UI, into src/mortar/server/static
 export GITHUB_CLIENT_ID=... GITHUB_CLIENT_SECRET=...
-export MORTAR_ADMINS=github:you MORTAR_DEV=1
-mortar serve --check                    # what the settings allow, and what is missing
-mortar serve                           # http://localhost:8080 (development server)
+export MTR_ADMINS=github:you MTR_DEV=1
+mtr serve --check                    # what the settings allow, and what is missing
+mtr serve                           # http://localhost:8080 (development server)
 ```
 
 UI development: `cd web && npm run dev` serves the UI on :5173 and passes `/api` to Mortar on :8080.
 
 In production use the image: `docker build -t mortar .`, or `deploy/docker-compose.yml`
 (Mortar + Postgres; copy `deploy/mortar.env.example` to `deploy/mortar.env`). Put it behind a TLS
-proxy and set `MORTAR_TRUSTED_PROXIES=1` so it sees the real client address. The image runs
+proxy and set `MTR_TRUSTED_PROXIES=1` so it sees the real client address. The image runs
 gunicorn with one process and many threads, which keeps each user's API cache in one place.
 
 ## OAuth apps
 
 | provider | where | callback URL | scopes |
 | --- | --- | --- | --- |
-| GitHub | Settings › Developer settings › OAuth Apps | `{MORTAR_URL}/api/v1/auth/github/callback` | `repo read:org workflow security_events read:packages` |
-| GitLab | Preferences (or Admin) › Applications, confidential | `{MORTAR_URL}/api/v1/auth/gitlab/callback` | `api` |
+| GitHub | Settings › Developer settings › OAuth Apps | `{MTR_URL}/api/v1/auth/github/callback` | `repo read:org workflow security_events read:packages` |
+| GitLab | Preferences (or Admin) › Applications, confidential | `{MTR_URL}/api/v1/auth/gitlab/callback` | `api` |
 
 GitHub Enterprise: set `GITHUB_URL` (and `GITHUB_API_URL` if it isn't `{GITHUB_URL}/api/v3`). Self-managed
 GitLab: set `GITLAB_URL`. Someone signed in with one provider connects the other in Settings › Accounts.
@@ -66,22 +66,22 @@ GitLab: set `GITLAB_URL`. Someone signed in with one provider connects the other
 
 | variable | meaning |
 | --- | --- |
-| `MORTAR_URL` | where people reach it; must be `https://` unless `MORTAR_DEV=1` |
-| `MORTAR_SECRET_KEY` | encrypts stored tokens and secrets; made once in the data folder when unset |
-| `MORTAR_DATA` | data folder (default `./data`, `/data` in the image) |
+| `MTR_URL` | where people reach it; must be `https://` unless `MTR_DEV=1` |
+| `MTR_SECRET_KEY` | encrypts stored tokens and secrets; made once in the data folder when unset |
+| `MTR_DATA` | data folder (default `./data`, `/data` in the image) |
 | `DATABASE_URL` | SQLAlchemy URL; SQLite in the data folder by default, `postgresql+psycopg://…` with `[postgres]` |
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_URL`, `GITHUB_API_URL`, `GITHUB_SCOPES` | the GitHub login |
 | `GITLAB_CLIENT_ID`, `GITLAB_CLIENT_SECRET`, `GITLAB_URL`, `GITLAB_SCOPES` | the GitLab login |
-| `MORTAR_ALLOW_USERS` | who may sign in: `github:mike, gitlab:ann`, or a bare login for either |
-| `MORTAR_ALLOW_ORGS` | members of these GitHub orgs or GitLab groups may sign in |
-| `MORTAR_ADMINS` | admins (may sign in too): everyone's audit log, plugins for everyone, installs |
-| `MORTAR_ALLOW_ANYONE` | `1` lets any account sign in (on purpose only) |
-| `MORTAR_IDLE_HOURS`, `MORTAR_SESSION_DAYS` | session idle timeout (12) and lifetime (7) |
-| `MORTAR_CACHE` | how long GET answers are cached per user (`60s`); ETags make refreshes cheap |
-| `BNB_PLUGIN_INDEX`, `BNB_PLUGIN_INDEX_KEYS` | the plugin index (URL or file) and the keys it must be signed with |
-| `MORTAR_PLUGIN_INSTALL` | `1` lets admins install plugins from the marketplace page |
-| `MORTAR_TRUSTED_PROXIES` | how many proxies in front set `X-Forwarded-*` (0) |
-| `MORTAR_DEV` | `1`: http allowed, plain cookie names (local development only) |
+| `MTR_ALLOW_USERS` | who may sign in: `github:mike, gitlab:ann`, or a bare login for either |
+| `MTR_ALLOW_ORGS` | members of these GitHub orgs or GitLab groups may sign in |
+| `MTR_ADMINS` | admins (may sign in too): everyone's audit log, plugins for everyone, installs |
+| `MTR_ALLOW_ANYONE` | `1` lets any account sign in (on purpose only) |
+| `MTR_IDLE_HOURS`, `MTR_SESSION_DAYS` | session idle timeout (12) and lifetime (7) |
+| `MTR_CACHE` | how long GET answers are cached per user (`60s`); ETags make refreshes cheap |
+| `MTR_PLUGIN_INDEX`, `MTR_PLUGIN_INDEX_KEYS` | the plugin index (URL or file) and the keys it must be signed with |
+| `MTR_PLUGIN_INSTALL` | `1` lets admins install plugins from the marketplace page |
+| `MTR_TRUSTED_PROXIES` | how many proxies in front set `X-Forwarded-*` (0) |
+| `MTR_DEV` | `1`: http allowed, plain cookie names (local development only) |
 
 Mortar refuses to start when no login is configured, nobody may sign in, or the URL isn't https.
 
@@ -96,12 +96,12 @@ Mortar refuses to start when no login is configured, nobody may sign in, or the 
 - **Sessions** are random cookies (`__Host-` prefixed, `Secure`, `HttpOnly`, `SameSite=Lax`); the database
   keeps only their SHA-256. Idle and absolute timeouts; users see and end their other sessions.
 - **CSRF**: every change needs the session's `X-CSRF-Token` header and a matching `Origin`.
-- **API keys** (`bnbo_<id>_<secret>`) are stored hashed, have a scope (`read` or `write`), an optional expiry,
+- **API keys** (`mtr_<id>_<secret>`) are stored hashed, have a scope (`read` or `write`), an optional expiry,
   and show their last use. Read keys can still ask for dry runs. Creating keys, deleting the account and
   installing plugins need a browser session, not a key.
-- **Device login** (`bnb login URL`): the terminal shows a code, the user approves it in the browser and picks
+- **Device login** (`mtr login URL`): the terminal shows a code, the user approves it in the browser and picks
   the scope; the terminal gets a key. Codes expire after 10 minutes and polling is rate limited.
-- **The GitHub proxy** for signed-in CLIs passes on only the reads bnb makes and the writes bnb and its plugins
+- **The GitHub proxy** for signed-in CLIs passes on only the reads mtr makes and the writes mtr and its plugins
   make; deleting repos, changing access, keys, hooks and account settings are never passed on.
 - **Audit log**: sign-ins, keys, every change (with its output) and every dry run, with who, how and from where.
 - **Browser hardening**: a strict CSP (`self` only, no inline scripts or styles, no `data:` fonts), no
@@ -111,14 +111,14 @@ Mortar refuses to start when no login is configured, nobody may sign in, or the 
 ## The CLI and TUI through Mortar
 
 ```sh
-bnb login https://mortar.example.com        # device login; --read for a read-only key, --key KEY to paste one
-bnb whoami
-bnb status                                # every command now goes through Mortar
-bnb tui
-bnb logout                                # forgets the key here (revoke it in Settings › API keys)
+mtr login https://mortar.example.com        # device login; --read for a read-only key, --key KEY to paste one
+mtr whoami
+mtr status                                # every command now goes through Mortar
+mtr tui
+mtr logout                                # forgets the key here (revoke it in Settings › API keys)
 ```
 
-The key is kept in `~/.config/mortar/operator.json` (0600). `BNB_OPERATOR` and `BNB_OPERATOR_KEY`
+The key is kept in `~/.config/mortar/operator.json` (0600). `MTR_SERVER` and `MTR_KEY`
 do the same for CI. The defaults repo and orgs then come from your Mortar settings.
 
 ## Defaults
@@ -155,15 +155,15 @@ Plugins are the same Python entry points the CLI loads. In Mortar they can also 
 
 Each user switches plugins on or off for themselves; admins can switch one off for everyone.
 
-The marketplace reads a plugin index (`plugins/index.json` by default) signed with Ed25519 (`bnb market
-keygen`, `bnb market sign`). Unsigned or wrongly signed indexes are shown but nothing installs from them.
-Installing from the web is off unless `MORTAR_PLUGIN_INSTALL=1`, and only admins can do it; restart
+The marketplace reads a plugin index (`plugins/index.json` by default) signed with Ed25519 (`mtr market
+keygen`, `mtr market sign`). Unsigned or wrongly signed indexes are shown but nothing installs from them.
+Installing from the web is off unless `MTR_PLUGIN_INSTALL=1`, and only admins can do it; restart
 Mortar after an install. The signing code is adapted from labdex (relicensed into Mortar (formerly bitsandbricks)
 under MIT by its author).
 
 ## API
 
-Everything the UI does is JSON under `/api/v1` and works with an API key (`Authorization: Bearer bnbo_…`):
+Everything the UI does is JSON under `/api/v1` and works with an API key (`Authorization: Bearer mtr_…`):
 
 `/me`, `/repos`, `/status`, `/prs`, `/pr`, `/merge`, `/ready`, `/runs`, `/approvals`, `/approve`, `/releases`,
 `/packages`, `/security`, `/doctor`, `/sync`, `/new`, `/metrics?days=`, `/console`, `/defaults…`, `/plugins…`,
