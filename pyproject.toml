@@ -30,6 +30,13 @@ path = "src/mortar/__init__.py"
 packages = ["src/mortar"]
 artifacts = ["src/mortar/server/static/**"]
 
+# The built UI is gitignored; hatch_build.py builds it (npm) so wheels and sdists carry it.
+[tool.hatch.build.hooks.custom]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["web/node_modules", "data"]
+artifacts = ["src/mortar/server/static/**"]
+
 [tool.ruff]
 line-length = 120
 target-version = "py39"
