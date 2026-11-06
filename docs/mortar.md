@@ -2,7 +2,8 @@
 
 Mortar is mtr as a web app: it holds the bricks together. People sign in with their own GitHub and GitLab accounts and get every
 CLI and TUI view in a terminal-style browser UI: repos, pull requests, runs, approvals, releases, packages,
-security alerts, doctor/fix/sync, stats, a defaults editor, a `mtr` console, plugins and a plugin marketplace.
+issues, security alerts, doctor/fix/sync, workflow hardening, stats, a defaults editor, a `mtr` console,
+plugins and a plugin marketplace.
 The same API serves `mtr` and `mtr tui` on a laptop: `mtr login https://mortar` and they need neither gh
 nor a GitHub token.
 
@@ -34,23 +35,55 @@ On a phone (the layout adapts below 700px; it can be added to the home screen):
 
 <img src="screenshots/phone/m01-login.png" alt="login" width="200"> <img src="screenshots/phone/m02-repos.png" alt="repos" width="200"> <img src="screenshots/phone/m03-prs.png" alt="prs" width="200"> <img src="screenshots/phone/m05-approvals.png" alt="approvals" width="200"> <img src="screenshots/phone/m06-stats.png" alt="stats" width="200"> <img src="screenshots/phone/m08-defaults.png" alt="defaults" width="200"> <img src="screenshots/phone/m12-settings.png" alt="settings" width="200"> <img src="screenshots/phone/m14-console-run.png" alt="console run" width="200">
 
+## The web UI
+
+The tabs are repos, pull requests, issues, runs, approvals, releases, packages, security, checks, workflows,
+stats, defaults, console, plugins, market, settings and audit, plus tabs that plugins add. Each has a
+one-key shortcut (`1` to `9` for the first ones, `I` issues, `W` workflows, `D` defaults, `:` console,
+`P` plugins, `K` market, `S` settings, `L` audit).
+
+- **Issues** lists issues across GitHub repos and GitLab projects, filtered by state, label, mine and age.
+  It closes, reopens and comments on them, and **n** opens a new issue in any repo.
+- **Workflows** shows what `mtr workflows` finds; **p** opens a PR that pins the selected repo's actions
+  to commit SHAs.
+- **Settings** holds the defaults repo, orgs, extra and left-out repos, GitLab groups and projects,
+  connected accounts, API keys, sessions and plugin secrets.
+- **Keys:** arrows or `j`/`k` move, Enter acts, `/` filters, `r` reloads, `t` switches the theme
+  (phosphor, amber, paper), `?` lists the keys.
+
 ## Run it
+
+Mortar needs the `server` extra and the built UI. A pipx install from git
+(`pipx install "mortar-cli[tui,server] @ git+https://github.com/bitsandbricks-ch/mortar-cli"`) has
+`mtr serve`, but not the UI's built files, so run it from the Docker image or a clone:
 
 ```sh
 pip install -e ".[server]"                   # flask, sqlalchemy, cryptography, gunicorn
 (cd web && npm ci && npm run build)          # the UI, into src/mortar/server/static
 export GITHUB_CLIENT_ID=... GITHUB_CLIENT_SECRET=...
 export MTR_ADMINS=github:you MTR_DEV=1
-mtr serve --check                    # what the settings allow, and what is missing
-mtr serve                           # http://localhost:8080 (development server)
+mtr serve --check                            # what the settings allow, and what is missing
+mtr serve                                    # http://localhost:8080 (Flask's development server)
+mtr serve --host 0.0.0.0 --port 9000         # somewhere else
 ```
 
 UI development: `cd web && npm run dev` serves the UI on :5173 and passes `/api` to Mortar on :8080.
 
 In production use the image: `docker build -t mortar .`, or `deploy/docker-compose.yml`
-(Mortar + Postgres; copy `deploy/mortar.env.example` to `deploy/mortar.env`). Put it behind a TLS
+(Mortar + Postgres on `127.0.0.1:8080`; copy `deploy/mortar.env.example` to `deploy/mortar.env`). Put it behind a TLS
 proxy and set `MTR_TRUSTED_PROXIES=1` so it sees the real client address. The image runs
 gunicorn with one process and many threads, which keeps each user's API cache in one place.
+
+## Signing in
+
+People sign in in the browser with GitHub or GitLab through an OAuth app you register (below): the
+authorization code flow with PKCE. There is no GitHub or GitLab device flow for the browser sign-in. The
+device-code flow Mortar has is its own, for `mtr login` (see [The CLI and TUI through
+Mortar](#the-cli-and-tui-through-mortar)). Someone signed in with one provider connects the other in
+Settings › Accounts, and both logins then belong to the same Mortar user.
+
+Who may sign in is up to you: `MTR_ALLOW_USERS`, `MTR_ALLOW_ORGS` and `MTR_ADMINS`, or anyone with
+`MTR_ALLOW_ANYONE=1`. Mortar doesn't start until one of them is set.
 
 ## OAuth apps
 
@@ -60,7 +93,7 @@ gunicorn with one process and many threads, which keeps each user's API cache in
 | GitLab | Preferences (or Admin) › Applications, confidential | `{MTR_URL}/api/v1/auth/gitlab/callback` | `api` |
 
 GitHub Enterprise: set `GITHUB_URL` (and `GITHUB_API_URL` if it isn't `{GITHUB_URL}/api/v3`). Self-managed
-GitLab: set `GITLAB_URL`. Someone signed in with one provider connects the other in Settings › Accounts.
+GitLab: set `GITLAB_URL`.
 
 ## Settings (environment)
 
@@ -70,7 +103,7 @@ GitLab: set `GITLAB_URL`. Someone signed in with one provider connects the other
 | `MTR_SECRET_KEY` | encrypts stored tokens and secrets; made once in the data folder when unset |
 | `MTR_DATA` | data folder (default `./data`, `/data` in the image) |
 | `DATABASE_URL` | SQLAlchemy URL; SQLite in the data folder by default, `postgresql+psycopg://…` with `[postgres]` |
-| `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_URL`, `GITHUB_API_URL`, `GITHUB_SCOPES` | the GitHub login |
+| `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_URL`, `GITHUB_API_URL`, `GITHUB_SCOPES` | the GitHub login (scopes default to the table above) |
 | `GITLAB_CLIENT_ID`, `GITLAB_CLIENT_SECRET`, `GITLAB_URL`, `GITLAB_SCOPES` | the GitLab login |
 | `MTR_ALLOW_USERS` | who may sign in: `github:mike, gitlab:ann`, or a bare login for either |
 | `MTR_ALLOW_ORGS` | members of these GitHub orgs or GitLab groups may sign in |
@@ -78,10 +111,10 @@ GitLab: set `GITLAB_URL`. Someone signed in with one provider connects the other
 | `MTR_ALLOW_ANYONE` | `1` lets any account sign in (on purpose only) |
 | `MTR_IDLE_HOURS`, `MTR_SESSION_DAYS` | session idle timeout (12) and lifetime (7) |
 | `MTR_CACHE` | how long GET answers are cached per user (`60s`); ETags make refreshes cheap |
-| `MTR_PLUGIN_INDEX`, `MTR_PLUGIN_INDEX_KEYS` | the plugin index (URL or file) and the keys it must be signed with |
+| `MTR_PLUGIN_INDEX`, `MTR_PLUGIN_INDEX_KEYS` | the plugin index (URL or file; default: `plugins/index.json` on this repo's main branch) and extra public keys (base64, comma separated) it may be signed with |
 | `MTR_PLUGIN_INSTALL` | `1` lets admins install plugins from the marketplace page |
 | `MTR_TRUSTED_PROXIES` | how many proxies in front set `X-Forwarded-*` (0) |
-| `MTR_DEV` | `1`: http allowed, plain cookie names (local development only) |
+| `MTR_DEV` | `1`: http allowed and `MTR_URL` defaults to `http://localhost:8080` (local development only); over http the session cookie loses its `__Host-` prefix |
 
 Mortar refuses to start when no login is configured, nobody may sign in, or the URL isn't https.
 
@@ -118,8 +151,10 @@ mtr tui
 mtr logout                                # forgets the key here (revoke it in Settings › API keys)
 ```
 
-The key is kept in `~/.config/mortar/operator.json` (0600). `MTR_SERVER` and `MTR_KEY`
-do the same for CI. The defaults repo and orgs then come from your Mortar settings.
+`mtr login` asks Mortar for a code and opens the approval page in the browser (over SSH it prints the
+link), where you pick read only or read and change; the terminal then gets the key. The key is kept in `~/.config/mortar/operator.json` (0600). `MTR_SERVER` and `MTR_KEY`
+do the same for CI; `MTR_SERVER=` (set but empty) goes back to gh without logging out. The defaults repo
+and orgs then come from your Mortar settings.
 
 ## Defaults
 
@@ -155,17 +190,17 @@ Plugins are the same Python entry points the CLI loads. In Mortar they can also 
 
 Each user switches plugins on or off for themselves; admins can switch one off for everyone.
 
-The marketplace reads a plugin index (`plugins/index.json` by default) signed with Ed25519 (`mtr market
+The marketplace reads a plugin index (this repo's `plugins/index.json` by default) signed with Ed25519 (`mtr market
 keygen`, `mtr market sign`). Unsigned or wrongly signed indexes are shown but nothing installs from them.
 Installing from the web is off unless `MTR_PLUGIN_INSTALL=1`, and only admins can do it; restart
-Mortar after an install. The signing code is adapted from labdex (relicensed into Mortar (formerly bitsandbricks)
-under MIT by its author).
+Mortar after an install. The signing code is adapted from labdex (relicensed into Mortar under MIT by its author).
 
 ## API
 
 Everything the UI does is JSON under `/api/v1` and works with an API key (`Authorization: Bearer mtr_…`):
 
-`/me`, `/repos`, `/status`, `/prs`, `/pr`, `/merge`, `/ready`, `/runs`, `/approvals`, `/approve`, `/releases`,
-`/packages`, `/security`, `/doctor`, `/sync`, `/new`, `/metrics?days=`, `/console`, `/defaults…`, `/plugins…`,
-`/market…`, `/settings`, `/keys`, `/sessions`, `/secrets`, `/audit`, `/rate`, `/cache/clear`.
-Changes take `"dry_run": true`.
+`/me`, `/config`, `/repos`, `/repo`, `/status`, `/prs`, `/pr`, `/merge`, `/ready`, `/issues`, `/issue`,
+`/runs`, `/approvals`, `/approve`, `/releases`, `/releases/jobs`, `/packages`, `/security`, `/doctor`, `/sync`,
+`/workflows`, `/workflows/pin`, `/new`, `/metrics?days=`, `/console`, `/defaults…`, `/plugins…`, `/market…`,
+`/settings`, `/keys`, `/sessions`, `/secrets`, `/audit`, `/rate`, `/cache/clear`, and for admins
+`/admin/users` and `/admin/stats`. `/api/v1/health` needs no sign-in. Changes take `"dry_run": true`.
