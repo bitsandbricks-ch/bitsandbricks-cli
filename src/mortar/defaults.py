@@ -11,6 +11,7 @@ import base64
 import hashlib
 import json
 import time
+import urllib.parse
 
 from mortar import core, plugins
 from mortar.config import Config, Group
@@ -23,6 +24,8 @@ REPO_SETTINGS = ("allow_auto_merge", "allow_merge_commit", "allow_rebase_merge",
 PATCHABLE_SECURITY = ("advanced_security", "secret_scanning", "secret_scanning_push_protection",
                       "secret_scanning_non_provider_patterns", "secret_scanning_validity_checks")
 RULESET_FIELDS = ("name", "target", "enforcement", "conditions", "rules", "bypass_actors")
+ACTIONS = ("enabled", "allowed_actions")  # /actions/permissions
+WORKFLOW = ("default_workflow_permissions", "can_approve_pull_request_reviews")  # /actions/permissions/workflow
 
 
 # ── what a repo has ──────────────────────────────────────────────────────────
@@ -50,7 +53,18 @@ def repo_state(repo: str) -> dict:
         "vulnerability_reporting": flag(repo, "private-vulnerability-reporting"),
         "immutable_releases": flag(repo, "immutable-releases"),
         "rulesets": live_rulesets(repo),
+        "info": {"topics": info.get("topics") or [], "description": info.get("description") or "",
+                 "visibility": info.get("visibility") or ("private" if info.get("private") else "public")},
     }
+
+
+def alerts_on(repo: str) -> str | None:
+    """Dependabot alerts: "enabled" (204), "disabled" (404), None when unreadable."""
+    try:
+        api("GET", f"/repos/{repo}/vulnerability-alerts")
+        return "enabled"
+    except RuntimeError as err:
+        return "disabled" if "404" in str(err) else None
 
 
 def ruleset_files(repo: str, ref: str | None = None) -> dict[str, tuple[str, dict]]:
@@ -112,6 +126,26 @@ def baseline(cfg: Config, group: Group) -> dict:
     texts = cfg.files_of(group)
     want["files"].update({p: git_blob_sha(t) for p, t in texts.items()})
     want["texts"].update(texts)
+    want.update(topics=list(group.topics), labels=dict(group.labels), actions=dict(group.actions),
+                required_files=list(group.required_files), branch=group.branch, visibility=group.visibility,
+                description=group.description, skip=set(group.skip))
+    return skip(want)
+
+
+def skip(want: dict) -> dict:
+    """Leave out what the group's `skip` names."""
+    off = want["skip"]
+    for key in ("settings", "security", "rulesets", "files", "labels", "actions"):
+        if key in off:
+            want[key] = {}
+    for key in ("topics", "required_files"):
+        if key in off:
+            want[key] = []
+    for key in ("vulnerability_reporting", "immutable_releases", "branch", "visibility"):
+        if key in off:
+            want[key] = None
+    if "description" in off:
+        want["description"] = False
     return want
 
 
@@ -222,6 +256,78 @@ def file_drift(repo: str, want: dict, branch: str) -> list[str]:
     return out
 
 
+def required_drift(repo: str, want: dict, branch: str) -> list[str]:
+    if not want.get("required_files"):
+        return []
+    ours = blob_shas(repo, branch)
+    return [f"{need.replace('|', ' or ')} is missing" for need in want["required_files"]
+            if not any(p.strip() in ours for p in need.split("|"))]
+
+
+def repo_drift(repo: str, state: dict, want: dict) -> tuple[list[str], list[str]]:
+    """Topics, labels and Actions permissions (doctor --fix sets them), then what's only checked:
+    the default branch, visibility and description."""
+    info, label = state["info"], want["label"]
+    fix: list[str] = []
+    missing = [t for t in want.get("topics") or [] if t not in info["topics"]]
+    if missing:
+        fix.append(f"topics lack {', '.join(missing)}")
+    if want.get("labels"):
+        have = {x["name"].lower(): x for x in core.api_pages(f"/repos/{repo}/labels")}
+        for name, spec in want["labels"].items():
+            got = have.get(name.lower())
+            if not got:
+                fix.append(f"label {name} is missing")
+            elif spec.get("color") and got.get("color", "").lower() != spec["color"]:
+                fix.append(f"label {name} is #{got.get('color')}, {label} has #{spec['color']}")
+    for key, value in actions_drift(repo, want.get("actions") or {}).items():
+        fix.append(f"actions {key} is {compact(value[0])}, {label} has {compact(value[1])}")
+    check = []
+    if want.get("branch") and state["default_branch"] != want["branch"]:
+        check.append(f"default branch is {state['default_branch']}, {label} has {want['branch']}")
+    if want.get("visibility") and info["visibility"] != want["visibility"]:
+        check.append(f"the repo is {info['visibility']}, {label} has {want['visibility']}")
+    if want.get("description") and not info["description"].strip():
+        check.append("it has no description")
+    return fix, check
+
+
+def actions_drift(repo: str, want: dict) -> dict[str, tuple]:
+    """{key: (have, want)} of the Actions permissions that differ."""
+    out = {}
+    for keys, path in ((ACTIONS, "actions/permissions"), (WORKFLOW, "actions/permissions/workflow")):
+        asked = {k: want[k] for k in keys if k in want}
+        if asked:
+            have = api("GET", f"/repos/{repo}/{path}") or {}
+            out.update({k: (have.get(k), v) for k, v in asked.items() if have.get(k) != v})
+    return out
+
+
+def fix_repo(repo: str, state: dict, want: dict) -> None:
+    """Add the missing topics and labels, fix label colors, set the Actions permissions."""
+    topics = state["info"]["topics"]
+    if any(t not in topics for t in want.get("topics") or []):
+        api("PUT", f"/repos/{repo}/topics", {"names": list(dict.fromkeys(topics + want["topics"]))})
+    if want.get("labels"):
+        have = {x["name"].lower(): x for x in core.api_pages(f"/repos/{repo}/labels")}
+        for name, spec in want["labels"].items():
+            got = have.get(name.lower())
+            body = {k: spec[k] for k in ("color", "description") if spec.get(k)}
+            if not got:
+                api("POST", f"/repos/{repo}/labels", {"name": name, "color": spec.get("color") or "ededed", **body})
+            elif spec.get("color") and got.get("color", "").lower() != spec["color"]:
+                api("PATCH", f"/repos/{repo}/labels/{urllib.parse.quote(got['name'])}", body)
+    acts = want.get("actions") or {}
+    drift = actions_drift(repo, acts)
+    if any(k in drift for k in ACTIONS):
+        api("PUT", f"/repos/{repo}/actions/permissions",
+            {"enabled": acts.get("enabled", True), **{k: acts[k] for k in ACTIONS if k in acts}})
+    if any(k in drift for k in WORKFLOW):
+        have = api("GET", f"/repos/{repo}/actions/permissions/workflow") or {}
+        api("PUT", f"/repos/{repo}/actions/permissions/workflow",
+            {**{k: have[k] for k in WORKFLOW if k in have}, **{k: acts[k] for k in WORKFLOW if k in acts}})
+
+
 # ── fixing ───────────────────────────────────────────────────────────────────
 
 
@@ -247,6 +353,9 @@ def apply(repo: str, want: dict, own: dict | None = None) -> None:
         body["security_and_analysis"] = sec
     if body:
         api("PATCH", f"/repos/{repo}", body)
+    if "dependabot_alerts" in want["security"]:
+        on = want["security"]["dependabot_alerts"] == "enabled"
+        api("PUT" if on else "DELETE", f"/repos/{repo}/vulnerability-alerts")
     if "dependabot_security_updates" in want["security"]:
         on = want["security"]["dependabot_security_updates"] == "enabled"
         api("PUT" if on else "DELETE", f"/repos/{repo}/automated-security-fixes")
@@ -331,12 +440,19 @@ def doctor(repo: str, ctx: dict) -> None:
     group = ctx["groups"].get(repo)
     want = ctx["wants"].get(group.name) if group else None
     own = ruleset_files(repo)
+    checked: list[str] = []
+    repo_fix: list[str] = []
     if want:
         state = repo_state(repo)
+        if "dependabot_alerts" in want["security"]:
+            state["security"]["dependabot_alerts"] = alerts_on(repo)
         fixable = state_drift(state, want, own)
         missing = {n for n in want["rulesets"] if n not in state["rulesets"]}
-        fixable += [p for p in files_drift(state["rulesets"], own)
-                    if p not in fixable and not any(p.startswith(f"ruleset {n} (") for n in missing)]
+        if "own_rulesets" not in want["skip"]:
+            fixable += [p for p in files_drift(state["rulesets"], own)
+                        if p not in fixable and not any(p.startswith(f"ruleset {n} (") for n in missing)]
+        repo_fix, checked = repo_drift(repo, state, want)
+        fixable += repo_fix
         branch = state["default_branch"]
     else:
         live = live_rulesets(repo)
@@ -344,12 +460,17 @@ def doctor(repo: str, ctx: dict) -> None:
         branch = (api("GET", f"/repos/{repo}") or {}).get("default_branch") or "main"
     problems = list(fixable)
     if want:
-        problems += file_drift(repo, want, branch)
-    problems += plugins.hook("doctor", repo, group, ctx)
+        problems += file_drift(repo, want, branch) + required_drift(repo, want, branch) + checked
+    if not (want and "plugins" in want["skip"]):
+        problems += plugins.hook("doctor", repo, group, ctx)
 
     if fixable and ctx.get("fix"):
         if want:
-            apply(repo, want, own)
+            if [p for p in fixable if p not in repo_fix]:
+                apply(repo, want, own)
+            if repo_fix:
+                fix_repo(repo, state, want)
+                say(f"   set {len(repo_fix)} topics, labels or Actions permissions")
         else:
             import_rulesets(repo, {n: rs for n, (_, rs) in own.items() if not rs.get("_broken")})
             say(f"   rulesets ({', '.join(own)}) imported from .github/rulesets")

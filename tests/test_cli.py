@@ -289,3 +289,39 @@ def test_old_names_still_work(env):
     proc = subprocess.run([sys.executable, "-m", "bitsandbricks", "--version"], env=env, capture_output=True,
                           text=True, check=False)
     assert proc.stdout.startswith("mortar ")
+
+
+def test_repo_checks_from_defaults(env, tmp_path):
+    folder = tmp_path / "defaults"
+    folder.mkdir()
+    (folder / "mortar.toml").write_text('''orgs = ["mike"]
+[[group]]
+name = "default"
+security = { dependabot_alerts = "enabled" }
+topics = ["dotfiles"]
+labels = { bug = "d73a4a", docs = "#0075CA", security = { color = "b60205", description = "Security" } }
+actions = { allowed_actions = "selected", default_workflow_permissions = "read" }
+required_files = ["SECURITY.md", "CODEOWNERS|.github/CODEOWNERS"]
+branch = "trunk"
+visibility = "private"
+description = true
+skip = ["own_rulesets"]
+''')
+    e = {**env, "BNB_DEFAULTS": str(folder)}
+    out = bnb(e, "doctor", "dotfiles")
+    for line in ("dependabot_alerts is disabled, defaults has enabled", "topics lack dotfiles",
+                 "label bug is #ee0701, defaults has #d73a4a", "label security is missing",
+                 "actions allowed_actions is all, defaults has selected",
+                 "actions default_workflow_permissions is write, defaults has read",
+                 "CODEOWNERS or .github/CODEOWNERS is missing", "default branch is main, defaults has trunk",
+                 "it has no description"):
+        assert line in out, line
+    assert "label docs" not in out and "SECURITY.md is missing" not in out and "the repo is" not in out
+    assert "required_linear_history" not in out  # skipped: own_rulesets
+    out = bnb(e, "doctor", "--fix", "--dry-run", "dotfiles")
+    for call in ("PUT /repos/mike/dotfiles/vulnerability-alerts", "PUT /repos/mike/dotfiles/topics",
+                 "PATCH /repos/mike/dotfiles/labels/bug", "POST /repos/mike/dotfiles/labels",
+                 "PUT /repos/mike/dotfiles/actions/permissions",
+                 "PUT /repos/mike/dotfiles/actions/permissions/workflow"):
+        assert f"[dry-run] {call}" in out, call
+    assert "default branch is main" in out  # checked only: --fix leaves it

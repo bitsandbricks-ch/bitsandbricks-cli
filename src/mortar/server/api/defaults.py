@@ -78,6 +78,17 @@ def validate(path: str, text: str) -> list[str]:
             unknown = set(grp.get("settings") or {}) - set(D.REPO_SETTINGS)
             if unknown:
                 problems.append(f"{label}: settings bnb doesn't check: {', '.join(sorted(unknown))}")
+            off = set(config._list(grp.get("skip"))) - set(config.CHECKS)
+            if off:
+                problems.append(f"{label}: skip doesn't know {', '.join(sorted(off))} "
+                                f"(checks: {', '.join(config.CHECKS)})")
+            if grp.get("visibility") not in (None, "public", "private", "internal"):
+                problems.append(f"{label}: visibility is public, private or internal")
+            acts = grp.get("actions") or {}
+            if not isinstance(acts, dict) or set(acts) - set(D.ACTIONS + D.WORKFLOW):
+                problems.append(f"{label}: actions knows {', '.join(D.ACTIONS + D.WORKFLOW)}")
+            if not isinstance(grp.get("labels") or [], (list, dict)):
+                problems.append(f"{label}: labels is a list of names or a table of name = color")
             gl = grp.get("gitlab") or {}
             if gl and set(gl.get("settings") or {}) - set(GL.SETTINGS):
                 problems.append(f"{label}: gitlab settings bnb doesn't know: "

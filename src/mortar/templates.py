@@ -32,6 +32,24 @@ files = [".gitignore", "LICENSE", ".github/pull_request_template.md"]
 require = { allow_auto_merge = true }
 release_assets = ["*.tar.gz"]
 """},
+    {"id": "group-hardened", "title": "Group: hardened public repos",
+     "help": "Security on, read-only workflow tokens, pinned actions, labels, topics and the files every repo needs",
+     "text": """
+[[group]]
+name = "public"
+match = { org = "your-org", topics = ["public"] }
+settings = { delete_branch_on_merge = true, allow_merge_commit = false, has_wiki = false, web_commit_signoff_required = true }
+security = { secret_scanning = "enabled", secret_scanning_push_protection = "enabled", dependabot_alerts = "enabled", dependabot_security_updates = "enabled" }
+vulnerability_reporting = true
+immutable_releases = true
+topics = ["your-org"]
+labels = { bug = "d73a4a", enhancement = "a2eeef", dependencies = "0366d6", security = "b60205" }
+actions = { allowed_actions = "selected", default_workflow_permissions = "read", can_approve_pull_request_reviews = false }
+required_files = ["README.md", "LICENSE", "SECURITY.md", "CODEOWNERS|.github/CODEOWNERS"]
+branch = "main"
+visibility = "public"
+description = true
+"""},
     {"id": "group-gitlab", "title": "Group: GitLab projects",
      "help": "Settings and protected branches for GitLab projects (provider = gitlab)",
      "text": """

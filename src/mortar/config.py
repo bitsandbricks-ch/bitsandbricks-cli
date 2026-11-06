@@ -77,7 +77,11 @@ GITLAB: contextvars.ContextVar = contextvars.ContextVar("bnb_gitlab", default=No
 OVERRIDE: contextvars.ContextVar = contextvars.ContextVar("bnb_config_override", default=None)
 GROUP_KEYS = {"name", "match", "from", "files", "require", "settings", "security", "immutable_releases",
               "vulnerability_reporting", "rulesets", "release_assets",
-              "version", "changelog"}
+              "version", "changelog", "topics", "labels", "actions", "required_files", "branch",
+              "visibility", "description", "skip"}
+# What doctor checks for a group; `skip = [...]` turns checks off.
+CHECKS = ("settings", "security", "vulnerability_reporting", "immutable_releases", "rulesets", "own_rulesets",
+          "files", "required_files", "topics", "labels", "actions", "branch", "visibility", "description", "plugins")
 
 
 def config_dir() -> Path:
@@ -188,6 +192,14 @@ class Group:
     release_assets: list[str] = field(default_factory=list)  # globs every release must attach
     version: str | None = None  # the file that holds the version: plugin.yaml, pyproject.toml, VERSION ...
     changelog: list[str] = field(default_factory=list)  # changelogs that get a section per version
+    topics: list[str] = field(default_factory=list)  # topics every repo has (doctor --fix adds them)
+    labels: dict = field(default_factory=dict)  # {name: color or {color, description}} (--fix creates them)
+    actions: dict = field(default_factory=dict)  # enabled, allowed_actions, default_workflow_permissions, ...
+    required_files: list[str] = field(default_factory=list)  # each must exist; "A|B" takes either
+    branch: str | None = None  # the default branch's name (checked only)
+    visibility: str | None = None  # public, private or internal (checked only)
+    description: bool = False  # every repo needs a description (checked only)
+    skip: list[str] = field(default_factory=list)  # checks to leave out (CHECKS)
     extra: dict = field(default_factory=dict)
 
     def matches(self, repo: str, topics: list[str] | None = None) -> bool:
@@ -293,6 +305,14 @@ def make_group(raw: dict, i: int) -> Group:
         release_assets=_list(raw.get("release_assets")),
         version=raw.get("version"),
         changelog=_list(raw.get("changelog")),
+        topics=_list(raw.get("topics")),
+        labels=_labels(raw.get("labels")),
+        actions=raw.get("actions") or {},
+        required_files=_list(raw.get("required_files")),
+        branch=raw.get("branch"),
+        visibility=raw.get("visibility"),
+        description=bool(raw.get("description")),
+        skip=_list(raw.get("skip")),
         extra={k: v for k, v in raw.items() if k not in GROUP_KEYS},
     )
 
@@ -352,6 +372,19 @@ def operator_settings() -> dict:
     return {k: got[k] for k in ("defaults", "ref", "orgs", "repos", "exclude") if got.get(k)}
 
 
+def _labels(raw) -> dict:
+    """labels = ["bug", ...] or { bug = "d73a4a", docs = { color = "0075ca", description = "..." } }."""
+    if isinstance(raw, list):
+        return {str(n): {} for n in raw}
+    out = {}
+    for name, spec in (raw or {}).items():
+        spec = {"color": spec} if isinstance(spec, str) else dict(spec or {})
+        if spec.get("color"):
+            spec["color"] = str(spec["color"]).lstrip("#").lower()
+        out[name] = spec
+    return out
+
+
 def _unique(items: list[str]) -> list[str]:
     return list(dict.fromkeys(items))
 
@@ -373,6 +406,18 @@ orgs = [{orgs}]
 name = "default"
 settings = {{ delete_branch_on_merge = true, allow_auto_merge = true }}
 security = {{ secret_scanning = "enabled", secret_scanning_push_protection = "enabled" }}
+# security = {{ dependabot_alerts = "enabled", dependabot_security_updates = "enabled" }}
+# vulnerability_reporting = true         # private vulnerability reporting
+# immutable_releases = true
+# topics = ["your-org"]                  # topics every repo has
+# labels = {{ bug = "d73a4a", dependencies = {{ color = "0366d6", description = "Updates" }} }}
+# actions = {{ allowed_actions = "selected", default_workflow_permissions = "read",
+#             can_approve_pull_request_reviews = false }}
+# required_files = ["README.md", "LICENSE", "SECURITY.md", "CODEOWNERS|.github/CODEOWNERS"]
+# branch = "main"                        # checked only: the default branch's name
+# visibility = "private"                 # checked only
+# description = true                     # checked only: every repo has one
+# skip = ["labels"]                      # checks to leave out for this group
 # rulesets = "rulesets/default"          # ruleset JSON files (export them from GitHub)
 # files = "files/default"                # files every repo of the group gets
 """

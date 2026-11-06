@@ -95,9 +95,19 @@ require = { allow_auto_merge = true }              # what the reference itself m
 [[group]]
 name = "default"                                   # no match: takes the rest
 settings = { delete_branch_on_merge = true, has_wiki = false }
-security = { secret_scanning = "enabled", secret_scanning_push_protection = "enabled" }
+security = { secret_scanning = "enabled", secret_scanning_push_protection = "enabled",
+             dependabot_alerts = "enabled", dependabot_security_updates = "enabled" }
 immutable_releases = true
 vulnerability_reporting = true
+topics = ["your-org"]                              # topics every repo has
+labels = { bug = "d73a4a", docs = { color = "0075ca", description = "Documentation" } }
+actions = { allowed_actions = "selected", default_workflow_permissions = "read",
+            can_approve_pull_request_reviews = false }
+required_files = ["README.md", "LICENSE", "CODEOWNERS|.github/CODEOWNERS"]   # A|B: either one
+branch = "main"                                    # the default branch's name
+visibility = "private"                             # public, private or internal
+description = true                                 # every repo has a description
+skip = ["labels"]                                  # checks this group leaves out
 release_assets = ["*.zip"]                         # files every release must attach (bnb releases)
 version = "pyproject.toml"                         # the file with the version (bnb bump, bnb release)
 changelog = ["CHANGELOG.md"]                       # changelogs bnb bump adds the section to
@@ -108,6 +118,10 @@ files = "files/default"                            # copied into each repo, path
 The first group that matches a repo is its group. With `from`, the group takes everything from the reference repo as it is live on GitHub (settings, security, release immutability, rulesets), so changing the reference changes what every repo of the group should have. Explicit `settings`, `security` and `rulesets` go on top.
 
 A ruleset from the defaults folder only has to be covered: a repo may set more than the file says (GitHub fills in its own defaults). A reference repo's rulesets must match exactly. Each repo's own `.github/rulesets/*.json` must also match what's live, and `doctor --fix` imports them.
+
+`doctor --fix` sets settings, security (Dependabot alerts and security updates too), topics (it adds the missing ones and keeps the rest), labels (it creates missing ones and fixes colors, and leaves other labels alone) and the Actions permissions. `branch`, `visibility`, `description` and `required_files` are only checked, because changing them can break things: a missing required file is a job for `bnb sync` or a PR.
+
+`skip` turns checks off for a group: `settings`, `security`, `vulnerability_reporting`, `immutable_releases`, `rulesets`, `own_rulesets` (the repo's `.github/rulesets`), `files`, `required_files`, `topics`, `labels`, `actions`, `branch`, `visibility`, `description` and `plugins` (the plugins' doctor checks).
 
 Unknown keys on a group stay there for plugins (`group.extra`).
 
