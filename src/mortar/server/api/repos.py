@@ -13,6 +13,7 @@ from mortar import core, plugins
 from mortar import defaults as D
 from mortar import packages as P
 from mortar import repos as R
+from mortar import workflows as W
 from mortar.server import gitlab as GL
 from mortar.server.api.account import body
 from mortar.server.auth import audit, can_write, need
@@ -428,6 +429,40 @@ def security():
             out.append({"repo": repo, "provider": "gitlab" if is_gl(repo) else "github", "alerts": alerts,
                         "unread": unread})
         return jsonify({"security": out})
+
+
+@bp.get("/workflows")
+@need("read")
+def workflows():
+    """Workflow hardening findings for every GitHub repo (GitLab CI isn't read yet)."""
+    with as_user() as (gh, gl):
+        cfg = load_config()
+        gh_r, _gl_r, _ = all_repos(cfg, gh, gl, names_arg(), request.args.get("group"))
+
+        def one(repo: str) -> dict:
+            want = W.want_of(cfg, repo)
+            files = W.workflow_files(repo)
+            return {"repo": repo, "workflows": len(files), "findings": W.findings(repo, want, files)}
+
+        try:
+            out = core.pmap(one, gh_r)
+        except core.RateLimited as err:
+            abort(429, str(err))
+    return jsonify({"workflows": out})
+
+
+@bp.post("/workflows/pin")
+@need("read")
+def workflows_pin():
+    """A PR per repo that pins its actions to commit SHAs."""
+    data = body()
+    dry = write_allowed(bool(data.get("dry_run")))
+    with as_user(dry) as (gh, gl):
+        cfg = load_config()
+        gh_r, _gl_r, _ = all_repos(cfg, gh, gl, [str(x) for x in data.get("repos") or []], data.get("group"))
+        text = capture_rate(W.workflows, cfg, gh_r, True) if gh_r else "no GitHub repos"
+    audit("workflows.pin", ", ".join(data.get("repos") or []) or "all", dry, detail=text)
+    return jsonify({"text": text})
 
 
 # ── doctor, sync, new ────────────────────────────────────────────────────────

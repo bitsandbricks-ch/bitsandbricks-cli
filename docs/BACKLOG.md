@@ -18,9 +18,6 @@ move it to "Done" when it ships.
   server-sent events, so lists refresh themselves and the cache can be invalidated precisely.
 - **Scheduled checks.** Run `doctor` nightly per user or group, keep the results, and show drift over time;
   notify on new drift (email, Slack, Discord, a webhook).
-- **Workflow hardening.** Flag actions pinned to a tag instead of a SHA, `pull_request_target` with a
-  checkout of the PR, `permissions: write-all`, and script injection from `${{ github.event.* }}` (zizmor /
-  actionlint findings per repo), with a PR that pins the actions.
 - **Access review.** Who has admin or write on each repo, outside collaborators, deploy keys and webhooks
   (read only), with a periodic "still needed?" review and an export for audits.
 - **Prometheus `/metrics`** for the operator itself (requests, GitHub calls, cache hit rate, rate limit left)
@@ -90,5 +87,7 @@ move it to "Done" when it ships.
 
 ## Done
 
+- Workflow hardening: `bnb workflows [--fix]`, doctor's `workflows` check and the web app's Workflows tab.
+- More repo settings in mortar.toml: topics, labels, Actions permissions, required files and `skip`.
 - Mortar, the web app, with GitHub and GitLab OAuth, terminal UI, API keys, device login (this PR).
 - Plugin marketplace with a signed index; `bnb stats`; transport layer with caching.

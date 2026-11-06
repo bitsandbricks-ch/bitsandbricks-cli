@@ -17,6 +17,7 @@ repo of your orgs. --org and --group narrow that down.
   bnb approve                       runs waiting for you (environments, outside contributors)
   bnb security                      Dependabot, secret and code scanning alerts
   bnb doctor [names] [--fix]        settings, security, rulesets and files against the defaults
+  bnb workflows [names] [--fix]     unpinned actions, write-all tokens, script injection; --fix: PRs that pin
   bnb sync [names]                  PRs that bring shared files in line
   bnb new owner/name [--group G]    a new repo, set up the way its group wants
   bnb tui                           all of it, full screen
@@ -30,10 +31,10 @@ from __future__ import annotations
 import argparse
 import sys
 
-from mortar import __version__, config, core, defaults, packages, plugins, repos, versions
+from mortar import __version__, config, core, defaults, packages, plugins, repos, versions, workflows
 
 ON_REPOS = ("status", "prs", "merge", "runs", "rerun", "releases", "packages", "approve", "security", "doctor", "sync",
-            "repos", "stats")
+            "repos", "stats", "workflows")
 
 
 def common_parser() -> argparse.ArgumentParser:
@@ -66,6 +67,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict]:
         "sync": "open PRs with the group's shared files",
         "repos": "the repos bnb sees and their groups",
         "stats": "PRs merged, time to merge, CI success, releases over the last days",
+        "workflows": "risky workflows: unpinned actions, write-all tokens, script injection",
     }
     for cmd in ON_REPOS:
         sp = sub.add_parser(cmd, parents=[common], help=helps[cmd])
@@ -86,6 +88,8 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict]:
             sp.add_argument("--problems", action="store_true", help="only what's missing or failed")
         if cmd == "doctor":
             sp.add_argument("--fix", action="store_true", help="apply settings and rulesets where they drifted")
+        if cmd == "workflows":
+            sp.add_argument("--fix", action="store_true", help="open a PR per repo that pins the actions to SHAs")
         if cmd == "stats":
             sp.add_argument("--days", type=int, default=30)
         if cmd == "sync":
@@ -292,6 +296,8 @@ def run(cfg, args, names: list[str], pick: dict) -> None:
         return repos.security(names)
     if args.cmd == "doctor":
         return defaults.doctor_all(cfg, names, args.fix)
+    if args.cmd == "workflows":
+        return workflows.workflows(cfg, names, args.fix)
     if args.cmd == "sync":
         ctx = defaults.sync_ctx(cfg, names, args.only)
         unknown = sorted({p for w in ctx["wants"].values() for p in w.get("unknown", [])})

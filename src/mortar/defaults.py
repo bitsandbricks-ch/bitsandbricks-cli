@@ -13,7 +13,7 @@ import json
 import time
 import urllib.parse
 
-from mortar import core, plugins
+from mortar import core, plugins, workflows
 from mortar.config import Config, Group
 from mortar.core import WEB, api, compact, file_on, for_each, get_file, git_blob_sha, open_pr, say, short
 
@@ -126,7 +126,8 @@ def baseline(cfg: Config, group: Group) -> dict:
     texts = cfg.files_of(group)
     want["files"].update({p: git_blob_sha(t) for p, t in texts.items()})
     want["texts"].update(texts)
-    want.update(topics=list(group.topics), labels=dict(group.labels), actions=dict(group.actions),
+    want.update(workflows=workflows.settings(group.workflows), topics=list(group.topics),
+                labels=dict(group.labels), actions=dict(group.actions),
                 required_files=list(group.required_files), branch=group.branch, visibility=group.visibility,
                 description=group.description, skip=set(group.skip))
     return skip(want)
@@ -146,6 +147,8 @@ def skip(want: dict) -> dict:
             want[key] = None
     if "description" in off:
         want["description"] = False
+    if "workflows" in off:
+        want["workflows"] = {}
     return want
 
 
@@ -461,6 +464,9 @@ def doctor(repo: str, ctx: dict) -> None:
     problems = list(fixable)
     if want:
         problems += file_drift(repo, want, branch) + required_drift(repo, want, branch) + checked
+        if want.get("workflows"):
+            problems += [f"workflow {f['path'].rsplit('/', 1)[-1]}:{f['line']} {f['text']}"
+                         for f in workflows.findings(repo, want["workflows"])]
     if not (want and "plugins" in want["skip"]):
         problems += plugins.hook("doctor", repo, group, ctx)
 
@@ -489,6 +495,8 @@ def doctor(repo: str, ctx: dict) -> None:
     if want and any(p.endswith(("is missing", f"differs from {want['label']}")) and not p.startswith("ruleset")
                     for p in problems):
         say(f"   fix: bnb sync {repo}  (PR with the files)")
+    if any(p.startswith("workflow ") and "isn't pinned" in p for p in problems):
+        say(f"   fix: bnb workflows --fix {repo}  (PR that pins the actions)")
     for hint in plugins.hook("doctor_hints", repo, group, problems):
         say(f"   fix: {hint}")
 

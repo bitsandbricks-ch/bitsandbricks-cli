@@ -78,10 +78,11 @@ OVERRIDE: contextvars.ContextVar = contextvars.ContextVar("bnb_config_override",
 GROUP_KEYS = {"name", "match", "from", "files", "require", "settings", "security", "immutable_releases",
               "vulnerability_reporting", "rulesets", "release_assets",
               "version", "changelog", "topics", "labels", "actions", "required_files", "branch",
-              "visibility", "description", "skip"}
+              "visibility", "description", "skip", "workflows"}
 # What doctor checks for a group; `skip = [...]` turns checks off.
 CHECKS = ("settings", "security", "vulnerability_reporting", "immutable_releases", "rulesets", "own_rulesets",
-          "files", "required_files", "topics", "labels", "actions", "branch", "visibility", "description", "plugins")
+          "files", "required_files", "topics", "labels", "actions", "branch", "visibility", "description", "workflows",
+          "plugins")
 
 
 def config_dir() -> Path:
@@ -200,6 +201,7 @@ class Group:
     visibility: str | None = None  # public, private or internal (checked only)
     description: bool = False  # every repo needs a description (checked only)
     skip: list[str] = field(default_factory=list)  # checks to leave out (CHECKS)
+    workflows: bool | dict | None = None  # workflow hardening in doctor: true, or a table (see workflows.py)
     extra: dict = field(default_factory=dict)
 
     def matches(self, repo: str, topics: list[str] | None = None) -> bool:
@@ -313,6 +315,7 @@ def make_group(raw: dict, i: int) -> Group:
         visibility=raw.get("visibility"),
         description=bool(raw.get("description")),
         skip=_list(raw.get("skip")),
+        workflows=raw.get("workflows"),
         extra={k: v for k, v in raw.items() if k not in GROUP_KEYS},
     )
 
@@ -417,6 +420,7 @@ security = {{ secret_scanning = "enabled", secret_scanning_push_protection = "en
 # branch = "main"                        # checked only: the default branch's name
 # visibility = "private"                 # checked only
 # description = true                     # checked only: every repo has one
+# workflows = true                       # flag unpinned actions, write-all tokens, script injection
 # skip = ["labels"]                      # checks to leave out for this group
 # rulesets = "rulesets/default"          # ruleset JSON files (export them from GitHub)
 # files = "files/default"                # files every repo of the group gets

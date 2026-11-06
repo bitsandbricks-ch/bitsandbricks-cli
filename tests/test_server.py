@@ -120,8 +120,14 @@ def test_changes_are_dry_runs_and_audited(op):
     assert "[dry-run] create private acme/plugin-c from the template acme/plugin-tpl" in text
     text = c.post("/api/v1/approve", json={"repo": "acme/api", "id": 5, "dry_run": True}, headers=H).json["text"]
     assert "[dry-run] approve production for acme/api main" in text
+    wf = {w["repo"]: w for w in c.get("/api/v1/workflows").json["workflows"]}
+    assert wf["acme/api"] == {"repo": "acme/api", "workflows": 0, "findings": []}
+    assert {f["kind"] for f in wf["acme/web"]["findings"]} == {"pinned", "permissions", "pull_request_target",
+                                                              "injection"}
+    text = c.post("/api/v1/workflows/pin", json={"repos": ["web"], "dry_run": True}, headers=H).json["text"]
+    assert "[dry-run] PUT /repos/acme/web/contents/.github/workflows/ci.yml" in text
     log = c.get("/api/v1/audit").json
-    assert {"merge", "doctor.fix", "sync", "new", "approve"} <= {a["action"] for a in log}
+    assert {"merge", "doctor.fix", "sync", "new", "approve", "workflows.pin"} <= {a["action"] for a in log}
     assert all(a["dry_run"] for a in log if a["action"] in ("merge", "sync"))
 
 

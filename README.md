@@ -39,6 +39,7 @@ Repos are named as `owner/name`, as a bare `name` when only one repo has it, or 
 | `bnb security` | Open Dependabot, secret scanning and code scanning alerts. |
 | `bnb doctor [names] [--fix]` | Settings, security, release immutability, rulesets and files against the defaults. `--fix` applies them. |
 | `bnb sync [names] [--only PATH]` | Opens a PR per repo whose shared files differ. |
+| `bnb workflows [names] [--fix]` | Risky GitHub Actions workflows: actions not pinned to a commit, `write-all` or missing `permissions`, `pull_request_target` that checks out the PR, script injection from `${{ github.event... }}`. `--fix` opens a PR per repo that pins the actions to commit SHAs. |
 | `bnb new owner/name [--group G] [--public]` | Creates a repo the way its group wants it: from the reference repo when that is a GitHub template, the group's files committed, then its settings, security and rulesets applied. Private unless `--public`. |
 | `bnb open web#12` | Prints the link, and opens it (or copies it over SSH; `BNB_OPEN=browser\|copy\|print`). |
 | `bnb stats [--days 30]` | Pull requests merged and opened, median time to merge, open and stale PRs, workflow runs with success rate and duration, releases. |
@@ -107,6 +108,7 @@ required_files = ["README.md", "LICENSE", "CODEOWNERS|.github/CODEOWNERS"]   # A
 branch = "main"                                    # the default branch's name
 visibility = "private"                             # public, private or internal
 description = true                                 # every repo has a description
+workflows = { allow_unpinned = ["actions/*"] }     # doctor checks the workflows too (or: workflows = true)
 skip = ["labels"]                                  # checks this group leaves out
 release_assets = ["*.zip"]                         # files every release must attach (bnb releases)
 version = "pyproject.toml"                         # the file with the version (bnb bump, bnb release)
@@ -121,7 +123,9 @@ A ruleset from the defaults folder only has to be covered: a repo may set more t
 
 `doctor --fix` sets settings, security (Dependabot alerts and security updates too), topics (it adds the missing ones and keeps the rest), labels (it creates missing ones and fixes colors, and leaves other labels alone) and the Actions permissions. `branch`, `visibility`, `description` and `required_files` are only checked, because changing them can break things: a missing required file is a job for `bnb sync` or a PR.
 
-`skip` turns checks off for a group: `settings`, `security`, `vulnerability_reporting`, `immutable_releases`, `rulesets`, `own_rulesets` (the repo's `.github/rulesets`), `files`, `required_files`, `topics`, `labels`, `actions`, `branch`, `visibility`, `description` and `plugins` (the plugins' doctor checks).
+`skip` turns checks off for a group: `settings`, `security`, `vulnerability_reporting`, `immutable_releases`, `rulesets`, `own_rulesets` (the repo's `.github/rulesets`), `files`, `required_files`, `topics`, `labels`, `actions`, `branch`, `visibility`, `description`, `workflows` and `plugins` (the plugins' doctor checks).
+
+`workflows` makes doctor check the group's workflow files like `bnb workflows` does. It takes `true` or a table: `pinned`, `permissions`, `pull_request_target` and `injection` turn single checks off with `false`, and `allow_unpinned = ["actions/*", "your-org/*"]` lets actions of owners you trust stay on a tag. `bnb workflows --fix` keeps the tag as a comment (`uses: actions/checkout@<sha> # v4`), so Dependabot and Renovate keep updating the pins.
 
 Unknown keys on a group stay there for plugins (`group.extra`).
 

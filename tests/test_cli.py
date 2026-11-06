@@ -325,3 +325,44 @@ skip = ["own_rulesets"]
                  "PUT /repos/mike/dotfiles/actions/permissions/workflow"):
         assert f"[dry-run] {call}" in out, call
     assert "default branch is main" in out  # checked only: --fix leaves it
+
+
+def test_workflows(env, tmp_path):
+    out = bnb(env, "workflows", "web")
+    web = out.split("== acme/web")[1]
+    for line in ("ci.yml:9 actions/checkout@v4 isn't pinned to a commit",
+                 "ci.yml:14 someone/thing@main isn't pinned to a commit",
+                 "ci.yml:7 permissions: write-all", "ci.yml:1 no top-level permissions",
+                 "ci.yml:11 pull_request_target (line 3) checks out the PR's code",
+                 "ci.yml:15 github.event.pull_request.title goes straight into a shell",
+                 "ci.yml:18 github.head_ref goes straight into a shell",
+                 "fix: bnb workflows --fix acme/web"):
+        assert line in web, line
+    assert "acme/tools" not in web and "local-action" not in web and "github.sha" not in web
+    out = bnb(env, "workflows", "--fix", "--dry-run", "web")
+    assert "couldn't resolve someone/thing@main: left as it is" in out
+    assert "[dry-run] PUT /repos/acme/web/contents/.github/workflows/ci.yml" in out
+    assert "PR: " in out and "(pins 1 action in 1 workflow)" in out
+    assert "ci.yml:14 someone/thing@main" in out and "ci.yml:9 actions/checkout" not in out.split("PR: ")[1]
+    folder = tmp_path / "defaults"
+    folder.mkdir()
+    (folder / "mortar.toml").write_text('orgs = ["acme"]\n[[group]]\nname = "default"\n'
+                                        'workflows = { permissions = false, allow_unpinned = ["actions/*"] }\n')
+    out = bnb({**env, "BNB_DEFAULTS": str(folder)}, "doctor", "web").split("== acme/web")[1]
+    assert "workflow ci.yml:14 someone/thing@main isn't pinned to a commit" in out
+    assert "workflow ci.yml:18 github.head_ref goes straight into a shell" in out
+    assert "actions/checkout" not in out and "permissions" not in out
+    assert "fix: bnb workflows --fix acme/web" in out
+
+
+def test_workflow_pinning_keeps_the_tag():
+    from mortar import workflows
+
+    text = "    steps:\n      - uses: actions/checkout@v4\n      - uses: 'actions/cache@v3' # old\n"
+    workflows._resolved[("actions/checkout", "v4")] = "a" * 40
+    workflows._resolved[("actions/cache", "v3")] = None
+    new, changed, failed = workflows.pin(text, {"pinned": True, "allow_unpinned": []})
+    assert f"      - uses: actions/checkout@{'a' * 40} # v4\n" in new
+    assert "'actions/cache@v3' # old" in new and changed == ["actions/checkout@v4"] and failed == ["actions/cache@v3"]
+    assert workflows.scan("x.yml", "permissions: {}\njobs:\n  a:\n    steps:\n      - uses: actions/checkout@v4\n",
+                          workflows.settings({"allow_unpinned": ["actions/*"]})) == []

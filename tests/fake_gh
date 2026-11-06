@@ -59,6 +59,28 @@ SECURITY_MD = "Report security issues privately.\n"
 GITIGNORE = "__pycache__/\n"
 LICENSE = "MIT License\n"
 
+CI_YML = """\
+name: CI
+on:
+  pull_request_target:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions: write-all
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: "acme/tools/setup@0123456789abcdef0123456789abcdef01234567"
+      - uses: ./local-action
+      - uses: someone/thing@main  # a branch
+      - run: echo "${{ github.event.pull_request.title }}"
+      - run: |
+          echo ok
+          echo "${{ github.head_ref }}" > branch.txt
+      - name: fine
+        run: echo "${{ github.sha }}"
+"""
 SETTINGS = {"allow_auto_merge": True, "delete_branch_on_merge": True, "has_wiki": False}
 REPOS = {  # full name: (settings, rulesets, files, immutable)
     "acme/plugin-tpl": (SETTINGS, {"main": ruleset("main")},
@@ -69,7 +91,7 @@ REPOS = {  # full name: (settings, rulesets, files, immutable)
     "acme/plugin-b": (dict(SETTINGS, has_wiki=True), {}, {
         ".gitignore": GITIGNORE, "LICENSE": "GPL\n", "plugin.yaml": "name: plugin-b\nversion: \"0.4.0\"\n",
         "CHANGELOG.md": "# Changelog\n\n## [Unreleased]\n\n## [0.4.0] - 2026-11-05\n- Faster\n"}, False),
-    "acme/web": (dict(SETTINGS, delete_branch_on_merge=False), {}, {}, False),
+    "acme/web": (dict(SETTINGS, delete_branch_on_merge=False), {}, {".github/workflows/ci.yml": CI_YML}, False),
     "acme/api": (SETTINGS, {"main": ruleset("main", approvals=1)},
                  {"SECURITY.md": SECURITY_MD, ".github/rulesets/release.json": json.dumps(RELEASE_RS)}, False),
     "acme/legacy": ({}, {}, {}, False),
@@ -200,6 +222,8 @@ if argv[0] == "api":
         fail("gh: Not Found (HTTP 404)")
     if route == "/user/repos":
         out([info("mike/dotfiles")] if params.get("page", "1") == "1" else [])
+    if route == "/repos/actions/checkout/commits/v4":
+        out({"sha": "b4ffde65f46336ab88eb53be808477a3936bae11"})
     m = re.match(r"/repos/([\w.-]+/[\w.-]+)(/.*)?$", route)
     if not m or m.group(1) not in REPOS:
         fail("gh: Not Found (HTTP 404)")
