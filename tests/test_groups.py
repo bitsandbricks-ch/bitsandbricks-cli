@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import sys
+
+import pytest
+
 from mason import config
 from mason.config import Config, Group, orgs_of
 
@@ -45,7 +49,10 @@ def test_orgs_of():
     assert orgs_of("gitlab:a/b/p") == ["gitlab:a/", "gitlab:a/b/"]
 
 
+@pytest.mark.skipif(sys.version_info < (3, 10), reason="the operator needs Python 3.10+")
 def test_gitlab_group_filter_uses_topics(monkeypatch):
+    pytest.importorskip("flask")
+    pytest.importorskip("sqlalchemy")
     """A group that matches GitLab projects on topics keeps them when the list is filtered by it."""
     from flask import Flask
 
