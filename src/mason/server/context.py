@@ -18,7 +18,8 @@ from mason.server import oauth
 REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 GITLAB_REPO = re.compile(r"^gitlab:[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$")
 SETTING_KEYS = {"defaults": str, "ref": str, "orgs": list, "repos": list, "exclude": list,
-                "gitlab_groups": list, "gitlab_repos": list, "theme": str, "plugins_off": list}
+                "gitlab_groups": list, "gitlab_repos": list, "theme": str, "plugins_off": list,
+                "org_defaults": bool}
 
 
 class NoTransport:
@@ -46,7 +47,8 @@ def valid_repo(value: str) -> str:
 
 def user_settings(user) -> dict:
     s = user.settings
-    return {k: s.get(k, [] if t is list else "") for k, t in SETTING_KEYS.items()}
+    blank = {list: [], str: "", bool: True}  # org_defaults: on unless turned off
+    return {k: s.get(k, blank[t]) for k, t in SETTING_KEYS.items()}
 
 
 def clean_settings(body: dict) -> dict:
@@ -55,7 +57,10 @@ def clean_settings(body: dict) -> dict:
         if k not in body:
             continue
         v = body[k]
-        if t is list:
+        if t is bool:
+            if not isinstance(v, bool):
+                abort(400, f"{k} must be true or false")
+        elif t is list:
             if isinstance(v, str):
                 v = [x.strip() for x in v.replace("\n", ",").split(",")]
             if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
@@ -102,6 +107,7 @@ def load_config(orgs: list[str] | None = None):
     """This user's config: their settings plus their defaults repo (inside as_user)."""
     s = user_settings(g.user)
     mine = {k: s[k] for k in ("defaults", "ref", "orgs", "repos", "exclude") if s.get(k)}
+    mine["org_defaults"] = s.get("org_defaults") is not False
     try:
         return config.load(orgs, mine=mine, env=False)
     except RuntimeError as err:

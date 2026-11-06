@@ -80,6 +80,7 @@ def run():
         argv.append("--yes")  # nobody can answer y/N here; the console asked before sending
     s = user_settings(__import__("flask").g.user)
     mine = {k: s[k] for k in ("defaults", "ref", "orgs", "repos", "exclude") if s.get(k)}
+    mine["org_defaults"] = s.get("org_defaults") is not False
     with as_user():
         token = config.OVERRIDE.set(mine)
         try:

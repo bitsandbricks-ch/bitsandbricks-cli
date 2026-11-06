@@ -638,7 +638,7 @@ def create(gl: GitLab, cfg, repo: str, group_name: str | None = None, public: bo
     path = path_of(repo)
     ns, _, name = path.rpartition("/")
     if group_name:
-        group = next((g for g in cfg.groups if g.name == group_name), None)
+        group = cfg.find_group(group_name, full(repo))
         if not group:
             raise RuntimeError(f"No group {group_name!r}")
     else:
