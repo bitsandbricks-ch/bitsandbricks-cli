@@ -17,7 +17,7 @@ const page = ref(null)
 const text = ref('')
 const sel = ref(null)
 const output = ref('')
-const form = ref(false)
+const form = ref('') // '', 'release' or 'tag'
 const loading = ref(false)
 
 async function load(tag = '', fresh = false) {
@@ -30,7 +30,7 @@ async function load(tag = '', fresh = false) {
     sel.value = got.selected || null
   } catch (e) { text.value = `error: ${e.message}` } finally { loading.value = false }
 }
-watch(repo, () => { page.value = null; form.value = false; output.value = ''; load(String(route.query.tag || '')) }, { immediate: true })
+watch(repo, () => { page.value = null; form.value = ''; output.value = ''; load(String(route.query.tag || '')) }, { immediate: true })
 watch(sel, (tag, before) => { if (tag && before && tag !== before) { router.replace({ query: { ...route.query, tag } }); load(tag) } })
 
 const rows = computed(() => page.value?.releases || [])
@@ -45,10 +45,10 @@ const back = () => (window.history.state?.back ? router.back() : router.push('/r
 function done({ text: t, tag, ok }) {
   output.value = t
   if (!ok) return
-  form.value = false
+  form.value = ''
   load('', true).then(() => { if (rows.value.some((r) => r.tag === tag)) sel.value = tag })
 }
-useKeys({ Escape: () => (form.value ? (form.value = false) : back()), Backspace: back, n: () => { form.value = true },
+useKeys({ Escape: () => (form.value ? (form.value = '') : back()), Backspace: back, n: () => { form.value = 'release' }, T: () => { form.value = 'tag' },
   o: open, r: () => load(sel.value || '', true) })
 </script>
 
@@ -59,7 +59,8 @@ useKeys({ Escape: () => (form.value ? (form.value = false) : back()), Backspace:
       <span class="accent">releases › {{ repo }}</span>
       <span class="spacer" />
       <button @click="load(sel || '', true)"><span class="k">r</span> reload</button>
-      <button class="primary" @click="form = true"><span class="k">n</span> new release</button>
+      <button class="primary" @click="form = 'release'"><span class="k">n</span> new release</button>
+      <button @click="form = 'tag'"><span class="k">T</span> new tag</button>
       <button :disabled="!page" @click="open"><span class="k">o</span> open</button>
       <router-link class="chip" :to="{ path: '/repo', query: { repo } }">repo page</router-link>
     </div>
@@ -67,7 +68,8 @@ useKeys({ Escape: () => (form.value ? (form.value = false) : back()), Backspace:
       <div><DataTable v-model="sel" :columns="columns" :rows="rows" :row-key="(r) => r.tag"
                       :empty="loading ? 'loading…' : 'no releases yet: n creates the first'" @activate="open" /></div>
       <div class="pad">
-        <ReleaseForm v-if="form" :repo="repo" :suggest="page?.suggest" @done="done" @cancel="form = false" />
+        <ReleaseForm v-if="form" :key="form" :mode="form" :repo="repo" :suggest="page?.suggest" :publishes="page?.publishes"
+                     @done="done" @cancel="form = ''" />
         <template v-if="output"><h2>output</h2><TextPane :text="output" /></template>
         <TextPane v-if="!form" :text="text" :placeholder="loading ? 'loading…' : 'pick a release'" />
       </div>

@@ -87,6 +87,30 @@ def test_me_csrf_settings(op):
     assert c.put("/api/v1/settings", json={"org_defaults": False}, headers=H).json["org_defaults"] is False
 
 
+
+def test_theme_is_a_per_user_setting(op):
+    """The web app saves the theme to the account, so it follows the user to every browser."""
+    _, c = op
+    assert c.get("/api/v1/me").json["settings"]["theme"] == ""  # the default (phosphor)
+    assert c.put("/api/v1/settings", json={"theme": "grey"}, headers=H).json["theme"] == "grey"
+    assert c.get("/api/v1/me").json["settings"]["theme"] == "grey"
+    assert c.get("/api/v1/settings").json["orgs"] == []  # saving the theme leaves the other settings alone
+    assert c.put("/api/v1/settings", json={"theme": "neon"}, headers=H).status_code == 400
+    assert c.get("/api/v1/settings").json["theme"] == "grey"
+
+
+def test_web_themes_match_the_server():
+    """web/src/themes.js, style.css and the server's THEMES list name the same themes."""
+    import re
+    from pathlib import Path
+
+    from mason.server.context import THEMES
+
+    web = Path(__file__).resolve().parents[1] / "web" / "src"
+    js = re.findall(r"'([a-z]+)'", (web / "themes.js").read_text())
+    css = re.findall(r'\[data-theme="([a-z]+)"\]', (web / "style.css").read_text())
+    assert tuple(js) == THEMES and set(css) == set(THEMES)
+
 def test_lists(op):
     _, c = op
     repos = c.get("/api/v1/repos").json
@@ -819,3 +843,15 @@ def test_operator_panel(op, monkeypatch, capsys):
     # removing takes effect at the next request
     assert operator_command(app.config["OP"], "remove", "mike") == 0
     assert mike.get("/api/v1/operator").status_code == 403
+
+
+def test_tag_only(op):
+    _, c = op
+    assert c.get("/api/v1/release?repo=acme/plugin-b").json["publishes"] == ".github/workflows/release.yml"
+    assert c.get("/api/v1/release?repo=acme/api").json["publishes"] == ""
+    got = c.post("/api/v1/tags", json={"repo": "acme/plugin-b", "tag": "v0.4.0", "dry_run": True}, headers=H).json
+    assert "[dry-run] push the tag v0.4.0 on main of acme/plugin-b; .github/workflows/release.yml" in got["text"]
+    got = c.post("/api/v1/tags", json={"repo": "acme/plugin-a", "tag": "v1.0.0"}, headers=H).json
+    assert not got["ok"] and "has a tag v1.0.0 already" in got["text"]
+    assert c.post("/api/v1/tags", json={"repo": "acme/api", "tag": ""}, headers=H).status_code == 400
+    assert any(a["action"] == "tag.create" for a in c.get("/api/v1/audit").json)

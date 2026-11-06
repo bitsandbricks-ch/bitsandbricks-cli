@@ -1,9 +1,11 @@
 """Releases: create one by hand, and show a repo's releases in detail.
 
 `mason release new name v1.4.0 [--title T] [--notes TEXT|-] [--draft] [--prerelease] [--target REF]
-[--generate-notes]` creates a GitHub release (and its tag, on the default branch or --target, when the
-tag is new). `mason release view name [tag]` shows one release in full with the repo's recent releases;
-the TUI's and the web app's release pages show the same text.
+[--generate-notes]` creates a GitHub release through the API (and its tag, on the default branch or
+--target, when it is new). `mason release tag name [v1.4.0] [--target REF]` only pushes the tag, for repos
+whose workflow creates the release on a tag push (hubra's does, with immutable releases); the next patch
+tag is suggested when none is given. `mason release view name [tag]` shows one release in full with the
+repo's recent releases; the TUI's and the web app's release pages show the same text.
 
 The version-file flow (`mason bump`, then `mason release name` pushing v<version>) stays in versions.py:
 this is for releases that aren't driven by a version file, drafts and pre-releases.
@@ -135,7 +137,8 @@ def page(cfg: Config | None, repo: str, tag: str | None = None) -> dict:
     rel_url = (rel or {}).get("html_url") or f"{WEB}/{repo}/releases"
     return {"repo": repo, "provider": "github", "releases": [row(r) for r in rels],
             "selected": (rel or {}).get("tag_name") or "", "url": rel_url,
-            "text": detail_text(cfg, repo, rel, runs, rels), "suggest": suggest_from(rels)}
+            "text": detail_text(cfg, repo, rel, runs, rels), "suggest": suggest_from(rels),
+            "publishes": publishing_workflow(repo)}
 
 
 def view(cfg: Config, repo: str, tag: str | None = None) -> None:
@@ -171,10 +174,59 @@ def exists(repo: str, tag: str) -> dict | None:
         raise
 
 
+# A workflow that publishes on a tag push: triggered by pushed tags, and making the release itself.
+TAG_TRIGGER = re.compile(r"(?ms)^\s*push\s*:.*?^\s*tags\s*:")
+MAKES_RELEASE = re.compile(r"gh release create|action-gh-release|release-action|create-release|/releases\b|"
+                           r"semantic-release|goreleaser", re.I)
+
+
+def publishing_workflow(repo: str) -> str:
+    """The workflow file that creates the repo's releases when a tag is pushed ('' when there is none).
+    Such a repo gets only the tag from `mason release new`: a release made beforehand would collide with
+    the one the workflow makes (and with immutable releases it could never get its assets)."""
+    from mason import workflows as W
+    for path, (text, _) in W.workflow_files(repo).items():
+        if TAG_TRIGGER.search(text) and MAKES_RELEASE.search(text):
+            return path
+    return ""
+
+
+def push_tag(repo: str, tag: str, target: str = "") -> str:
+    """New tag: push `tag` on `target` (the default branch) and nothing else. A workflow that publishes on
+    tag pushes (hubra's) makes the release from it. Returns the tag's release page ('' in a dry run)."""
+    from mason import versions as V
+    tag = valid_tag(tag)
+    target = (target or "").strip()
+    if target and not re.match(r"^[A-Za-z0-9._/-]{1,250}$", target):
+        raise RuntimeError(f"not a branch or commit: {target[:60]!r}")
+    if tag_exists(repo, tag):
+        raise RuntimeError(f"{repo} has a tag {tag} already")
+    base = target or (api("GET", f"/repos/{repo}") or {}).get("default_branch") or "main"
+    workflow = publishing_workflow(repo)
+    then = f"{workflow} creates the release" if workflow else "no workflow here creates a release from it"
+    if core.dry_run():
+        say(f"   [dry-run] push the tag {tag} on {base} of {repo}; {then}")
+        return ""
+    if re.fullmatch(r"[0-9a-f]{40}", base):
+        sha = base
+    else:
+        sha = api("GET", f"/repos/{repo}/git/ref/heads/{base}")["object"]["sha"]
+    api("POST", f"/repos/{repo}/git/refs", {"ref": f"refs/tags/{tag}", "sha": sha})
+    R.forget(repo)
+    say(f"   pushed the tag {tag} on {base} of {repo} at {sha[:7]}; {then}")
+    run = V.release_run(repo, tag, wait=20 if workflow else 0)
+    if run:
+        say(f"      release run: {R.run_state(run)}  {run.get('html_url', '')}")
+    elif workflow:
+        say(f"      no release run started yet: {WEB}/{repo}/actions")
+    return f"{WEB}/{repo}/releases/tag/{tag}"
+
+
 def create(repo: str, tag: str, title: str = "", notes: str = "", draft: bool = False, prerelease: bool = False,
            target: str = "", generate: bool = False) -> str:
-    """Create a GitHub release; GitHub creates the tag on `target` (the default branch) when it is new.
-    Returns the release's URL ('' in a dry run)."""
+    """New release: create it through GitHub, which makes the tag on `target` (the default branch) when it
+    is new. Returns the release's URL ('' in a dry run). For repos whose workflow publishes on tag pushes,
+    push_tag (New tag) is the way: a release made here first would collide with the workflow's."""
     tag = valid_tag(tag)
     title = (title or "").strip()[:200] or tag
     target = (target or "").strip()

@@ -784,3 +784,25 @@ def create_release(gl: GitLab, repo: str, tag: str, title: str = "", notes: str 
     say(f"   created the release {tag} of {repo} from {where}")
     say(f"      {url}")
     return url
+
+
+def push_tag(gl: GitLab, repo: str, tag: str, target: str = "") -> str:
+    """New tag on a GitLab project: the tag alone, on `target` or the default branch. A pipeline with a
+    `release:` job for tags makes the release from it."""
+    from mason import releases as REL
+    tag = REL.valid_tag(tag)
+    p = gl.project(repo)
+    q = urllib.parse.quote(tag, safe="")
+    try:
+        gl.api("GET", f"{p}/repository/tags/{q}")
+        raise RuntimeError(f"{repo} has a tag {tag} already")
+    except HttpError as err:
+        if err.status != 404:
+            raise
+    ref = (target or "").strip() or (gl.api("GET", p) or {}).get("default_branch") or "main"
+    ci = gl.file(repo, ".gitlab-ci.yml", ref) or ""
+    then = ("its pipeline's release job creates the release" if re.search(r"(?m)^\s+release\s*:", ci)
+            else "no pipeline job here creates a release from it")
+    gl.write("POST", f"{p}/repository/tags", {"tag_name": tag, "ref": ref})
+    say(f"   {'[dry-run] push' if core.dry_run() else 'pushed'} the tag {tag} on {ref} of {repo}; {then}")
+    return "" if core.dry_run() else f"{gl.web}/{path_of(repo)}/-/tags/{q}"

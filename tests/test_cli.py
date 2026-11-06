@@ -422,3 +422,16 @@ def test_org_defaults_repo(env, tmp_path):
     # no defaults repo of your own at all: the org's .mason still applies
     bare = {**e, "MASON_DEFAULTS": "", "MASON_ORGS": "mike", "XDG_CONFIG_HOME": str(tmp_path / "cfg")}
     assert "(group mike:personal)" in mason(bare, "doctor", "dotfiles")
+
+
+def test_release_tag_only_pushes_the_tag(env, tmp_path):
+    log = tmp_path / "calls.log"
+    out = mason({**env, "FAKE_GH_LOG": str(log)}, "release", "tag", "b", "v0.4.0", "--yes")
+    assert "pushed the tag v0.4.0 on main of acme/plugin-b at headsha" in out
+    assert ".github/workflows/release.yml creates the release" in out and "release run: queued" in out
+    calls = log.read_text()
+    assert "api -X POST /repos/acme/plugin-b/git/refs" in calls and "/releases --input" not in calls
+    out = mason(env, "release", "tag", "api", "--dry-run")  # no tag given: the next patch
+    assert "[dry-run] push the tag v1.10.1 on main of acme/api; no workflow here creates a release" in out
+    assert "has a tag v1.0.0 already" in mason(env, "release", "tag", "a", "v1.0.0", "--yes")
+    assert "left as it is" in mason(env, "release", "tag", "b", "v0.4.0")

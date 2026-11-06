@@ -427,6 +427,30 @@ def release_create():
     return jsonify({"text": text, "ok": not text.lstrip().startswith("error")})
 
 
+@bp.post("/tags")
+@need("read")
+def tag_create():
+    """New tag: push only the tag {repo, tag, target?, dry_run?}; a workflow that publishes on tags does the rest."""
+    data = body()
+    repo = valid_repo(str(data.get("repo") or ""))
+    tag = str(data.get("tag") or "").strip()
+    try:
+        REL.valid_tag(tag)
+    except RuntimeError as err:
+        abort(400, str(err))
+    target = str(data.get("target") or "")[:250]
+    dry = write_allowed(bool(data.get("dry_run")))
+    with as_user(dry) as (_gh, gl):
+        if is_gl(repo):
+            if gl is None:
+                abort(409, "connect GitLab first")
+            text = capture_rate(GL.push_tag, gl, repo, tag, target)
+        else:
+            text = capture_rate(REL.push_tag, repo, tag, target)
+    audit("tag.create", f"{repo} {tag}", dry, detail=text)
+    return jsonify({"text": text, "ok": not text.lstrip().startswith("error")})
+
+
 @bp.get("/releases/jobs")
 @need("read")
 def release_jobs():

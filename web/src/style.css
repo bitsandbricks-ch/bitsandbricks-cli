@@ -1,4 +1,4 @@
-/* Mason: a terminal. Three themes: phosphor (default), amber, paper (light). */
+/* Mason: a terminal. Four themes: phosphor (default), amber, grey (classic dark grey, white text), paper (light). */
 :root, [data-theme="phosphor"] {
   --bg: #07090a; --bg2: #0d1210; --bg3: #142019; --line: #1f3a2b; --fg: #c8f5d4; --dim: #6f9c80;
   --accent: #3ddc84; --accent2: #7fdbff; --ok: #3ddc84; --warn: #ffd166; --bad: #ff5f6d; --sel: #12372a;
@@ -8,6 +8,11 @@
   --bg: #0c0904; --bg2: #140f06; --bg3: #20180a; --line: #3d2d10; --fg: #ffd79a; --dim: #a8875a;
   --accent: #ffb000; --accent2: #ffd166; --ok: #b5e853; --warn: #ffd166; --bad: #ff6b4a; --sel: #3a2a0c;
   --glow: 0 0 6px rgba(255, 176, 0, .35); --link: #ffe08a;
+}
+[data-theme="grey"] {
+  --bg: #1e1e1e; --bg2: #262626; --bg3: #313131; --line: #4a4a4a; --fg: #f2f2f2; --dim: #a6a6a6;
+  --accent: #ffffff; --accent2: #9ec5fe; --ok: #8fd694; --warn: #f0c96a; --bad: #ff8a80; --sel: #3d3d3d;
+  --glow: none; --link: #9ec5fe;
 }
 [data-theme="paper"] {
   --bg: #f6f4ee; --bg2: #ecE9e0; --bg3: #e2ddd0; --line: #c9c2b0; --fg: #1d1f1c; --dim: #6b6a63;
