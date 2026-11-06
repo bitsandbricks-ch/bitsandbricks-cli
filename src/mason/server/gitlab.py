@@ -204,6 +204,19 @@ def status_rows(gl: GitLab, cfg, repos: list[str]) -> list[dict]:
     return rows
 
 
+GL_MERGE_WORD = {"mergeable": "mergeable", "conflict": "conflicts", "need_rebase": "behind",
+                 "draft_status": "draft", "checking": "checking", "unchecked": "checking", "preparing": "checking"}
+
+
+def merge_word(m: dict) -> str:
+    """The same words as GitHub's list: mergeable, blocked, behind, conflicts, draft or checking."""
+    if m.get("draft"):
+        return "draft"
+    if m.get("conflicts"):
+        return "conflicts"
+    return GL_MERGE_WORD.get((m.get("detailedMergeStatus") or "").lower(), "blocked")
+
+
 def mr_rows(gl: GitLab, repos: list[str]) -> list[dict]:
     out = []
     for repo, node in nodes(gl, repos).items():
@@ -214,6 +227,7 @@ def mr_rows(gl: GitLab, repos: list[str]) -> list[dict]:
                         "review": "approved" if m.get("approved") else "",
                         "auto": bool(m.get("autoMergeEnabled")), "author": (m.get("author") or {}).get("username", ""),
                         "branch": m.get("sourceBranch", ""), "state": (m.get("detailedMergeStatus") or "").lower(),
+                        "merge": merge_word(m),
                         "created": m.get("createdAt")})
     return out
 
@@ -313,12 +327,23 @@ def merge(gl: GitLab, repo: str, ctx: dict) -> None:
         if core.dry_run():
             say(f"   [dry-run] {'merge now' if ctx.get('now') else 'auto-merge'} {label}{link}")
             continue
+        url = f"{gl.project(repo)}/merge_requests/{m['iid']}/merge"
         try:
-            gl.api("PUT", f"{gl.project(repo)}/merge_requests/{m['iid']}/merge", body)
-            done = "merged" if ctx.get("now") else "auto-merge on (merges when the pipeline passes)"
-            say(f"   {label}: {done}{link}")
+            got = gl.api("PUT", url, body) or {}
+            if ctx.get("now") or got.get("state") == "merged":
+                say(f"   {label}: merged{link}")
+            else:
+                say(f"   {label}: auto-merge on (merges when the pipeline passes){link}")
         except RuntimeError as err:
-            say(f"   {label}: not merged: {str(err)[:200]}{link}")
+            if ctx.get("now"):
+                say(f"   {label}: not merged: {str(err)[:200]}{link}")
+                continue
+            try:  # GitLab won't auto-merge it (no pipeline, or auto-merge off): merge it now
+                gl.api("PUT", url, {k: v for k, v in body.items() if k not in ("merge_when_pipeline_succeeds",
+                                                                               "auto_merge")})
+                say(f"   {label}: merged right away (GitLab couldn't auto-merge it){link}")
+            except RuntimeError as again:
+                say(f"   {label}: not merged: auto-merge: {str(err)[:150]}; merge now: {str(again)[:150]}{link}")
 
 
 def mark_ready(gl: GitLab, repo: str, iid: int) -> None:

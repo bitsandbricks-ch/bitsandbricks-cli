@@ -40,6 +40,7 @@ def test_status_is_one_query(env, tmp_path):
 def test_prs_and_pr(env):
     out = mason(env, "prs")
     assert "https://github.com/acme/web/pull/7" in out and "CONFLICTS" in out and "3 open PRs" in out
+    assert "· blocked" in out
     out = mason(env, "pr", "web#7", "--diff")
     assert "blocked: required checks or reviews missing" in out
     assert "https://github.com/acme/web/actions/runs/1/job/2" in out

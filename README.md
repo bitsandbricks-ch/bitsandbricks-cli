@@ -28,9 +28,9 @@ Repos are named as `owner/name`, as a bare `name` when only one repo has it, or 
 | `mason config` | Where mason looks: config file, defaults, orgs, groups, plugins. |
 | `mason repos` | The repos mason sees, with their group. |
 | `mason status` | One line per repo: group, latest release, PRs ready/draft, CI. One GraphQL query per 20 repos. |
-| `mason prs` | Open PRs with checks, reviews, conflicts and auto-merge. |
+| `mason prs` | Open PRs with checks, reviews, merge status (mergeable, blocked, behind, conflicts) and auto-merge. |
 | `mason pr web#12 [--diff] [--body]` | One PR in detail: merge state, failing checks with links, files, description (`--body`: all of it). Takes a PR URL too. |
-| `mason merge [names] [--now] [--ready] [--method squash\|merge\|rebase]` | Auto-merge open PRs (or merge now; squash by default). Drafts and conflicts stay open; `--ready` marks named drafts ready first. |
+| `mason merge [names] [--now] [--ready] [--method squash\|merge\|rebase]` | Auto-merge open PRs (or merge now; squash by default). When GitHub won't auto-merge a PR (auto-merge off for the repo, or no required checks on the base branch), it is merged right away. Drafts and conflicts stay open; `--ready` marks named drafts ready first. |
 | `mason runs [--failed] [--limit 3]` | Latest workflow runs per repo. |
 | `mason rerun name [--run ID] [--yes]` | Re-runs the failed jobs of the repo's newest failed run (or of run ID), after listing its jobs and the step that failed. Jobs that passed and approvals already given stay. |
 | `mason releases [--problems]` | Each repo's latest release, its assets, and its release runs. Flags assets the group's `release_assets` wants but the release lacks, and a failed last release run with the job and step that failed. |

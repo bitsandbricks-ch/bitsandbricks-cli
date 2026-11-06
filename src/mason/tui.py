@@ -165,8 +165,9 @@ THEMES = [
 
 STATE_STYLE = {
     "success": SUCCESS, "passing": SUCCESS, "ok": SUCCESS, "ready": SUCCESS,
-    "failure": DANGER, "failing": DANGER, "error": DANGER, "conflicts": DANGER,
-    "pending": WARNING, "running": WARNING, "waiting": WARNING, "in_progress": WARNING, "auto-merge": SKY,
+    "mergeable": SUCCESS, "failure": DANGER, "failing": DANGER, "error": DANGER, "conflicts": DANGER,
+    "blocked": WARNING, "behind": WARNING, "checking": WARNING, "pending": WARNING, "running": WARNING,
+    "waiting": WARNING, "in_progress": WARNING, "auto-merge": SKY,
 }
 CACHE = "60s"  # gh answers the same GET from its cache for this long
 URL = re.compile(r"https?://[^\s)\]>,'\"]+")
@@ -821,7 +822,7 @@ class MasonTui(App):
                                  style=DANGER if word == "failing" else SKY)
                     sort = 0
                 else:
-                    state = styled("draft" if p["isDraft"] else "ready")
+                    state = styled(R.merge_word(p))
                     sort = 2 if p["isDraft"] else 1
             rows.append((sort, key, [self.label(p["repo"]), str(p["number"]), Text(p["title"][:60]),
                                      state, checks]))

@@ -157,7 +157,8 @@ for repo, (_, rsets, _, _) in REPOS.items():
 
 PRS = {
     "acme/web": [
-        dict(number=7, title="Add login page", isDraft=False, mergeable="MERGEABLE", autoMergeRequest=None, state="OPEN"),
+        dict(number=7, title="Add login page", isDraft=False, mergeable="MERGEABLE", mergeStateStatus="BLOCKED",
+             autoMergeRequest=None, state="OPEN"),
         dict(number=8, title="WIP: dark mode", isDraft=True, mergeable="MERGEABLE", autoMergeRequest=None, state="OPEN"),
         dict(number=9, title="Conflicting change", isDraft=False, mergeable="CONFLICTING", autoMergeRequest=None,
              state="OPEN"),
