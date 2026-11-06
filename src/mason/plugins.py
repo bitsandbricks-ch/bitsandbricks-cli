@@ -10,7 +10,8 @@ optional; override the ones you need. Install a plugin next to mason:
 
     pipx inject mason-cli <plugin package>
 
-MASON_PLUGINS=none (or a comma separated list of names) limits which plugins load.
+MASON_PLUGINS=none (or a comma separated list of names) limits which plugins load, and
+MASON_PLUGINS_OFF=a,b never loads those (on a Mason server: switched off for every user).
 """
 
 from __future__ import annotations
@@ -127,8 +128,9 @@ def load() -> list[Plugin]:
     _plugins = []
     only = os.environ.get("MASON_PLUGINS")  # unset: all; "none": none; "a,b": only these
     allowed = None if only is None else {n.strip() for n in only.split(",") if n.strip()}
+    off = {n.strip() for n in os.environ.get("MASON_PLUGINS_OFF", "").split(",") if n.strip()}
     for ep in sorted(found, key=lambda e: e.name):
-        if allowed is not None and ep.name not in allowed:
+        if (allowed is not None and ep.name not in allowed) or ep.name in off:
             continue
         try:
             obj = ep.load()

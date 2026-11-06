@@ -9,6 +9,7 @@ static/ (built from web/ with Vite); /api/v1 is the JSON API the UI, the CLI and
 
 from __future__ import annotations
 
+import os
 import sys
 
 from flask import Flask, abort, g, jsonify, request, send_from_directory
@@ -110,6 +111,22 @@ def create_app(op: S.Settings | None = None) -> Flask:
     return app
 
 
+def print_users(op: S.Settings) -> None:
+    """`mason serve --users`: the accounts, their logins, keys and sessions, read from the database.
+    Mason has no admins, so this lives on the host (whoever can read the database), not in the web app."""
+    from mason.server.models import ApiKey, Session, User, db
+    models.init(op.database)
+    users = db.query(User).order_by(User.id).all()
+    keys = db.query(ApiKey).filter_by(revoked_at=None).count()
+    print(f"{len(users)} users, {db.query(Session).count()} sessions, {keys} working API keys")
+    for u in users:
+        logins = ", ".join(f"{i.provider}:{i.login}" for i in u.identities) or "-"
+        n = db.query(ApiKey).filter_by(user_id=u.id, revoked_at=None).count()
+        seen = u.last_login.strftime("%Y-%m-%d %H:%M") if u.last_login else "never"
+        print(f"{u.id:>5}  {u.name[:30]:<30}  {logins:<40}  {n:>3} keys  last sign-in {seen}")
+    db.remove()
+
+
 def _version() -> str:
     from mason import __version__
     return __version__
@@ -127,8 +144,14 @@ def main(argv: list[str] | None = None) -> None:
     cp = sub.add_parser("check", help="what the settings allow, and what is missing")
     cp.add_argument("--port", type=int, default=S.DEFAULT_PORT, help="the port `serve` will use")
     cp.add_argument("--host", help=argparse.SUPPRESS)  # so `mason serve --check` takes serve's options
+    up = sub.add_parser("users", help="the accounts on this Mason (only where it runs, never on the web)")
+    up.add_argument("--port", type=int, default=S.DEFAULT_PORT, help=argparse.SUPPRESS)
+    up.add_argument("--host", help=argparse.SUPPRESS)
     args = p.parse_args(argv)
     op = S.load(args.port)
+    if args.cmd == "users":
+        print_users(op)
+        return
     if args.cmd == "check":
         print(f"url          {op.url or '(MASON_URL is not set)'}")
         print(f"data         {op.data}")
@@ -140,7 +163,8 @@ def main(argv: list[str] | None = None) -> None:
         who = ("anyone with an account" if op.open_sign_in
                else f"users {sorted(op.allow_users) or '-'}, orgs {sorted(op.allow_orgs) or '-'}")
         print(f"sign-in      {who}")
-        print(f"plugins      index {op.plugin_index} (install with pip next to Mason)")
+        off = os.environ.get("MASON_PLUGINS_OFF", "").strip()
+        print(f"plugins      index {op.plugin_index} (install with pip next to Mason); off for all: {off or '-'}")
         print(f"web ui       {'built' if webui.built(STATIC) else 'NOT BUILT: cd web && npm ci && npm run build'}")
         for problem in op.problems():
             print(f"PROBLEM      {problem}")

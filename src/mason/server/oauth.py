@@ -159,11 +159,15 @@ def member_of(name: str, token: str, uid: str, org: str) -> bool:
     return status == 200
 
 
+def listed(name: str, login: str) -> bool:
+    """Named in MASON_ALLOW_USERS: set where Mason runs, so it can't lock out whoever runs it."""
+    return bool({(name, login.lower()), ("*", login.lower())} & current_app.config["OP"].allow_users)
+
+
 def allowed(name: str, login: str, token: str, uid: str) -> bool:
     """With no MASON_ALLOW_USERS or MASON_ALLOW_ORGS anyone may sign in; with them, only those."""
     op = current_app.config["OP"]
-    who = {(name, login.lower()), ("*", login.lower())}
-    if op.open_sign_in or who & op.allow_users:
+    if op.open_sign_in or listed(name, login):
         return True
     return any(prov in (name, "*") and member_of(name, token, uid, org) for prov, org in op.allow_orgs)
 
@@ -184,8 +188,9 @@ def sign_in(name: str, got: dict, link_user: User | None) -> User:
     else:
         if not allowed(name, me["login"], token, me["uid"]):
             raise PermissionError(f"{name} user {me['login']} may not use this operator")
-        from mason.server import auth, limits
-        limits.new_account(auth.client_ip())
+        if not listed(name, me["login"]):  # MASON_ALLOW_USERS always get an account
+            from mason.server import auth, limits
+            limits.new_account(auth.client_ip())
         user = User(name=me["name"] or me["login"], avatar_url=me["avatar_url"])
         db.add(user)
         db.flush()

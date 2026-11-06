@@ -632,7 +632,10 @@ def test_new_accounts_are_limited(op, monkeypatch):
         _sign_in_as(app, "bob", "3")
     assert _sign_in_as(app, "ann", "2").name == "ann"  # existing accounts still sign in
     with pytest.raises(PermissionError, match="as many accounts"):
-        _sign_in_as(app, "root", "4")  # nobody is exempt: there are no admins
+        _sign_in_as(app, "root", "4")
+    monkeypatch.setattr(s, "allow_users", {("github", "root"), ("github", "ann")})
+    assert _sign_in_as(app, "root", "4").name == "root"  # MASON_ALLOW_USERS always get in
+    monkeypatch.setattr(s, "allow_users", set())
     monkeypatch.setattr(s, "max_users", 0)
     monkeypatch.setattr(s, "signups_per_ip", 1)
     from mason.server import limits
@@ -703,3 +706,34 @@ def test_old_databases_lose_admins(tmp_path):
     assert [u.name for u in models.db.query(models.User).order_by(models.User.id)] == ["Mike", "Ann"]
     models.db.remove()
     engine.dispose()
+
+
+def test_plugins_off_for_everyone(monkeypatch):
+    from importlib import metadata
+
+    from mason import plugins
+
+    class EP:
+        def __init__(self, name):
+            self.name = name
+        def load(self):  # noqa: E301
+            return type("P", (), {"name": self.name})
+
+    class EPs:
+        def select(self, group):
+            return [EP("a"), EP("b")]
+    monkeypatch.setattr(metadata, "entry_points", lambda: EPs())
+    monkeypatch.setattr(plugins, "_plugins", None)
+    monkeypatch.delenv("MASON_PLUGINS", raising=False)
+    monkeypatch.setenv("MASON_PLUGINS_OFF", "b")
+    assert [p.name for p in plugins.load()] == ["a"]  # b never loads, for anyone
+
+
+def test_serve_users(op, capsys):
+    app, c = op
+    from mason.server.app import print_users
+    c.post("/api/v1/keys", json={"name": "k"}, headers=H)
+    print_users(app.config["OP"])
+    out = capsys.readouterr().out
+    assert out.startswith("1 users, 1 sessions, 1 working API keys")
+    assert "Mike" in out and "github:mike" in out and "1 keys" in out
