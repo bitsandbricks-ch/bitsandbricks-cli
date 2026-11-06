@@ -35,6 +35,7 @@ export const router = createRouter({
     { path: '/device', name: 'device', component: v('Device') },
     ...TABS.map((t) => ({ path: t.path, name: t.name, component: v(VIEWS[t.name]) })),
     { path: '/plugins/:plugin/:tab', name: 'plugin-tab', component: v('PluginTab') },
+    { path: '/operator', name: 'operator', component: v('Operator') },
     { path: '/:rest(.*)*', redirect: '/' },
   ],
 })

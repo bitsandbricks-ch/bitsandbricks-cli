@@ -65,6 +65,7 @@ pip install -e ".[server]"                   # flask, sqlalchemy, cryptography, 
 (cd web && npm ci && npm run build)          # the UI, into src/mason/server/static
 mason serve --check                            # what the settings allow, and what is missing
 mason serve --users                            # the accounts on this Mason (reads the database)
+mason operator add github:you                  # after signing in once: the operator page
 mason serve                                    # http://localhost:8080 (Flask's development server)
 mason serve --host 0.0.0.0 --port 9000         # somewhere else
 ```
@@ -129,16 +130,34 @@ Anyone with a GitHub or GitLab account may sign in, and each user sees only thei
 their own token), API keys, sessions, secrets and audit log. `MASON_ALLOW_USERS` and `MASON_ALLOW_ORGS`
 restrict who may sign in.
 
-Mason has no admins. Every setting belongs to one user: the defaults repo and the repos to manage (with
-the groups, rules and templates kept in that defaults repo), the theme, which plugins are on, plugin
-secrets, API keys and sessions. No user can read or change another user's, and there is no page or API
-that lists other users. What applies to the whole server is up to whoever runs Mason, on that machine:
+Every setting belongs to one user: the defaults repo and the repos to manage (with the groups, rules and
+templates kept in that defaults repo), the theme, which plugins are on, plugin secrets, API keys and
+sessions. No user can read or change another user's, operators included.
+
+### Operators
+
+Operators look after the whole server in the web app's **operator** page: the accounts (logins, keys,
+sessions, last sign-in), the server's numbers and problems, plugins switched off for everyone, and
+signing a user out everywhere (their sessions end and their keys are revoked; the account stays). Every
+change there is in the operator's audit log. The page needs a browser session; API keys never reach it.
+
+Only whoever runs Mason makes someone an operator, with the database on that machine; the web app and the
+API can't. The user signs in once first, so their account exists:
+
+```sh
+mason operator add github:mike --note "runs it"   # or gitlab:LOGIN, a bare login, or #ID
+mason operator list
+mason operator remove github:mike                 # from their next request
+docker compose run --rm mason mason operator add github:mike   # with the compose file
+```
+
+Operators keep signing in when the allow lists change. Other server-wide things stay on the host:
 
 - who may sign in and the limits: the environment below (logins in `MASON_ALLOW_USERS` always get an
   account, so the caps never lock out whoever runs Mason);
 - which plugins exist: `pip install` (or `mason market install NAME`) and a restart; `MASON_PLUGINS_OFF`
-  switches one off for everyone without uninstalling it;
-- who has an account: `mason serve --users` lists the accounts, their logins, keys and last sign-in.
+  keeps one from loading at all;
+- `mason serve --users` lists the accounts on the host too.
 
 ## OAuth apps
 
@@ -165,7 +184,7 @@ GitLab: set `GITLAB_URL`.
 | `MASON_IDLE_HOURS`, `MASON_SESSION_DAYS` | session idle timeout (12) and lifetime (7) |
 | `MASON_CACHE` | the base time GitHub and GitLab answers are kept per user (`60s`, `0` to always ask); see [Caching](#caching) |
 | `MASON_CACHE_SIZE`, `MASON_CACHE_USER_SIZE` | memory for cached answers, all users together (`256MB`) and one user's share (`32MB`) |
-| `MASON_PLUGINS`, `MASON_PLUGINS_OFF` | which installed plugins load: only these (`none` for none), and never these (off for every user) |
+| `MASON_PLUGINS`, `MASON_PLUGINS_OFF` | which installed plugins load: only these (`none` for none), and never these (operators can also switch one off for everyone in the operator page) |
 | `MASON_PLUGIN_INDEX`, `MASON_PLUGIN_INDEX_KEYS` | the plugin index (URL or file; default: `plugins/index.json` on this repo's main branch) and extra public keys (base64, comma separated) it may be signed with |
 | `MASON_TRUSTED_PROXIES` | how many proxies in front set `X-Forwarded-*` (0) |
 | `MASON_AUDIT_DAYS`, `MASON_AUDIT_ROWS`, `MASON_AUDIT_OUTPUT` | audit rows go after 90 days; each user keeps the newest 1000; command output is cut to 1000 characters |
@@ -294,7 +313,7 @@ Plugins are the same Python entry points the CLI loads. In Mason they can also a
 - `web_secrets()`: per-user secrets (e.g. a Hubra token) that users set in Settings and plugins read with
   `plugins.secret(name)` while serving that user.
 
-Each user switches plugins on or off for themselves only; `MASON_PLUGINS_OFF` switches one off for everyone.
+Each user switches plugins on or off for themselves; operators can switch one off for everyone (and `MASON_PLUGINS_OFF` keeps one from loading).
 
 The marketplace reads a plugin index (this repo's `plugins/index.json` by default) signed with Ed25519 (`mason market
 keygen`, `mason market sign`). Unsigned or wrongly signed indexes are shown but nothing installs from them.
@@ -309,4 +328,5 @@ Everything the UI does is JSON under `/api/v1` and works with an API key (`Autho
 `/runs`, `/approvals`, `/approve`, `/releases`, `/releases/jobs`, `/packages`, `/security`, `/doctor`, `/sync`,
 `/workflows`, `/workflows/pin`, `/new`, `/metrics?days=`, `/console`, `/defaults…`, `/plugins…`, `/market…`,
 `/settings`, `/keys`, `/sessions`, `/secrets`, `/audit`, `/rate` and `/cache/clear`, each only ever about
-the caller. `/api/v1/health` needs no sign-in. Changes take `"dry_run": true`.
+the caller, and for operators (in the browser) `/operator`, `/operator/plugins/NAME` and
+`/operator/users/ID/sign-out`. `/api/v1/health` needs no sign-in. Changes take `"dry_run": true`.

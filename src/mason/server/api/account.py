@@ -277,7 +277,8 @@ def me():
         return jsonify({"user": None, "providers": list(sign_in_methods()), "sign_in": sign_in_methods()})
     u = g.user
     return jsonify({
-        "user": {"id": u.id, "name": u.name, "avatar_url": u.avatar_url},
+        "user": {"id": u.id, "name": u.name, "avatar_url": u.avatar_url,
+                 "is_operator": auth.is_operator(u)},
         "identities": [{"id": i.id, "provider": i.provider, "host": i.host, "login": i.login, "scopes": i.scopes,
                         "expires_at": iso(i.expires_at)} for i in u.identities],
         "providers": list(sign_in_methods()), "sign_in": sign_in_methods(),

@@ -84,6 +84,9 @@ window.addEventListener('keydown', (e) => {
                    :class="{ active: route.params.plugin === p.name }">
         <span class="k">+</span>{{ p.tabs[0].title.toLowerCase() }}
       </router-link>
+      <router-link v-if="state.me.user.is_operator" to="/operator" :class="{ active: route.name === 'operator' }">
+        <span class="k">#</span>operator
+      </router-link>
     </nav>
     <main><router-view @rate="refreshRate" /></main>
     <footer class="foot">

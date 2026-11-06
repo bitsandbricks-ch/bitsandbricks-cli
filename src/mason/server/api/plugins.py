@@ -1,9 +1,10 @@
 """Plugins in the web UI (their tabs, checks and actions) and the marketplace.
 
 Plugins are Python packages installed next to the operator (mason's `mason.plugins` entry
-points). Each user switches plugins on or off for themselves only: there is no setting that changes
-another user's plugins. The marketplace lists a signed plugin index; installing one changes the whole
-server, so it happens where Mason runs (pip install, or `mason market install NAME`), not from the web.
+points). Each user switches plugins on or off for themselves; operators (the operator panel) and
+MASON_PLUGINS_OFF can switch one off for everyone. No user changes another user's choice.
+The marketplace lists a signed plugin index; installing one changes the whole server, so it happens
+where Mason runs (pip install, or `mason market install NAME`), not from the web.
 """
 
 from __future__ import annotations
@@ -22,7 +23,8 @@ bp = Blueprint("plugins", __name__, url_prefix="/api/v1")
 
 
 def active() -> list:
-    off = set(user_settings(g.user).get("plugins_off") or [])
+    from mason.server.api.operator import off_for_all
+    off = off_for_all() | set(user_settings(g.user).get("plugins_off") or [])
     return [p for p in plugins.load() if p.name not in off]
 
 
@@ -70,8 +72,10 @@ def describe(p, on: bool) -> dict:
 @bp.get("/plugins")
 @need("read")
 def plugins_list():
-    names = {p.name for p in active()}
-    return jsonify({"plugins": [describe(p, p.name in names) for p in plugins.load()],
+    from mason.server.api.operator import off_for_all
+    names, everyone = {p.name for p in active()}, off_for_all()
+    return jsonify({"plugins": [dict(describe(p, p.name in names), off_for_all=p.name in everyone)
+                                for p in plugins.load()],
                     "broken": plugins.errors})
 
 

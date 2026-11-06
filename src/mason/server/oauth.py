@@ -172,6 +172,11 @@ def allowed(name: str, login: str, token: str, uid: str) -> bool:
     return any(prov in (name, "*") and member_of(name, token, uid, org) for prov, org in op.allow_orgs)
 
 
+def _operator(user: User) -> bool:
+    from mason.server.auth import is_operator
+    return is_operator(user)  # operators keep signing in, even when the allow lists change
+
+
 def sign_in(name: str, got: dict, link_user: User | None) -> User:
     """Find or create the user of this login; store the (encrypted) tokens."""
     vault = current_app.config["VAULT"]
@@ -197,7 +202,7 @@ def sign_in(name: str, got: dict, link_user: User | None) -> User:
     if ident is None:
         ident = Identity(user_id=user.id, provider=name, host=p.host, uid=me["uid"], login=me["login"])
         db.add(ident)
-    elif link_user is None and not allowed(name, me["login"], token, me["uid"]):
+    elif link_user is None and not _operator(user) and not allowed(name, me["login"], token, me["uid"]):
         raise PermissionError(f"{name} user {me['login']} may no longer use this operator")
     ident.login = me["login"]
     ident.access_enc = vault.encrypt(token)
@@ -332,3 +337,11 @@ def gitlab(user: User):
     op = current_app.config["OP"]
     return _kept(("gitlab", user.id, security.sha256(token)),
                  lambda: GitLab(token, api_url=op.gitlab.api, web=op.gitlab.web, cache=op.cache))
+
+
+def transport_stats() -> list[dict]:
+    """The cached transports (for the operator panel): who, cache use and the last rate limit seen."""
+    with _tlock:
+        return [{"provider": k[0], "user_id": k[1], **(t.cache_info() if hasattr(t, "cache_info") else {}),
+                 "rate": getattr(t, "last_rate", {})}
+                for k, t in _transports.items()]
