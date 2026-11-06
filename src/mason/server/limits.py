@@ -8,7 +8,7 @@ Limits (each a setting, see docs/mason.md):
   calls MASON_RATE_ANON per minute per address (120). Reads through the GitHub proxy (/api/v1/github/) are
   not counted: one CLI command makes many, and they spend only the user's own GitHub quota.
 - New accounts: MASON_SIGNUPS_PER_HOUR in all (60) and MASON_SIGNUPS_PER_IP per address (5), and no more than
-  MASON_MAX_USERS accounts (1000; 0 = no cap). Nobody is exempt.
+  MASON_MAX_USERS accounts (1000; 0 = no cap). Logins in MASON_ALLOW_USERS always get in.
 - Sign-ins in progress: at most PENDING rows each of sign-in states, device sign-ins and device codes.
 
 Caps on what each user stores:
@@ -85,7 +85,7 @@ def api_call(user_id: int | None, ip: str, write: bool, count: bool = True) -> N
 
 
 def new_account(ip: str) -> None:
-    """Before an account is created. PermissionError says why not."""
+    """Before an account is created (not for MASON_ALLOW_USERS). PermissionError says why not."""
     from mason.server.models import User, db
     op = current_app.config["OP"]
     if op.max_users and db.query(User).count() >= op.max_users:

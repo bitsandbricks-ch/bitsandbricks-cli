@@ -73,6 +73,8 @@ skips the build. An editable install (`pip install -e`) never builds it, so from
 pip install -e ".[server]"                   # flask, sqlalchemy, cryptography, gunicorn
 (cd web && npm ci && npm run build)          # the UI, into src/mason/server/static
 mason serve --check                            # what the settings allow, and what is missing
+mason serve --users                            # the accounts on this Mason (reads the database)
+mason operator add github:you                  # after signing in once: the operator page
 mason serve                                    # http://localhost:8080 (Flask's development server)
 mason serve --host 0.0.0.0 --port 9000         # somewhere else
 ```
@@ -137,11 +139,34 @@ Anyone with a GitHub or GitLab account may sign in, and each user sees only thei
 their own token), API keys, sessions, secrets and audit log. `MASON_ALLOW_USERS` and `MASON_ALLOW_ORGS`
 restrict who may sign in.
 
-Mason has no admins. Every setting belongs to one user: the defaults repo and the repos to manage (with
-the groups, rules and templates kept in that defaults repo), the theme, which plugins are on, plugin
-secrets, API keys and sessions. No user can read or change another user's, and there is no page or API
-that lists other users. What applies to the whole server (sign-in, limits, the plugin index, which plugins
-are installed) is set where Mason runs, in the environment below and with `pip`, not from the web.
+Every setting belongs to one user: the defaults repo and the repos to manage (with the groups, rules and
+templates kept in that defaults repo), the theme, which plugins are on, plugin secrets, API keys and
+sessions. No user can read or change another user's, operators included.
+
+### Operators
+
+Operators look after the whole server in the web app's **operator** page: the accounts (logins, keys,
+sessions, last sign-in), the server's numbers and problems, plugins switched off for everyone, and
+signing a user out everywhere (their sessions end and their keys are revoked; the account stays). Every
+change there is in the operator's audit log. The page needs a browser session; API keys never reach it.
+
+Only whoever runs Mason makes someone an operator, with the database on that machine; the web app and the
+API can't. The user signs in once first, so their account exists:
+
+```sh
+mason operator add github:mike --note "runs it"   # or gitlab:LOGIN, a bare login, or #ID
+mason operator list
+mason operator remove github:mike                 # from their next request
+docker compose run --rm mason mason operator add github:mike   # with the compose file
+```
+
+Operators keep signing in when the allow lists change. Other server-wide things stay on the host:
+
+- who may sign in and the limits: the environment below (logins in `MASON_ALLOW_USERS` always get an
+  account, so the caps never lock out whoever runs Mason);
+- which plugins exist: `pip install` (or `mason market install NAME`) and a restart; `MASON_PLUGINS_OFF`
+  keeps one from loading at all;
+- `mason serve --users` lists the accounts on the host too.
 
 ## OAuth apps
 
@@ -163,16 +188,17 @@ GitLab: set `GITLAB_URL`.
 | `DATABASE_URL` | SQLAlchemy URL; SQLite in the data folder by default, `postgresql+psycopg://…` with `[postgres]` |
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_URL`, `GITHUB_API_URL`, `GITHUB_SCOPES` | the GitHub login: the client ID defaults to Mason's own app (device flow) on github.com; with a secret, the redirect sign-in (scopes default to the table above) |
 | `GITLAB_CLIENT_ID`, `GITLAB_CLIENT_SECRET`, `GITLAB_URL`, `GITLAB_SCOPES` | the GitLab login |
-| `MASON_ALLOW_USERS` | optional: only these may sign in: `github:mike, gitlab:ann`, or a bare login for either |
+| `MASON_ALLOW_USERS` | optional: only these may sign in: `github:mike, gitlab:ann`, or a bare login for either; they always get an account, whatever the caps |
 | `MASON_ALLOW_ORGS` | optional: only members of these GitHub orgs or GitLab groups may sign in |
 | `MASON_IDLE_HOURS`, `MASON_SESSION_DAYS` | session idle timeout (12) and lifetime (7) |
 | `MASON_CACHE` | the base time GitHub and GitLab answers are kept per user (`60s`, `0` to always ask); see [Caching](#caching) |
 | `MASON_CACHE_SIZE`, `MASON_CACHE_USER_SIZE` | memory for cached answers, all users together (`256MB`) and one user's share (`32MB`) |
+| `MASON_PLUGINS`, `MASON_PLUGINS_OFF` | which installed plugins load: only these (`none` for none), and never these (operators can also switch one off for everyone in the operator page) |
 | `MASON_PLUGIN_INDEX`, `MASON_PLUGIN_INDEX_KEYS` | the plugin index (URL or file; default: `plugins/index.json` on this repo's main branch) and extra public keys (base64, comma separated) it may be signed with |
 | `MASON_TRUSTED_PROXIES` | how many proxies in front set `X-Forwarded-*` (0) |
 | `MASON_AUDIT_DAYS`, `MASON_AUDIT_ROWS`, `MASON_AUDIT_OUTPUT` | audit rows go after 90 days; each user keeps the newest 1000; command output is cut to 1000 characters |
 | `MASON_RATE_API`, `MASON_RATE_WRITES`, `MASON_RATE_ANON` | API calls per minute: per user (600), changes per user (60), signed-out calls per address (120); 0 switches one off. Reads through the GitHub proxy for the CLI aren't counted (they spend only your own GitHub quota) |
-| `MASON_SIGNUPS_PER_HOUR`, `MASON_SIGNUPS_PER_IP`, `MASON_MAX_USERS` | new accounts per hour in all (60) and per address (5), and the most accounts this Mason takes (1000; 0 = no cap); nobody is exempt |
+| `MASON_SIGNUPS_PER_HOUR`, `MASON_SIGNUPS_PER_IP`, `MASON_MAX_USERS` | new accounts per hour in all (60) and per address (5), and the most accounts this Mason takes (1000; 0 = no cap); logins in `MASON_ALLOW_USERS` always get in |
 | `MASON_MAX_KEYS`, `MASON_MAX_SESSIONS` | working API keys (50) and browser sessions (20) per user |
 | `MASON_AUDIT_IPS` | what the audit log keeps of the caller's address: `hash` (default: an HMAC with the secret key, so "same address" shows without the address), `none`, or `full` |
 
@@ -236,7 +262,7 @@ cache: nothing one user fetched is ever looked up for another.
   `v-html` anywhere in the UI, `X-Frame-Options: DENY`, `no-referrer`, HSTS, `Cache-Control: no-store` on the API.
 - **Throttling and caps** so open sign-in can't fill the disk: sign-ins, device codes, code lookups and bad
   keys are throttled per address; API calls per user (and per address when signed out); new accounts per
-  hour, per address and in all (`MASON_MAX_USERS`, with no exemptions); and what each user stores is capped
+  hour, per address and in all (`MASON_MAX_USERS`; logins in `MASON_ALLOW_USERS` always get one); and what each user stores is capped
   (below). Counters live in memory, so they start over on restart, and each
   server process counts on its own (the image runs one).
 
@@ -298,7 +324,7 @@ Plugins are the same Python entry points the CLI loads. In Mason they can also a
 - `web_secrets()`: per-user secrets (e.g. a Hubra token) that users set in Settings and plugins read with
   `plugins.secret(name)` while serving that user.
 
-Each user switches plugins on or off for themselves only.
+Each user switches plugins on or off for themselves; operators can switch one off for everyone (and `MASON_PLUGINS_OFF` keeps one from loading).
 
 The marketplace reads a plugin index (this repo's `plugins/index.json` by default) signed with Ed25519 (`mason market
 keygen`, `mason market sign`). Unsigned or wrongly signed indexes are shown but nothing installs from them.
@@ -313,4 +339,5 @@ Everything the UI does is JSON under `/api/v1` and works with an API key (`Autho
 `/runs`, `/approvals`, `/approve`, `/releases` (GET lists, POST creates), `/release?repo=&tag=`, `/releases/jobs`, `/packages`, `/security`, `/doctor`, `/sync`,
 `/workflows`, `/workflows/pin`, `/new`, `/metrics?days=`, `/console`, `/defaults…`, `/plugins…`, `/market…`,
 `/settings`, `/keys`, `/sessions`, `/secrets`, `/audit`, `/rate` and `/cache/clear`, each only ever about
-the caller. `/api/v1/health` needs no sign-in. Changes take `"dry_run": true`.
+the caller, and for operators (in the browser) `/operator`, `/operator/plugins/NAME` and
+`/operator/users/ID/sign-out`. `/api/v1/health` needs no sign-in. Changes take `"dry_run": true`.

@@ -50,7 +50,7 @@ Repos are named as `owner/name`, as a bare `name` when only one repo has it, or 
 | `mason stats [--days 30]` | Pull requests merged and opened, median time to merge, open and stale PRs, workflow runs with success rate and duration, releases. |
 | `mason plugins` | Installed plugins. |
 | `mason market [install NAME] [--index URL]` | Plugins in the signed plugin index; `install` adds one (only from a verified index). `keygen`, `sign` and `verify` are for whoever publishes an index. |
-| `mason serve [--host 127.0.0.1] [--port 8080]` | Runs Mason, the web app, on Flask's development server (needs the `server` extra). `mason serve --check` shows what its settings allow and what is missing. See [docs/mason.md](docs/mason.md). |
+| `mason serve [--host 127.0.0.1] [--port 8080]` | Runs Mason, the web app, on Flask's development server (needs the `server` extra). `mason serve --check` shows what its settings allow and what is missing; `mason serve --users` lists its accounts, and `mason operator add github:LOGIN` makes someone an operator (the operator page). See [docs/mason.md](docs/mason.md). |
 | `mason login https://mason [--read] [--key KEY]` | Go through [Mason](docs/mason.md), the web app, with an API key: mason shows a code, you approve it in the browser, and every command and the TUI then work without gh or a GitHub token here. `--read` asks for a read-only key, `--key` uses one you made in Settings › API keys. `mason logout` forgets the key, `mason whoami` says how mason reaches GitHub and as whom. |
 | `mason tui` | Everything above, full screen. |
 

@@ -159,13 +159,22 @@ def member_of(name: str, token: str, uid: str, org: str) -> bool:
     return status == 200
 
 
+def listed(name: str, login: str) -> bool:
+    """Named in MASON_ALLOW_USERS: set where Mason runs, so it can't lock out whoever runs it."""
+    return bool({(name, login.lower()), ("*", login.lower())} & current_app.config["OP"].allow_users)
+
+
 def allowed(name: str, login: str, token: str, uid: str) -> bool:
     """With no MASON_ALLOW_USERS or MASON_ALLOW_ORGS anyone may sign in; with them, only those."""
     op = current_app.config["OP"]
-    who = {(name, login.lower()), ("*", login.lower())}
-    if op.open_sign_in or who & op.allow_users:
+    if op.open_sign_in or listed(name, login):
         return True
     return any(prov in (name, "*") and member_of(name, token, uid, org) for prov, org in op.allow_orgs)
+
+
+def _operator(user: User) -> bool:
+    from mason.server.auth import is_operator
+    return is_operator(user)  # operators keep signing in, even when the allow lists change
 
 
 def sign_in(name: str, got: dict, link_user: User | None) -> User:
@@ -184,15 +193,16 @@ def sign_in(name: str, got: dict, link_user: User | None) -> User:
     else:
         if not allowed(name, me["login"], token, me["uid"]):
             raise PermissionError(f"{name} user {me['login']} may not use this operator")
-        from mason.server import auth, limits
-        limits.new_account(auth.client_ip())
+        if not listed(name, me["login"]):  # MASON_ALLOW_USERS always get an account
+            from mason.server import auth, limits
+            limits.new_account(auth.client_ip())
         user = User(name=me["name"] or me["login"], avatar_url=me["avatar_url"])
         db.add(user)
         db.flush()
     if ident is None:
         ident = Identity(user_id=user.id, provider=name, host=p.host, uid=me["uid"], login=me["login"])
         db.add(ident)
-    elif link_user is None and not allowed(name, me["login"], token, me["uid"]):
+    elif link_user is None and not _operator(user) and not allowed(name, me["login"], token, me["uid"]):
         raise PermissionError(f"{name} user {me['login']} may no longer use this operator")
     ident.login = me["login"]
     ident.access_enc = vault.encrypt(token)
@@ -327,3 +337,11 @@ def gitlab(user: User):
     op = current_app.config["OP"]
     return _kept(("gitlab", user.id, security.sha256(token)),
                  lambda: GitLab(token, api_url=op.gitlab.api, web=op.gitlab.web, cache=op.cache))
+
+
+def transport_stats() -> list[dict]:
+    """The cached transports (for the operator panel): who, cache use and the last rate limit seen."""
+    with _tlock:
+        return [{"provider": k[0], "user_id": k[1], **(t.cache_info() if hasattr(t, "cache_info") else {}),
+                 "rate": getattr(t, "last_rate", {})}
+                for k, t in _transports.items()]

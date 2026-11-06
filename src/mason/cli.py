@@ -26,7 +26,8 @@ repo of your orgs. --org and --group narrow that down.
   mason tui                           all of it, full screen
   mason login https://mason          go through Mason (the web app) with an API key: no gh needed
   mason market [install NAME]         plugins from the signed plugin index
-  mason serve [--check]            run Mason, the web app (the [server] extra)
+  mason serve [--check|--users]    run Mason, the web app (the [server] extra); --users: its accounts
+  mason operator add|remove|list   who may open Mason's operator page (run where Mason runs)
 """
 
 from __future__ import annotations
@@ -224,10 +225,16 @@ def list_repos(cfg, names: list[str]) -> None:
 
 def main(argv: list[str] | None = None) -> None:
     argv = sys.argv[1:] if argv is None else argv
-    if argv[:1] == ["serve"]:  # the web app: mason serve [--host H] [--port P], mason serve --check
+    if argv[:1] == ["operator"]:  # mason operator add|remove|list [WHO]: on the host, against Mason's database
+        from mason.server.app import main as server
+        return server(argv)
+    if argv[:1] == ["serve"]:  # the web app: mason serve [--host H] [--port P], --check, --users
         from mason.server.app import main as server
         rest = argv[1:]
-        server(["check", *(a for a in rest if a != "--check")] if "--check" in rest else ["serve", *rest])
+        for flag in ("--check", "--users"):
+            if flag in rest:
+                return server([flag[2:], *(a for a in rest if a != flag)])
+        server(["serve", *rest])
         return
     parser, handlers = build_parser()
     args, extra = parser.parse_known_args(argv)

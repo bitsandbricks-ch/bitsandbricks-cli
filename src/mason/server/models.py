@@ -1,5 +1,5 @@
 """What the operator keeps: users, their logins (encrypted tokens), sessions, API keys,
-device logins for the CLI, secrets, plugin choices and the audit log.
+device logins for the CLI, secrets, plugin choices, operators and the audit log.
 
 Repos, PRs and runs are never stored: they come live from GitHub and GitLab with the user's token.
 """
@@ -173,6 +173,22 @@ class Audit(Base):
     detail: Mapped[str] = mapped_column(Text, default="")
 
 
+class Operator(Base):
+    """Users who may open the operator panel. Only `mason operator add` (on the host) adds one: the web
+    app and the API can't, so no one can make themselves or anyone else an operator from a browser."""
+    __tablename__ = "operators"
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    added_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    note: Mapped[str] = mapped_column(String(200), default="")
+
+
+class Setting(Base):
+    """Server-wide settings operators change in the operator panel (plugins switched off for everyone)."""
+    __tablename__ = "instance_settings"
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="")
+
+
 db = scoped_session(sessionmaker(expire_on_commit=False))
 
 
@@ -193,12 +209,9 @@ def init(url: str):
 
 
 def forget_admins(engine) -> None:
-    """Databases from before Mason dropped admins: remove users.is_admin and the instance-wide settings
-    table (it held only plugins switched off for everyone). Everything left belongs to one user."""
+    """Databases from before operators: remove users.is_admin (MASON_ADMINS is gone; operators are in
+    their own table, added with `mason operator add`)."""
     from sqlalchemy import inspect, text
-    have = inspect(engine)
-    with engine.begin() as conn:
-        if "is_admin" in {c["name"] for c in have.get_columns("users")}:
+    if "is_admin" in {c["name"] for c in inspect(engine).get_columns("users")}:
+        with engine.begin() as conn:
             conn.execute(text("ALTER TABLE users DROP COLUMN is_admin"))
-        if have.has_table("instance_settings"):
-            conn.execute(text("DROP TABLE instance_settings"))

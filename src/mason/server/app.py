@@ -9,6 +9,7 @@ static/ (built from web/ with Vite); /api/v1 is the JSON API the UI, the CLI and
 
 from __future__ import annotations
 
+import os
 import sys
 
 from flask import Flask, abort, g, jsonify, request, send_from_directory
@@ -82,8 +83,8 @@ def create_app(op: S.Settings | None = None) -> Flask:
     def _rate(err):
         return jsonify({"error": str(err), "reset": err.reset}), 429
 
-    from mason.server.api import account, console, defaults, metrics, plugins, proxy, repos
-    for mod in (account, repos, proxy, console, defaults, metrics, plugins):
+    from mason.server.api import account, console, defaults, metrics, operator, plugins, proxy, repos
+    for mod in (account, repos, proxy, console, defaults, metrics, plugins, operator):
         app.register_blueprint(mod.bp)
 
     @app.get("/api/v1/health")
@@ -110,6 +111,43 @@ def create_app(op: S.Settings | None = None) -> Flask:
     return app
 
 
+def print_users(op: S.Settings) -> None:
+    """`mason serve --users`: the accounts, their logins, keys and sessions, read from the database.
+    Operators see the same in the operator panel."""
+    from mason.server.models import ApiKey, Operator, Session, User, db
+    models.init(op.database)
+    ops = {o.user_id for o in db.query(Operator)}
+    users = db.query(User).order_by(User.id).all()
+    keys = db.query(ApiKey).filter_by(revoked_at=None).count()
+    print(f"{len(users)} users, {db.query(Session).count()} sessions, {keys} working API keys")
+    for u in users:
+        logins = ", ".join(f"{i.provider}:{i.login}" for i in u.identities) or "-"
+        n = db.query(ApiKey).filter_by(user_id=u.id, revoked_at=None).count()
+        seen = u.last_login.strftime("%Y-%m-%d %H:%M") if u.last_login else "never"
+        role = "  operator" if u.id in ops else ""
+        print(f"{u.id:>5}  {u.name[:30]:<30}  {logins:<40}  {n:>3} keys  last sign-in {seen}{role}")
+    db.remove()
+
+
+def operator_command(op: S.Settings, action: str, who: str | None, note: str = "") -> int:
+    from mason.server import operators
+    models.init(op.database)
+    try:
+        if action == "list":
+            print("\n".join(operators.listing()))
+            return 0
+        if not who:
+            print(f"mason operator {action} WHO (github:LOGIN, gitlab:LOGIN, a bare login or #ID)", file=sys.stderr)
+            return 2
+        print(operators.add(who, note) if action == "add" else operators.remove(who))
+        return 0
+    except LookupError as err:
+        print(f"error: {err}", file=sys.stderr)
+        return 1
+    finally:
+        models.db.remove()
+
+
 def _version() -> str:
     from mason import __version__
     return __version__
@@ -127,8 +165,21 @@ def main(argv: list[str] | None = None) -> None:
     cp = sub.add_parser("check", help="what the settings allow, and what is missing")
     cp.add_argument("--port", type=int, default=S.DEFAULT_PORT, help="the port `serve` will use")
     cp.add_argument("--host", help=argparse.SUPPRESS)  # so `mason serve --check` takes serve's options
+    up = sub.add_parser("users", help="the accounts on this Mason (only where it runs, never on the web)")
+    up.add_argument("--port", type=int, default=S.DEFAULT_PORT, help=argparse.SUPPRESS)
+    up.add_argument("--host", help=argparse.SUPPRESS)
+    opp = sub.add_parser("operator", help="who may open the operator panel (add, remove, list)")
+    opp.add_argument("action", choices=("add", "remove", "list"))
+    opp.add_argument("who", nargs="?", help="github:LOGIN, gitlab:LOGIN, a bare login, or #ID")
+    opp.add_argument("--note", default="", help="why (kept with the operator)")
+    opp.add_argument("--port", type=int, default=S.DEFAULT_PORT, help=argparse.SUPPRESS)
     args = p.parse_args(argv)
     op = S.load(args.port)
+    if args.cmd == "users":
+        print_users(op)
+        return
+    if args.cmd == "operator":
+        sys.exit(operator_command(op, args.action, args.who, args.note))
     if args.cmd == "check":
         print(f"url          {op.url or '(MASON_URL is not set)'}")
         print(f"data         {op.data}")
@@ -140,7 +191,8 @@ def main(argv: list[str] | None = None) -> None:
         who = ("anyone with an account" if op.open_sign_in
                else f"users {sorted(op.allow_users) or '-'}, orgs {sorted(op.allow_orgs) or '-'}")
         print(f"sign-in      {who}")
-        print(f"plugins      index {op.plugin_index} (install with pip next to Mason)")
+        off = os.environ.get("MASON_PLUGINS_OFF", "").strip()
+        print(f"plugins      index {op.plugin_index} (install with pip next to Mason); off for all: {off or '-'}")
         print(f"web ui       {'built' if webui.built(STATIC) else 'NOT BUILT: cd web && npm ci && npm run build'}")
         for problem in op.problems():
             print(f"PROBLEM      {problem}")

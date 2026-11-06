@@ -22,7 +22,7 @@ from datetime import timedelta
 from flask import abort, current_app, g, jsonify, request
 
 from mason.server import security
-from mason.server.models import ApiKey, Audit, Session, User, db, utcnow
+from mason.server.models import ApiKey, Audit, Operator, Session, User, db, utcnow
 
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 SCOPES = {"read": 0, "write": 1}
@@ -179,6 +179,23 @@ def need(scope: str = "read"):
             return fn(*a, **kw)
         return inner
     return wrap
+
+
+def is_operator(user: User | None) -> bool:
+    """Read from the database on every call: `mason operator remove` takes effect at the next request."""
+    return user is not None and db.get(Operator, user.id) is not None
+
+
+def need_operator(fn):
+    """The operator panel: a signed-in operator, in the browser (API keys never reach it)."""
+    @functools.wraps(fn)
+    def inner(*a, **kw):
+        if g.get("user") is None:
+            abort(401, "sign in first")
+        if g.get("session") is None or not is_operator(g.user):
+            abort(403, "only operators, in the browser (add one with `mason operator add` where Mason runs)")
+        return fn(*a, **kw)
+    return inner
 
 
 def can_write() -> bool:

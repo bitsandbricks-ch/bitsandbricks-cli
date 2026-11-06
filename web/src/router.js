@@ -37,6 +37,7 @@ export const router = createRouter({
     { path: '/repo', name: 'repo', component: v('RepoPage'), meta: { tab: 'repos' } },
     { path: '/release', name: 'release', component: v('ReleasePage'), meta: { tab: 'releases' } },
     { path: '/plugins/:plugin/:tab', name: 'plugin-tab', component: v('PluginTab') },
+    { path: '/operator', name: 'operator', component: v('Operator') },
     { path: '/:rest(.*)*', redirect: '/' },
   ],
 })

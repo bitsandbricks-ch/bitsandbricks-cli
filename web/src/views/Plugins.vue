@@ -1,5 +1,5 @@
 <script setup>
-// Plugins: switch them on or off for yourself (only yours: nobody switches them for anyone else), run their actions, open their tabs.
+// Plugins: switch them on or off for yourself (only yours; an operator can switch one off for everyone), run their actions, open their tabs.
 import { onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { get, log, post, put } from '../api.js'
@@ -48,8 +48,9 @@ onMounted(load)
           <div class="row">
             <span :class="p.on ? 'accent' : 'dim'">{{ p.name }}</span>
             <span class="dim grow">{{ p.description }}</span>
-            <label class="check"><input type="checkbox" :checked="p.on" @change="toggle(p, { on: $event.target.checked })"> on for me</label>
+            <label class="check"><input type="checkbox" :checked="p.on" :disabled="p.off_for_all" @change="toggle(p, { on: $event.target.checked })"> on for me</label>
           </div>
+          <div v-if="p.off_for_all" class="warn">an operator switched this plugin off for everyone</div>
           <div v-if="p.on" class="row dim" style="margin-top: 6px">
             <span v-for="t in p.tabs" :key="t.id"><RouterLink :to="`/plugins/${p.name}/${t.id}`">tab: {{ t.title }}</RouterLink></span>
             <span v-for="c in p.checks" :key="c.key" class="chip">check: {{ c.label }}</span>

@@ -365,7 +365,7 @@ def test_device_sign_in_is_open_to_anyone(op, monkeypatch):
     assert {a["action"] for a in ann.get("/api/v1/audit?all=1").json} == {"login.github"}  # no "everyone"
     assert mike.get("/api/v1/admin/users").status_code == 404  # no admins, so no list of users
     assert mike.get("/api/v1/me").json["scope"] == "write"
-    # plugins are switched per user: Ann's choice never reaches Mike, and there is no "for everyone"
+    # plugins are switched per user: Ann's choice never reaches Mike ("everyone" is for operators, elsewhere)
     from mason import plugins
 
     class Demo:
@@ -378,7 +378,7 @@ def test_device_sign_in_is_open_to_anyone(op, monkeypatch):
     assert ann.put("/api/v1/plugins/demo", json={"on": False, "everyone": False}, headers=ah).status_code == 200
     assert not next(p for p in ann.get("/api/v1/plugins").json["plugins"] if p["name"] == "demo")["on"]
     mine = next(p for p in mike.get("/api/v1/plugins").json["plugins"] if p["name"] == "demo")
-    assert mine["on"] and "off_for_all" not in mine
+    assert mine["on"] and not mine["off_for_all"]
     assert _poll(app, ann).status_code == 403  # signed in now: writes need the CSRF token
     r = ann.post("/api/v1/auth/github/device/poll", json={}, headers={"X-CSRF-Token": me["csrf"]})
     assert r.json["status"] == "expired"  # the cookie was for one sign-in
@@ -651,7 +651,10 @@ def test_new_accounts_are_limited(op, monkeypatch):
         _sign_in_as(app, "bob", "3")
     assert _sign_in_as(app, "ann", "2").name == "ann"  # existing accounts still sign in
     with pytest.raises(PermissionError, match="as many accounts"):
-        _sign_in_as(app, "root", "4")  # nobody is exempt: there are no admins
+        _sign_in_as(app, "root", "4")
+    monkeypatch.setattr(s, "allow_users", {("github", "root"), ("github", "ann")})
+    assert _sign_in_as(app, "root", "4").name == "root"  # MASON_ALLOW_USERS always get in
+    monkeypatch.setattr(s, "allow_users", set())
     monkeypatch.setattr(s, "max_users", 0)
     monkeypatch.setattr(s, "signups_per_ip", 1)
     from mason.server import limits
@@ -701,7 +704,7 @@ def test_proxy_reads_dont_count(op, monkeypatch):
     assert [c.get("/api/v1/me").status_code for _ in range(3)] == [200, 200, 429]
 
 
-def test_old_databases_lose_admins(tmp_path):
+def test_old_databases_lose_is_admin(tmp_path):
     import sqlite3
 
     from mason.server import models
@@ -716,9 +719,100 @@ def test_old_databases_lose_admins(tmp_path):
     from sqlalchemy import inspect
     have = inspect(engine)
     assert "is_admin" not in {c["name"] for c in have.get_columns("users")}
-    assert not have.has_table("instance_settings")
+    assert have.has_table("operators")
     models.db.add(models.User(name="Ann"))  # would fail on the old NOT NULL is_admin
     models.db.commit()
     assert [u.name for u in models.db.query(models.User).order_by(models.User.id)] == ["Mike", "Ann"]
     models.db.remove()
     engine.dispose()
+
+
+def test_plugins_off_for_everyone(monkeypatch):
+    from importlib import metadata
+
+    from mason import plugins
+
+    class EP:
+        def __init__(self, name):
+            self.name = name
+        def load(self):  # noqa: E301
+            return type("P", (), {"name": self.name})
+
+    class EPs:
+        def select(self, group):
+            return [EP("a"), EP("b")]
+    monkeypatch.setattr(metadata, "entry_points", lambda: EPs())
+    monkeypatch.setattr(plugins, "_plugins", None)
+    monkeypatch.delenv("MASON_PLUGINS", raising=False)
+    monkeypatch.setenv("MASON_PLUGINS_OFF", "b")
+    assert [p.name for p in plugins.load()] == ["a"]  # b never loads, for anyone
+
+
+def test_serve_users(op, capsys):
+    app, c = op
+    from mason.server.app import print_users
+    c.post("/api/v1/keys", json={"name": "k"}, headers=H)
+    print_users(app.config["OP"])
+    out = capsys.readouterr().out
+    assert out.startswith("1 users, 1 sessions, 1 working API keys")
+    assert "Mike" in out and "github:mike" in out and "1 keys" in out
+
+
+def test_operator_panel(op, monkeypatch, capsys):
+    app, mike = op
+    from mason import plugins
+    from mason.server import operators, security
+    from mason.server.app import operator_command
+    from mason.server.models import Identity, Session, User, db
+
+    class Demo:
+        name = "demo"
+        def tui_tabs(self): return []  # noqa: E301,E704
+        def tui_checks(self): return []  # noqa: E301,E704
+        def status_columns(self): return []  # noqa: E301,E704
+    monkeypatch.setattr(plugins, "load", lambda: [Demo()])
+    with app.app_context():  # Ann, a second user with a browser session
+        ann = User(name="Ann")
+        db.add(ann)
+        db.flush()
+        db.add(Identity(user_id=ann.id, provider="github", host="github.com", uid="2", login="ann"))
+        db.add(Session(id=security.sha256("ann-cookie"), user_id=ann.id, csrf="ann-csrf"))
+        db.commit()
+        ann_id = ann.id
+    annc = app.test_client()
+    annc.set_cookie("mason_session", "ann-cookie", domain="localhost")
+    AH = {"X-CSRF-Token": "ann-csrf"}
+    # nobody is an operator until `mason operator add`, and the web can't make one
+    assert mike.get("/api/v1/operator").status_code == 403
+    assert not mike.get("/api/v1/me").json["user"]["is_operator"]
+    assert operator_command(app.config["OP"], "add", "github:nobody") == 1
+    assert "no user signed in as github:nobody" in capsys.readouterr().err
+    with app.app_context():
+        assert "is an operator now" in operators.add("github:MIKE", note="runs it")
+        assert "already" in operators.add("#1")
+        assert operators.listing()[0].startswith("#1  Mike  github:mike")
+    assert mike.get("/api/v1/me").json["user"]["is_operator"]
+    got = mike.get("/api/v1/operator").json
+    assert [u["name"] for u in got["users"]] == ["Mike", "Ann"] and got["users"][0]["operator"]
+    assert got["stats"]["users"] == 2 and got["plugins"] == [{"name": "demo", "description": "", "off_for_all": False}]
+    assert annc.get("/api/v1/operator").status_code == 403  # Ann isn't one
+    key = mike.post("/api/v1/keys", json={"name": "k", "scope": "write"}, headers=H).json["key"]
+    keyed = app.test_client()
+    assert keyed.get("/api/v1/operator", headers={"Authorization": f"Bearer {key}"}).status_code == 403  # browser only
+    # a plugin off for everyone is off for Ann too, and she can't switch it back on for herself
+    assert mike.put("/api/v1/operator/plugins/demo", json={"on": False}, headers=H).json["plugins"][0]["off_for_all"]
+    demo = annc.get("/api/v1/plugins").json["plugins"][0]
+    assert not demo["on"] and demo["off_for_all"]
+    annc.put("/api/v1/plugins/demo", json={"on": True}, headers=AH)
+    assert not annc.get("/api/v1/plugins").json["plugins"][0]["on"]
+    assert annc.put("/api/v1/operator/plugins/demo", json={"on": True}, headers=AH).status_code == 403
+    mike.put("/api/v1/operator/plugins/demo", json={"on": True}, headers=H)
+    assert annc.get("/api/v1/plugins").json["plugins"][0]["on"]
+    # operators see accounts, never another user's settings, and can sign a user out everywhere
+    assert "settings" not in got["users"][1] and "defaults" not in str(got["users"])
+    assert mike.post(f"/api/v1/operator/users/{ann_id}/sign-out", headers=H).json == {"sessions": 1, "keys": 0}
+    assert annc.get("/api/v1/me").json["user"] is None
+    assert {a["action"] for a in mike.get("/api/v1/audit").json} >= {"operator.plugin", "operator.sign-out"}
+    # removing takes effect at the next request
+    assert operator_command(app.config["OP"], "remove", "mike") == 0
+    assert mike.get("/api/v1/operator").status_code == 403
