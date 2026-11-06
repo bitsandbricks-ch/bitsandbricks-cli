@@ -121,7 +121,7 @@ REPO_FIELDS = """
   pullRequests(states: OPEN, first: 30, orderBy: {field: UPDATED_AT, direction: DESC}) {
     totalCount
     nodes {
-      number title url isDraft mergeable reviewDecision headRefName
+      number title url isDraft mergeable mergeStateStatus reviewDecision headRefName
       author { login }
       autoMergeRequest { enabledAt }
       commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
@@ -233,6 +233,8 @@ def prs(cfg: Config, repos: list[str]) -> None:
                 bits.append(p["reviewDecision"].lower().replace("_", " "))
             if p.get("mergeable") == "CONFLICTING":
                 bits.append("CONFLICTS")
+            elif not p["isDraft"]:
+                bits.append(merge_word(p))
             if p.get("autoMergeRequest"):
                 bits.append("auto-merge on")
             who = (p.get("author") or {}).get("login", "?")
@@ -251,6 +253,18 @@ MERGE_STATE = {
     "DRAFT": "draft",
     "UNKNOWN": "GitHub is still working it out",
 }
+# One word for lists: can it merge right now?
+MERGE_WORD = {"CLEAN": "mergeable", "HAS_HOOKS": "mergeable", "UNSTABLE": "mergeable", "BLOCKED": "blocked",
+              "BEHIND": "behind", "DIRTY": "conflicts", "DRAFT": "draft", "UNKNOWN": "checking"}
+
+
+def merge_word(p: dict) -> str:
+    """mergeable, blocked, behind, conflicts, draft or checking, from a PR node's mergeStateStatus."""
+    if p.get("isDraft"):
+        return "draft"
+    if p.get("mergeable") == "CONFLICTING":
+        return "conflicts"
+    return MERGE_WORD.get(p.get("mergeStateStatus") or "UNKNOWN", "checking")
 
 
 def pr_detail(repo: str, number: int, diff: bool = False, full_body: bool = False) -> None:
@@ -348,32 +362,33 @@ def merge_one(repo: str, p: dict, ctx: dict, named: bool) -> None:
     if failed:
         say(f"   {label}: not merged: {failed}{link}")
     elif merged:
-        say(f"   {label}: merged right away (checks green, nothing left to wait for){link}")
+        say(f"   {label}: merged right away (GitHub couldn't auto-merge it){link}")
     else:
         say(f"   {label}: auto-merge on (merges when checks are green){link}\n      checks: {p['url']}/checks")
 
 
-# GitHub refuses auto-merge when there is nothing for it to wait for.
-NOTHING_TO_WAIT_FOR = re.compile(r"clean status", re.I)
-NO_REQUIRED_CHECKS = re.compile(r"unstable status|protected branch rules not configured", re.I)
 NOT_ALLOWED = re.compile(r"auto.?merge is not allowed|not allowed for this repository", re.I)
 
 
 def allow_auto_merge(repo: str) -> bool:
-    """Turn on the repo's "Allow auto-merge" setting when it is off. True when it changed it."""
-    info = api("GET", f"/repos/{repo}") or {}
-    if info.get("allow_auto_merge") is False:
-        api("PATCH", f"/repos/{repo}", {"allow_auto_merge": True})
-        say("   turned on auto-merge for the repo")
+    """Turn on the repo's "Allow auto-merge" setting when it is off. True when it is on afterwards."""
+    try:
+        info = api("GET", f"/repos/{repo}") or {}
+        if info.get("allow_auto_merge") is False:
+            api("PATCH", f"/repos/{repo}", {"allow_auto_merge": True})
+            say("   turned on auto-merge for the repo")
         return True
-    return False
+    except RuntimeError as err:  # not an admin of the repo, or the org doesn't allow it
+        say(f"   can't turn on auto-merge for the repo: {str(err)[:120]}")
+        return False
 
 
 def auto_merge(repo: str, number: int, method: str = "squash") -> tuple[bool, str]:
-    """Turn on auto-merge for one PR: (merged right away, why not or '').
+    """Auto-merge one PR, or merge it now when GitHub won't auto-merge: (merged now, why not or '').
 
-    GitHub only auto-merges when the base branch makes it wait (required checks or reviews).
-    A PR that is already mergeable ("clean status") is merged now, as `gh pr merge --auto` does.
+    GitHub refuses auto-merge when the repo has it turned off, and when the base branch gives it
+    nothing to wait for (no required checks: "clean status" or "unstable status"). Then the PR is
+    merged right away; if GitHub blocks that too, both reasons come back.
     """
     t = core.transport()
     failed = t.pr_merge(repo, number, method, auto=True)
@@ -381,14 +396,10 @@ def auto_merge(repo: str, number: int, method: str = "squash") -> tuple[bool, st
         failed = t.pr_merge(repo, number, method, auto=True)
     if not failed:
         return False, ""
-    if NOTHING_TO_WAIT_FOR.search(failed):
-        failed = t.pr_merge(repo, number, method, auto=False)
-        return not failed, failed
-    if NO_REQUIRED_CHECKS.search(failed):
-        return False, ("GitHub can only auto-merge when the base branch requires checks, and this one requires "
-                       "none. Add a ruleset (or branch protection) that requires the CI checks, or merge now "
-                       "once they pass")
-    return False, failed
+    now = t.pr_merge(repo, number, method, auto=False)
+    if not now:
+        return True, ""
+    return False, f"auto-merge: {failed.strip()[:150]}; merge now: {now.strip()[:150]}"
 
 
 def merge(repo: str, ctx: dict) -> None:

@@ -11,18 +11,21 @@ from mason import repos as R
 class Stub:
     """A transport whose enablePullRequestAutoMerge answers with a canned GitHub error."""
 
-    def __init__(self, auto_error: str = "", allowed: bool = True):
-        self.auto_error, self.allowed, self.calls = auto_error, allowed, []
+    def __init__(self, auto_error: str = "", allowed: bool = True, admin: bool = True, now_error: str = ""):
+        self.auto_error, self.allowed, self.admin, self.now_error = auto_error, allowed, admin, now_error
+        self.calls = []
 
     def pr_merge(self, repo, number, method="squash", auto=True):
         self.calls.append("auto" if auto else "now")
         if auto and not self.allowed:
             return "Auto merge is not allowed for this repository"
-        return self.auto_error if auto else ""
+        return self.auto_error if auto else self.now_error
 
     def api(self, method, path, body=None):
         self.calls.append(f"{method} {path}")
         if method == "PATCH":
+            if not self.admin:
+                raise RuntimeError("HTTP 403: Must have admin rights to Repository.")
             self.allowed = True
         return {"allow_auto_merge": self.allowed}
 
@@ -48,10 +51,31 @@ def test_clean_pr_merges_now(stub):
     assert t.calls == ["auto", "now"]
 
 
-def test_no_required_checks_says_why(stub):
+def test_no_required_checks_merges_now(stub):
     t = stub(auto_error="Pull request Pull request is in unstable status")
+    assert R.auto_merge("acme/web", 7) == (True, "")
+    assert t.calls == ["auto", "now"]
+
+
+def test_auto_merge_off_and_not_admin_merges_now(stub, capsys):
+    t = stub(allowed=False, admin=False)
+    assert R.auto_merge("acme/web", 7) == (True, "")
+    assert t.calls == ["auto", "GET /repos/acme/web", "PATCH /repos/acme/web", "now"]
+    assert "can't turn on auto-merge" in capsys.readouterr().out
+
+
+def test_protected_branch_blocks_both(stub):
+    stub(allowed=False, admin=False, now_error="Required status check \"test\" is expected.")
     merged, why = R.auto_merge("acme/web", 7)
-    assert not merged and "requires none" in why and t.calls == ["auto"]
+    assert not merged and "not allowed" in why and "Required status check" in why
+
+
+def test_merge_word():
+    assert R.merge_word({"isDraft": False, "mergeStateStatus": "CLEAN"}) == "mergeable"
+    assert R.merge_word({"isDraft": False, "mergeStateStatus": "BLOCKED"}) == "blocked"
+    assert R.merge_word({"isDraft": False, "mergeable": "CONFLICTING", "mergeStateStatus": "DIRTY"}) == "conflicts"
+    assert R.merge_word({"isDraft": True, "mergeStateStatus": "CLEAN"}) == "draft"
+    assert R.merge_word({"isDraft": False}) == "checking"
 
 
 def test_repo_setting_off_is_turned_on(stub):

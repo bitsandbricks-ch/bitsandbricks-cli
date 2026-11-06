@@ -23,7 +23,7 @@ const rows = computed(() => {
   return (data.value?.prs || []).filter((p) => ({
     all: true, ready: !p.draft && !p.conflicts, drafts: p.draft, auto: p.auto, conflicts: p.conflicts,
   })[filter.value]).map((p) => ({
-    ...p, state: p.draft ? 'draft' : p.conflicts ? 'CONFLICTS' : 'ready', flags: [p.auto && 'auto-merge', p.review].filter(Boolean).join(' · '),
+    ...p, state: p.draft ? 'draft' : p.conflicts ? 'CONFLICTS' : p.merge || 'ready', flags: [p.auto && 'auto-merge', p.review].filter(Boolean).join(' · '),
   }))
 })
 const columns = [
