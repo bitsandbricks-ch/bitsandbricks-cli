@@ -546,7 +546,7 @@ class MasonTui(App):
                 return {"approve": bool(envs), "rerun": state in R.FAILED, "logs": state in R.FAILED,
                         "cancel_run": run.get("status") in R.ACTIVE}[action]
             if action in ("bump", "release"):
-                return bool(key) and bool(V.source(self.cfg, key))
+                return bool(key) and bool(V.source(self.cfg, key, look=False))
         except (KeyError, TypeError):
             return False
         return True
@@ -1041,8 +1041,6 @@ class MasonTui(App):
 
     def version_lines(self, repo: str) -> list[str]:
         """The version file against the latest release, once loaded (a background call per repo)."""
-        if not V.source(self.cfg, repo):
-            return []
         st = self.versions.get(repo)
         if st is None:
             self.versions[repo] = "…"
@@ -1050,6 +1048,8 @@ class MasonTui(App):
             return ["version      …"]
         if isinstance(st, str):
             return [f"version      {st}"]
+        if not st.get("file"):
+            return []
         if not st["version"]:
             return [f"version      none found in {st['file']}"]
         todo = f"  → R releases {st['tag']}" if st["todo"] else "  (released; b bumps it)"
@@ -1111,6 +1111,7 @@ class MasonTui(App):
         self.detail_cache.clear()
         self.versions.clear()
         R._nodes.clear()
+        V._specs.clear()
         self.loaded.pop(self.tab(), None)
         core.CACHE = None  # r means fresh: no answers from gh's cache
         self.force = True
@@ -1419,13 +1420,19 @@ class MasonTui(App):
                           R.rerun_failed, repo, run)
 
     def version_repo(self) -> str | None:
-        """The repo of the selected row on Repos or Releases, when its group names a version file."""
+        """The repo of the selected row on Repos or Releases, when it has a version file (see versions.spec)."""
         key = self.current_key()
         if self.tab() not in ("repos", "releases") or not key:
             self.log_line("b bumps and R releases the selected repo: Repos (1) or Releases (4)")
             return None
-        if not V.source(self.cfg, key):
-            self.log_line(f"{key}: its group names no version file (version = \"...\" in mason.toml)")
+        if not V.source(self.cfg, key, look=False):  # looks happen in the background (version_lines)
+            if self.versions.get(key) in (None, "…"):
+                self.log_line(f"{key}: still looking for its version file, try again in a moment")
+                if key not in self.versions:
+                    self.versions[key] = "…"
+                    self.load_version(key)
+            else:
+                self.log_line(f"{key}: no version file found ([release] version = \"...\" in its .mason.toml)")
             return None
         return key
 
@@ -1695,7 +1702,7 @@ class MasonTui(App):
                           ("logs", "Show the end of the failed log (l)", self.action_logs)]
             if run.get("status") in R.ACTIVE:
                 items.append(("cancel", "Cancel it (C)", self.action_cancel_run))
-        if tab in ("repos", "releases") and V.source(self.cfg, key):
+        if tab in ("repos", "releases") and V.source(self.cfg, key, look=False):
             items += [("bump", "Bump its version: PR with version + changelog (b)", self.action_bump),
                       ("release", "Release: tag v<version> when it is new (R)", self.action_release)]
         if tab in ("repos", "releases"):

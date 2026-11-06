@@ -104,7 +104,8 @@ REPOS = {  # full name: (settings, rulesets, files, immutable)
         ".gitignore": GITIGNORE, "LICENSE": "GPL\n", "plugin.yaml": "name: plugin-b\nversion: \"0.4.0\"\n",
         "CHANGELOG.md": "# Changelog\n\n## [Unreleased]\n\n## [0.4.0] - 2026-11-05\n- Faster\n",
         ".github/workflows/release.yml": RELEASE_YML}, False),
-    "acme/web": (dict(SETTINGS, delete_branch_on_merge=False), {}, {".github/workflows/ci.yml": CI_YML}, False),
+    "acme/web": (dict(SETTINGS, delete_branch_on_merge=False), {}, {".github/workflows/ci.yml": CI_YML,
+                 "package.json": '{\n  "name": "web",\n  "version": "3.0.0"\n}\n'}, False),
     "acme/api": (SETTINGS, {"main": ruleset("main", approvals=1)},
                  {"SECURITY.md": SECURITY_MD, ".github/rulesets/release.json": json.dumps(RELEASE_RS)}, False),
     "acme/legacy": ({}, {}, {}, False),
@@ -112,7 +113,8 @@ REPOS = {  # full name: (settings, rulesets, files, immutable)
     "acme/defaults": ({}, {}, {}, False),
     "mike/dotfiles": (SETTINGS, {"main": ruleset("main", rules=("deletion", "non_fast_forward", "pull_request",
                                                                  "required_linear_history"))},
-                      {"SECURITY.md": SECURITY_MD}, False),
+                      {"SECURITY.md": SECURITY_MD, "dots/__init__.py": '"""dotfiles"""\n__version__ = "2.1.0"\n',
+                       ".mason.toml": '[release]\nversion = "dots/__init__.py"\ntag = "dots-{version}"\n'}, False),
 }
 DEFAULTS_TOML = """\
 orgs = ["acme", "mike"]
@@ -203,6 +205,8 @@ def contents(repo, path):
     files = REPOS[repo][2]
     if path in files:
         out({"content": base64.b64encode(files[path].encode()).decode(), "sha": blob(files[path])})
+    if path == "":  # the repo root
+        out([{"name": e, "path": e, "type": "file"} for e in sorted({p.split("/")[0] for p in files})])
     entries = sorted({p[len(path) + 1:].split("/")[0] for p in files if p.startswith(path + "/")})
     if entries:
         out([{"name": e, "path": f"{path}/{e}", "type": "file"} for e in entries])

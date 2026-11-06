@@ -1,11 +1,17 @@
 """Versions: bump a repo's version in a PR, and release it by pushing the tag v<version>.
 
-A group of mason.toml names where its repos keep their version:
+Where a repo keeps its version, first match wins (spec):
 
-    [[group]]
-    name = "plugins"
-    version = "plugin.yaml"                 # plugin.yaml, pyproject.toml, package.json, VERSION, ...
+1. the repo's own .mason.toml (only its [release] table is read):
+
+    [release]
+    version = "pyproject.toml"              # plugin.yaml, package.json, Cargo.toml, VERSION, src/app/__init__.py
     changelog = ["CHANGELOG.md"]            # optional; Keep a Changelog [Unreleased] or "## 1.2.0" sections
+    tag = "v{version}"                      # optional tag format
+
+2. its group in the defaults' mason.toml (version = "plugin.yaml", changelog = [...]);
+3. a known file in the repo root that holds a version (plugin.yaml, pyproject.toml, package.json,
+   Cargo.toml, VERSION), with CHANGELOG.md as its changelog when there is one.
 
 `mason bump name [major|minor|patch|1.4.0]` opens a PR on bump/v<new> with the new version and a
 changelog section; `mason release [names]` pushes the tag v<version> on the default branch for every
@@ -27,8 +33,12 @@ PATTERNS = {  # file kind -> the version, with what comes before and after it
     "yaml": re.compile(r"""^(version:\s*["']?)([^"'\s#]+)(["']?)""", re.M),
     "toml": re.compile(r'^(version\s*=\s*")([^"]+)(")', re.M),
     "json": re.compile(r'^(\s*"version"\s*:\s*")([^"]+)(")', re.M),
+    "python": re.compile(r"""^(__version__\s*=\s*["'])([^"']+)(["'])""", re.M),
     "plain": re.compile(r"\A(\s*v?)([0-9][^\s]*)(\s*)"),
 }
+REPO_FILE = ".mason.toml"  # a repo's own [release] table: version, changelog, tag
+DETECT = ("plugin.yaml", "pyproject.toml", "package.json", "Cargo.toml", "VERSION")  # tried in this order
+CHANGELOGS = ("CHANGELOG.md", "CHANGES.md", "HISTORY.md")
 
 
 def kind(path: str) -> str:
@@ -39,6 +49,8 @@ def kind(path: str) -> str:
         return "toml"
     if name.endswith(".json"):
         return "json"
+    if name.endswith(".py"):
+        return "python"
     return "plain"
 
 
@@ -84,10 +96,76 @@ def with_changelog(text: str | None, version: str, day: str, notes: list[str]) -
     return text[:m.start()] + section + text[m.start():] if m else text.rstrip("\n") + "\n\n" + section
 
 
-def source(cfg: Config, repo: str) -> tuple[str, list[str]] | None:
-    """(version file, changelog files) of the repo's group, or None when it has no version file."""
+_specs = core.Scoped("version_spec")  # repo -> spec() (None when there is no version file)
+
+
+def repo_release_table(repo: str, names: set[str]) -> dict:
+    """The [release] table of the repo's .mason.toml ({} without one). Only release settings are read here:
+    groups and checks stay with the defaults and the org's .mason repo."""
+    from mason.config import tomllib
+    if REPO_FILE not in names:
+        return {}
+    text = core.file_on(repo, REPO_FILE) or ""
+    try:
+        table = tomllib.loads(text).get("release") or {}
+    except tomllib.TOMLDecodeError as err:
+        raise RuntimeError(f"{repo}/{REPO_FILE}: {err}") from err
+    return table if isinstance(table, dict) else {}
+
+
+def root_names(repo: str) -> set[str]:
+    try:
+        return {f.get("name", "") for f in api("GET", f"/repos/{repo}/contents/") or [] if isinstance(f, dict)}
+    except core.RateLimited:
+        raise
+    except RuntimeError:
+        return set()
+
+
+def spec(cfg: Config, repo: str, look: bool = True) -> dict | None:
+    """Where the repo keeps its version: {"file", "changelog": [...], "tag": "v{version}", "from"}.
+
+    The repo's .mason.toml [release] table wins, then its group in the defaults (version = "..."), then a
+    guess from known files in the repo root (plugin.yaml, pyproject.toml, package.json, Cargo.toml, VERSION)
+    that hold a version. `look=False` never calls GitHub: the group's setting or what an earlier look found
+    (for the TUI's key hints)."""
     g = R.group_of(cfg, repo)
-    return (g.version, list(g.changelog)) if g and g.version else None
+    group = {"file": g.version, "changelog": list(g.changelog), "tag": "v{version}", "from": "group"} \
+        if g and g.version else None
+    if repo in _specs:
+        return _specs[repo]
+    if not look or repo.startswith("gitlab:"):
+        return group
+    names = root_names(repo)
+    table = repo_release_table(repo, names)
+    found = None
+    if table.get("version"):
+        logs = table.get("changelog", group["changelog"] if group else [])
+        found = {"file": str(table["version"]), "changelog": [logs] if isinstance(logs, str) else list(logs),
+                 "tag": str(table.get("tag") or "v{version}"), "from": REPO_FILE}
+    elif group:
+        found = group
+    else:
+        for name in DETECT:
+            if name in names and read_version(core.file_on(repo, name), name):
+                found = {"file": name, "changelog": [c for c in CHANGELOGS if c in names][:1], "tag": "v{version}",
+                         "from": "detected"}
+                break
+    if found and "{version}" not in found["tag"]:
+        raise RuntimeError(f"{repo}/{REPO_FILE}: tag must contain {{version}}, e.g. \"v{{version}}\"")
+    _specs[repo] = found
+    return found
+
+
+def source(cfg: Config, repo: str, look: bool = True) -> tuple[str, list[str]] | None:
+    """(version file, changelog files) of the repo (see spec), or None when it has no version file."""
+    sp = spec(cfg, repo, look)
+    return (sp["file"], sp["changelog"]) if sp else None
+
+
+def tag_of(cfg: Config, repo: str, version: str) -> str:
+    sp = spec(cfg, repo) or {}
+    return (sp.get("tag") or "v{version}").format(version=version)
 
 
 def release_tags(repo: str) -> list[str]:
@@ -128,13 +206,13 @@ def state(cfg: Config, repo: str) -> dict:
     last = newest(release_tags(repo))
     todo = bool(ver) and (not last or version_tuple(ver) > version_tuple(last))
     return {"repo": repo, "file": path, "base": base, "version": ver, "released": last,
-            "tag": f"v{ver}" if ver else None, "todo": todo}
+            "tag": tag_of(cfg, repo, ver) if ver else None, "todo": todo, "from": (spec(cfg, repo) or {}).get("from")}
 
 
 def bump(cfg: Config, repo: str, level: str, auto: bool = False) -> None:
     src = source(cfg, repo)
     if not src:
-        say("   its group names no version file (`version = ...` in the defaults), skipped")
+        say('   no version file found (set [release] version = "..." in .mason.toml, or version on its group), skipped')
         return
     path, changelogs = src
     base = api("GET", f"/repos/{repo}")["default_branch"]
@@ -167,7 +245,7 @@ def bump(cfg: Config, repo: str, level: str, auto: bool = False) -> None:
     logs = ", ".join(f"`{c}`" for c in files if c != path)
     body = (f"Sets `{path}` to {new}" + (f" and adds the {new} section to {logs}" if logs else "")
             + f". Edit the changelog here before merging.\n\nAfter the merge, `mason release {core.short(repo)}` "
-            f"(R in the TUI) pushes the tag v{new}; the repo's release workflow takes it from there.")
+            f"(R in the TUI) pushes the tag {tag_of(cfg, repo, new)}; the repo's release workflow takes it from there.")
     url = open_pr(repo, base, branch, files, f"Release {new}", f"Release {new}", body)
     say(f"   opened {url}")
     if auto:
@@ -180,7 +258,7 @@ def release(cfg: Config, repo: str, yes: bool = True) -> None:
     `yes=False` asks before pushing the tag."""
     st = state(cfg, repo)
     if not st["file"]:
-        say("   its group names no version file, skipped")
+        say('   no version file found (set [release] version = "..." in .mason.toml, or version on its group), skipped')
         return
     if not st["version"]:
         say(f"   no version in {st['file']}, skipped")

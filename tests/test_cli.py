@@ -421,3 +421,23 @@ def test_release_tag_only_pushes_the_tag(env, tmp_path):
     out = mason(env, "release", "tag", "b", "v0.5.0", "--yes")  # the version file decides the tag
     assert "plugin.yaml says 0.4.0, so the tag would be v0.4.0, not v0.5.0: bump it first" in out
     assert "push the tag v0.4.0 on main" in mason(env, "release", "tag", "b", "--dry-run")
+
+
+def test_version_file_from_repo_group_or_detected(env):
+    rows = [line.split() for line in mason(env, "release").splitlines()]
+    assert ["plugin-b", "plugin.yaml", "0.4.0", "v0.3.0", "v0.4.0"] in rows  # the group's version file
+    assert ["web", "package.json", "3.0.0", "-", "v3.0.0"] in rows  # found in the repo root
+    assert ["dotfiles", "dots/__init__.py", "2.1.0", "-", "dots-2.1.0"] in rows  # the repo's .mason.toml
+    assert not any(r and r[0] == "api" for r in rows)  # none anywhere
+    out = mason(env, "release", "tag", "dotfiles", "--dry-run")
+    assert "[dry-run] push the tag dots-2.1.0 on main of mike/dotfiles" in out
+    out = mason(env, "bump", "dotfiles", "minor", "--dry-run")
+    assert "2.1.0 -> 2.2.0 (dots/__init__.py)" in out
+
+
+def test_python_version_files():
+    from mason import versions as V
+    text = '"""x"""\n__version__ = "0.9.1"\n'
+    assert V.read_version(text, "src/app/__init__.py") == "0.9.1"
+    assert V.write_version(text, "src/app/__init__.py", "1.0.0") == '"""x"""\n__version__ = "1.0.0"\n'
+    assert V.read_version('[package]\nname = "x"\nversion = "0.3.0"\n', "Cargo.toml") == "0.3.0"

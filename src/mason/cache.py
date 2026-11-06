@@ -287,8 +287,9 @@ class Spaces(dict):
                 self.pop(name, None)
 
     def forget_files(self) -> None:
-        """A file was written: a defaults repo may have changed."""
+        """A file was written: a defaults repo, or a repo's .mason.toml or version file, may have changed."""
         self.pop("config", None)
+        self.pop("version_spec", None)
 
 
 def size_of(text: str, default: int) -> int:

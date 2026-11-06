@@ -35,7 +35,7 @@ Repos are named as `owner/name`, as a bare `name` when only one repo has it, or 
 | `mason rerun name [--run ID] [--yes]` | Re-runs the failed jobs of the repo's newest failed run (or of run ID), after listing its jobs and the step that failed. Jobs that passed and approvals already given stay. |
 | `mason releases [--problems]` | Each repo's latest release, its assets, and its release runs. Flags assets the group's `release_assets` wants but the release lacks, and a failed last release run with the job and step that failed. |
 | `mason packages [--problems]` | Container images on GHCR of your orgs: newest tags, whether the repo's latest release has an image with its tag, and a failed last image build (a run named or filed like image, docker or container) with the job and step that failed. |
-| `mason bump name [patch\|minor\|major\|1.4.0] [--auto-merge]` | Opens a PR on `bump/v<new>` that sets the version in the group's `version` file (plugin.yaml, pyproject.toml, package.json, VERSION, ...) and adds the section to each `changelog`: Keep a Changelog `[Unreleased]` entries become `## [1.4.0] - date`, otherwise a `## 1.4.0` section lists the PRs merged since the last release. Default: patch. |
+| `mason bump name [patch\|minor\|major\|1.4.0] [--auto-merge]` | Opens a PR on `bump/v<new>` that sets the version in the repo's version file (from its `.mason.toml`, else its group's `version`, else found in the repo root: plugin.yaml, pyproject.toml, package.json, Cargo.toml, VERSION; `__version__` in a Python file works too) and adds the section to each `changelog`: Keep a Changelog `[Unreleased]` entries become `## [1.4.0] - date`, otherwise a `## 1.4.0` section lists the PRs merged since the last release. Default: patch. |
 | `mason release new name v1.4.0 [--title T] [--notes TEXT\|-] [--draft] [--prerelease] [--target REF] [--generate-notes] [--yes]` | Creates a release by hand, after asking (GitHub creates the tag on the default branch or `--target` when it is new). `--generate-notes` lets GitHub write the notes from the merged PRs. `mason release tag name [v1.4.0] [--target REF] [--yes]` only pushes the tag, for repos whose workflow creates the release on a tag push, like hubra with immutable releases; it says whether such a workflow is there. It never changes the version file: when the repo's group names one, the tag must be `v<version>` from it (that is also the suggestion), so bump first. Without a version file the next patch is suggested. `mason release view name [tag]` shows one release in full: notes, assets, the runs of its tag, and the repo's other recent releases. |
 | `mason release [names] [--yes] [--list]` | Pushes the tag `v<version>` on the default branch of each named repo whose version is newer than its latest release (and whose first changelog has the section), after asking. The repo's own workflow builds and publishes. When the tag is there already it shows its release run. No names (or `--list`): a table of version against latest release. |
 | `mason approve [--yes]` | Runs waiting for you: environments you review, and outside contributors' runs. A run that waits for someone else says why you can't approve it, for example "Prevent self-review" when you started it and are its only reviewer. |
@@ -71,6 +71,24 @@ Security alerts need the `security_events` scope and packages the `read:packages
 - **ctrl+p** lists every command.
 - **Loading:** nothing reloads by itself. The repo and PR list loads at start, with one GraphQL query per 20 repos. Runs, Releases, Packages and Security load the first time you open their tab. **r** reloads the tab you are on.
 - **Rate limit:** the header shows how many API calls are left. Answers are cached for 60 seconds; **r** reads past the cache. If GitHub's rate limit is reached, the TUI says when it resets instead of failing.
+
+## Version files
+
+Bump, release and New tag need to know which file holds a repo's version. Mason looks in this order:
+
+1. **The repo's `.mason.toml`.** Only its `[release]` table is read (groups and checks stay with your defaults and the org's `.mason` repo):
+
+   ```toml
+   [release]
+   version = "src/app/__init__.py"   # any file: plugin.yaml, pyproject.toml, package.json, Cargo.toml, VERSION, __version__ = "..."
+   changelog = ["CHANGELOG.md"]      # optional
+   tag = "app-v{version}"            # optional, default "v{version}"
+   ```
+
+2. **Its group** in the defaults' `mason.toml`: `version = "plugin.yaml"`, `changelog = ["CHANGELOG.md"]`.
+3. **A known file in the repo root** that holds a version: plugin.yaml, pyproject.toml, package.json, Cargo.toml, VERSION (with CHANGELOG.md, CHANGES.md or HISTORY.md as the changelog).
+
+`mason release` (no names) lists every repo with the file it found.
 
 ## Configuration
 
